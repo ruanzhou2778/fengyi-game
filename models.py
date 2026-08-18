@@ -176,6 +176,7 @@ class GameState:
         self.rank_periods = 0  # 现任位份已历旬数（资历）
         self.last_duel_period = None
         self._active_duel = None
+        self.client_id = None
 
     def get_attr_max(self, attr_name):
         return self.ATTR_MAX.get(attr_name, 100)
@@ -335,6 +336,7 @@ class GameState:
             "last_duel_period": getattr(self, "last_duel_period", None),
             "scandal_strikes": getattr(self, "scandal_strikes", 0),
             "rank_periods": getattr(self, "rank_periods", 0),
+            "client_id": getattr(self, "client_id", None),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -412,6 +414,7 @@ class GameState:
             game_state._promotion_done = data.get("_promotion_done", False)
             game_state.scandal_strikes = data.get("scandal_strikes", 0)
             game_state.rank_periods = data.get("rank_periods", 0)
+            game_state.client_id = data.get("client_id")
             storyline_value = data.get("storyline", "主线")
             for sl in Storyline:
                 if sl.value == storyline_value:

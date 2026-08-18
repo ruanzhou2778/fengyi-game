@@ -638,6 +638,32 @@ function setSafeRequestHeader(headers, key, value) {
     if (isLatin1HeaderValue(str)) headers[key] = str;
 }
 
+function getClientId() {
+    let id = localStorage.getItem('gongdou_client_id');
+    if (!id) {
+        id = 'c_' + (crypto.randomUUID?.() || (Date.now() + '_' + Math.random().toString(36).slice(2)));
+        localStorage.setItem('gongdou_client_id', id);
+    }
+    return id;
+}
+
+function getKnownPlayerIds() {
+    return (localStorage.getItem('gongdou_known_player_ids') || '').split(',').filter(Boolean);
+}
+
+function trackKnownPlayerId(pid) {
+    if (!pid) return;
+    const set = new Set(getKnownPlayerIds());
+    set.add(pid);
+    localStorage.setItem('gongdou_known_player_ids', [...set].join(','));
+}
+
+function appendClientQuery(url) {
+    const known = getKnownPlayerIds().join(',');
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}known_player_ids=${encodeURIComponent(known)}`;
+}
+
 function mergeApiConfigIntoJsonBody(options) {
     if (!options.body || options.method !== 'POST') return;
     const ct = (options.headers && options.headers['Content-Type']) || '';
@@ -648,6 +674,8 @@ function mergeApiConfigIntoJsonBody(options) {
         if (cfg.api_key && body.api_key == null) body.api_key = cfg.api_key;
         if (cfg.api_base && body.api_base == null) body.api_base = cfg.api_base;
         if (cfg.api_model && body.api_model == null) body.api_model = cfg.api_model;
+        if (body.client_id == null) body.client_id = getClientId();
+        if (body.known_player_ids == null) body.known_player_ids = getKnownPlayerIds();
         options.body = JSON.stringify(body);
     } catch (e) { /* keep original body */ }
 }
@@ -658,6 +686,7 @@ async function myFetch(url, options = {}) {
     setSafeRequestHeader(options.headers, 'X-API-Base', cfg.api_base);
     setSafeRequestHeader(options.headers, 'X-API-Key', cfg.api_key);
     setSafeRequestHeader(options.headers, 'X-API-Model', cfg.api_model);
+    setSafeRequestHeader(options.headers, 'X-Client-Id', getClientId());
     mergeApiConfigIntoJsonBody(options);
     const skipLoading = options.skipLoading || !shouldShowLoadingForUrl(url);
     if (skipLoading) delete options.skipLoading;
@@ -863,6 +892,7 @@ function extractSurname(name){
 function randomPlayerName(){return PLAYER_SURNAMES[Math.floor(Math.random()*PLAYER_SURNAMES.length)]+randomGivenName(PLAYER_GIVEN);}
 function randomEmperorName(){return EMPEROR_SURNAMES[Math.floor(Math.random()*EMPEROR_SURNAMES.length)]+randomGivenName(EMPEROR_GIVEN);}
 const ATTR_KEYS=['容貌','才情','心计','宠爱','威望','健康','才艺','谋略','魅力','福运','倾向'];
+const CREATION_ATTR_KEYS=['容貌','才情','心计','健康','才艺','谋略','魅力','福运','倾向'];
 const TOTAL_POINTS=100;
 const RANK_ORDER=['宫女','更衣','官女子','秀女','答应','常在','贵人','才人','美人','婕妤','嫔','妃','淑妃','德妃','贤妃','宸妃','贵妃','皇贵妃','皇后'];
 
@@ -871,7 +901,7 @@ let currentCharData={
     name:'', background:null, backgroundDesc:'', appearance:'', talent:'琴艺',
     personality:'温婉贤淑', traits:[], customStory:'', attrs:{}, attrRange:{min:0,max:20}
 };
-ATTR_KEYS.forEach(k=>currentCharData.attrs[k]=10);
+CREATION_ATTR_KEYS.forEach(k=>currentCharData.attrs[k]=11);
 let currentEmperor=null;
 
 const logContent=document.getElementById('logContent'),logArea=document.getElementById('logArea'),loading=document.getElementById('loading');
@@ -954,15 +984,15 @@ function closeSaveListModal(){document.getElementById('saveListModal').classList
 
 async function renderSaveListModal(){
 const body=document.getElementById('saveListModalBody');body.innerHTML='<div style="text-align:center;color:var(--text-light);padding:6px;">加载中...</div>';
-try{let saves=[];if(playerId){const r=await myFetch(`${API_BASE}/api/saves/${playerId}`);const d=await r.json();saves=d.saves||[];}else{const r=await myFetch(`${API_BASE}/api/all_saves`);const d=await r.json();saves=d.saves||[];}
+try{let saves=[];if(playerId){const r=await myFetch(appendClientQuery(`${API_BASE}/api/saves/${playerId}`));const d=await r.json();saves=d.saves||[];}else{const r=await myFetch(appendClientQuery(`${API_BASE}/api/saves/mine`));const d=await r.json();saves=d.saves||[];}
 if(saves.length===0){body.innerHTML='<div style="text-align:center;color:var(--text-light);padding:8px;">📭 暂无存档</div>';return;}
 let html='';saves.forEach(s=>{const pid=s.player_id||playerId;html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid var(--border-light);gap:2px;"><div style="font-size:8px;"><strong>${s.player_name}</strong><span style="color:var(--gold);margin-left:2px;">${s.rank}</span><span style="color:var(--text-light);font-size:6px;margin-left:2px;">📅 ${s.day||1}天</span><div style="font-size:6px;color:var(--text-light);">${new Date(s.save_time).toLocaleString()}</div></div><div style="display:flex;gap:2px;flex-shrink:0;"><button onclick="loadGameFromModal('${pid}','${s.slot}')" style="padding:1px 5px;border:1px solid var(--border-light);border-radius:3px;background:var(--bg-card);cursor:pointer;font-size:7px;font-family:inherit;">读取</button><button onclick="deleteSaveFromModal('${pid}','${s.slot}')" style="padding:1px 5px;border:1px solid #d48c7a;border-radius:3px;background:transparent;color:#8a3a2a;cursor:pointer;font-size:7px;font-family:inherit;">删除</button></div></div>`;});body.innerHTML=html;}catch(e){body.innerHTML='<div style="text-align:center;color:var(--text-light);padding:8px;">❌ 加载失败</div>';}}
 
-async function loadGameFromModal(pid,slot){closeSaveListModal();showToast('📂 读取中...');try{const r=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){playerId=pid;localStorage.setItem('gongdou_playerId',pid);await syncConfigToBackend(playerId);const gs=d.game_state;eventLogs=[];flipTriggeredThisRound=false;if(gs.memories)gs.memories.forEach(m=>addLogEntry(m,'system'));updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,children:gs.children||[],has_children:gs.has_children||false,nobletitle:gs.nobletitle||null,rivalries:gs.rivalries||{},alliances:gs.alliances||{},npcs:gs.npcs||{},emperor:gs.emperor||{},remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,inventory:gs.inventory||[],player_id:pid});document.getElementById('scenarioOverlayContainer').innerHTML='';showToast('✅ 读取成功');}else showToast('❌ '+(d.error||'读取失败'));}catch(e){showToast('❌ 读取失败');}}
+async function loadGameFromModal(pid,slot){closeSaveListModal();showToast('📂 读取中...');try{const r=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){playerId=pid;localStorage.setItem('gongdou_playerId',pid);trackKnownPlayerId(pid);await syncConfigToBackend(playerId);const gs=d.game_state;eventLogs=[];flipTriggeredThisRound=false;if(gs.memories)gs.memories.forEach(m=>addLogEntry(m,'system'));updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,children:gs.children||[],has_children:gs.has_children||false,nobletitle:gs.nobletitle||null,rivalries:gs.rivalries||{},alliances:gs.alliances||{},npcs:gs.npcs||{},emperor:gs.emperor||{},remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,inventory:gs.inventory||[],player_id:pid});document.getElementById('scenarioOverlayContainer').innerHTML='';showToast('✅ 读取成功');}else showToast('❌ '+(d.error||'读取失败'));}catch(e){showToast('❌ 读取失败');}}
 
 async function deleteSaveFromModal(pid,slot){if(!confirm(`删除存档「${slot}」？`))return;try{const r=await myFetch(`${API_BASE}/api/save/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){showToast('🗑️ 已删除');renderSaveListModal();}}catch(e){showToast('删除失败');}}
 
-function getCurrentAttrsPayload(){const attrs={};ATTR_KEYS.forEach(k=>attrs[k]=currentCharData.attrs[k]||0);return attrs;}
+function getCurrentAttrsPayload(){const attrs={};CREATION_ATTR_KEYS.forEach(k=>attrs[k]=currentCharData.attrs[k]||0);return attrs;}
 function getCurrentCharacterContext(){
     return {
         name:(document.getElementById('playerName')?.value||'').trim(),
@@ -995,18 +1025,18 @@ function setStoryText(story){
     if(typeof updateStoryCharCount==='function')updateStoryCharCount();
     return story;
 }
-function getUsedPoints(){let t=0;ATTR_KEYS.forEach(k=>t+=currentCharData.attrs[k]||0);return t;}
+function getUsedPoints(){let t=0;CREATION_ATTR_KEYS.forEach(k=>t+=currentCharData.attrs[k]||0);return t;}
 function getRemainingPoints(){return TOTAL_POINTS-getUsedPoints();}
 
 function updateAttrDisplay(){
 const rem=getRemainingPoints();document.getElementById('totalPointsDisplay').textContent=`已分配 ${getUsedPoints()}/${TOTAL_POINTS} 点`;
 const el=document.getElementById('totalPointsRemain');el.textContent=`剩余 ${rem} 点`;el.style.color=rem<0?'#c0392b':'#2a5a4a';
 const range=currentCharData.attrRange||{min:0,max:20};
-ATTR_KEYS.forEach(k=>{const v=currentCharData.attrs[k]||0;const f=document.getElementById(`attrFill_${k}`);const d=document.getElementById(`attrVal_${k}`);if(f){const pct=range.max>range.min?((v-range.min)/(range.max-range.min))*100:0;f.style.width=Math.min(100,Math.max(0,pct))+'%';}if(d)d.textContent=v;const dec=document.getElementById(`attrDec_${k}`);const inc=document.getElementById(`attrInc_${k}`);if(dec)dec.disabled=v<=range.min;if(inc)inc.disabled=rem<=0||v>=range.max;});}
+CREATION_ATTR_KEYS.forEach(k=>{const v=currentCharData.attrs[k]||0;const f=document.getElementById(`attrFill_${k}`);const d=document.getElementById(`attrVal_${k}`);if(f){const pct=range.max>range.min?((v-range.min)/(range.max-range.min))*100:0;f.style.width=Math.min(100,Math.max(0,pct))+'%';}if(d)d.textContent=v;const dec=document.getElementById(`attrDec_${k}`);const inc=document.getElementById(`attrInc_${k}`);if(dec)dec.disabled=v<=range.min;if(inc)inc.disabled=rem<=0||v>=range.max;});}
 
 function adjustAttr(key,delta){const range=currentCharData.attrRange||{min:0,max:20};const nv=(currentCharData.attrs[key]||0)+delta;if(nv<range.min||nv>range.max)return;if(delta>0&&getRemainingPoints()<=0)return;currentCharData.attrs[key]=nv;updateAttrDisplay();}
 
-async function randomizeAttrs(){const range=currentCharData.attrRange||{min:0,max:20};let rem=TOTAL_POINTS;ATTR_KEYS.forEach((k,i)=>{if(rem<=0){currentCharData.attrs[k]=range.min;return;}const maxForThis=Math.min(range.max,rem-(ATTR_KEYS.length-1)*range.min);const minForThis=Math.max(range.min,rem-(ATTR_KEYS.length-1)*range.max);let val;if(i===ATTR_KEYS.length-1)val=rem;else val=Math.floor(Math.random()*(maxForThis-minForThis+1))+minForThis;val=Math.min(val,range.max);currentCharData.attrs[k]=Math.max(range.min,val);rem-=currentCharData.attrs[k];});ATTR_KEYS.forEach(k=>{if(currentCharData.attrs[k]<range.min)currentCharData.attrs[k]=range.min;if(currentCharData.attrs[k]>range.max)currentCharData.attrs[k]=range.max;});updateAttrDisplay();await suggestTraits();}
+async function randomizeAttrs(){const range=currentCharData.attrRange||{min:0,max:20};let rem=TOTAL_POINTS;CREATION_ATTR_KEYS.forEach((k,i)=>{if(rem<=0){currentCharData.attrs[k]=range.min;return;}const maxForThis=Math.min(range.max,rem-(CREATION_ATTR_KEYS.length-1)*range.min);const minForThis=Math.max(range.min,rem-(CREATION_ATTR_KEYS.length-1)*range.max);let val;if(i===CREATION_ATTR_KEYS.length-1)val=rem;else val=Math.floor(Math.random()*(maxForThis-minForThis+1))+minForThis;val=Math.min(val,range.max);currentCharData.attrs[k]=Math.max(range.min,val);rem-=currentCharData.attrs[k];});CREATION_ATTR_KEYS.forEach(k=>{if(currentCharData.attrs[k]<range.min)currentCharData.attrs[k]=range.min;if(currentCharData.attrs[k]>range.max)currentCharData.attrs[k]=range.max;});updateAttrDisplay();await suggestTraits();}
 
 async function rollBackground(){
     const ctx = getCurrentCharacterContext();
@@ -1088,7 +1118,7 @@ else{if(currentCharData.traits.length>=5){showToast('最多选择5个特质');re
 }
 
 function showPreview(){
-const box=document.getElementById('previewBox');const name=document.getElementById('playerName').value.trim()||'未命名';const bg=currentCharData.background;const bgDesc=document.getElementById('bgDescInput').value||'未知';const app=document.getElementById('appearanceInput').value||'未描述';const talent=document.getElementById('talentSelect').value||'未选择';const pers=document.getElementById('personalitySelect').value||'未选择';const traits=currentCharData.traits.length?currentCharData.traits.map(t=>`${t}（${TRAIT_HINTS[t]||'加成'}）`).join('、'):'无';const story=document.getElementById('customStoryInput').value||'未填写';const attrsText=ATTR_KEYS.map(k=>`${k} ${currentCharData.attrs[k]||0}`).join(' | ');
+const box=document.getElementById('previewBox');const name=document.getElementById('playerName').value.trim()||'未命名';const bg=currentCharData.background;const bgDesc=document.getElementById('bgDescInput').value||'未知';const app=document.getElementById('appearanceInput').value||'未描述';const talent=document.getElementById('talentSelect').value||'未选择';const pers=document.getElementById('personalitySelect').value||'未选择';const traits=currentCharData.traits.length?currentCharData.traits.map(t=>`${t}（${TRAIT_HINTS[t]||'加成'}）`).join('、'):'无';const story=document.getElementById('customStoryInput').value||'未填写';const attrsText=CREATION_ATTR_KEYS.map(k=>`${k} ${currentCharData.attrs[k]||0}`).join(' | ')+'（宠爱、威望入宫后由皇帝初印象决定）';
 box.innerHTML=`<div class="preview-title">📜 完整人设档案</div>
 <div><strong>姓名：</strong>${name}</div>
 <div><strong>家世：</strong>${bg?bg.label:'未选择'}</div>
@@ -1106,7 +1136,7 @@ const min=parseInt(document.getElementById('rangeMin').value)||0;
 const max=parseInt(document.getElementById('rangeMax').value)||20;
 if(min>=max){showToast('最小值必须小于最大值');return;}
 currentCharData.attrRange={min:min,max:max};
-ATTR_KEYS.forEach(k=>{
+CREATION_ATTR_KEYS.forEach(k=>{
 if(currentCharData.attrs[k]<min)currentCharData.attrs[k]=min;
 if(currentCharData.attrs[k]>max)currentCharData.attrs[k]=max;
 });
@@ -2212,7 +2242,7 @@ function flushSaveOnBackground() {
     const sid = playerId || localStorage.getItem('gongdou_playerId');
     if (!sid) return;
     const slot = localStorage.getItem('gongdou_save_slot') || 'default';
-    const body = JSON.stringify({ player_id: sid, slot_name: slot });
+    const body = JSON.stringify({ player_id: sid, slot_name: slot, client_id: getClientId(), known_player_ids: getKnownPlayerIds() });
     const url = `${API_BASE}/api/save`;
     try {
         if (navigator.sendBeacon) {
@@ -2240,7 +2270,7 @@ async function resumeFromBackground() {
 }
 
 async function applyRestoredGameState(pid,gs,fromSave){
-playerId=pid;localStorage.setItem('gongdou_playerId',pid);
+playerId=pid;localStorage.setItem('gongdou_playerId',pid);trackKnownPlayerId(pid);
 await syncConfigToBackend(playerId);
 eventLogs=[];flipTriggeredThisRound=false;
 if(gs.memories)gs.memories.forEach(m=>addLogEntry(m.replace(/触发了事件：/g,''),'system'));
@@ -2328,11 +2358,12 @@ container.innerHTML=`<div class="scenario-overlay" id="scenarioOverlay"><div cla
 <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">根据属性与性格自动分配，每个标签提供对应属性加成，可手动调整（最多5个）</div>
 <div class="tag-group">${TRAIT_OPTIONS.map(t=>`<span class="tag" id="trait_${t}" title="${TRAIT_HINTS[t]||''}" onclick="toggleTrait('${t}')">${t}</span>`).join('')}</div></div>
 <div class="char-card"><div class="card-title">📊 属 性 分 配（${TOTAL_POINTS}点自由分配）</div>
+<div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">宠爱、威望不在此分配，入宫殿选后由皇帝对你的初印象随机赐予</div>
 <div class="card-row" style="font-size:7px;color:var(--text-light);"><span class="label">范围</span>
 <input type="number" id="rangeMin" value="0" style="width:36px;font-size:7px;padding:1px 2px;" onchange="updateAttrRange()"> ~ 
 <input type="number" id="rangeMax" value="20" style="width:36px;font-size:7px;padding:1px 2px;" onchange="updateAttrRange()">
 <span style="font-size:6px;margin-left:2px;">（每项最小值~最大值）</span></div>
-<div id="attrAllocContainer">${ATTR_KEYS.map(key=>`<div class="attr-alloc-row"><span class="attr-name">${key}</span><button class="attr-btn" id="attrDec_${key}" onclick="adjustAttr('${key}',-1)">−</button><div class="bar-track"><div class="bar-fill" id="attrFill_${key}" style="width:50%;"></div></div><span class="attr-value" id="attrVal_${key}">10</span><button class="attr-btn" id="attrInc_${key}" onclick="adjustAttr('${key}',1)">+</button></div>`).join('')}</div>
+<div id="attrAllocContainer">${CREATION_ATTR_KEYS.map(key=>`<div class="attr-alloc-row"><span class="attr-name">${key}</span><button class="attr-btn" id="attrDec_${key}" onclick="adjustAttr('${key}',-1)">−</button><div class="bar-track"><div class="bar-fill" id="attrFill_${key}" style="width:50%;"></div></div><span class="attr-value" id="attrVal_${key}">11</span><button class="attr-btn" id="attrInc_${key}" onclick="adjustAttr('${key}',1)">+</button></div>`).join('')}</div>
 <div class="total-points"><span id="totalPointsDisplay">已分配 100/100 点</span><span id="totalPointsRemain" style="margin-left:8px;color:#2a5a4a;">剩余 0 点</span></div>
 <div style="display:flex;gap:3px;justify-content:center;padding-top:3px;border-top:1px solid var(--border-light);margin-top:3px;flex-wrap:wrap;">
 <button class="btn" onclick="randomizeAttrs()" style="font-size:7px;padding:1px 8px;">🎲 随机分配</button>
@@ -2424,7 +2455,7 @@ const talent=document.getElementById('talentSelect').value||'琴艺';
 const personality=document.getElementById('personalitySelect').value||'温婉贤淑';
 const traits=currentCharData.traits;
 const customStory=document.getElementById('customStoryInput').value.trim()||'';
-const attrs={};ATTR_KEYS.forEach(k=>attrs[k]=currentCharData.attrs[k]||10);
+const attrs={};CREATION_ATTR_KEYS.forEach(k=>attrs[k]=currentCharData.attrs[k]||11);
 if(getRemainingPoints()!==0){showToast('⚠️ 请分配完所有属性点（剩余 '+getRemainingPoints()+' 点）');return;}
 const startBtn=document.getElementById('startBtn');
 showLoading(true,{title:'入宫选秀中…',sub:'正在安排殿选与册封，请稍候',icon:'🏯'});
@@ -2433,12 +2464,14 @@ try{
 const r=await myFetch(`${API_BASE}/api/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:'才女入宫',name:name,background:bg.id,background_data:bg,attributes:attrs,emperor:currentEmperor,character:{appearance,talent,personality,traits,background_desc:bgDesc,custom_story:customStory},...getConfigFromStorage()}),skipLoading:true});
 const d=await r.json();
 if(!d.player_id){showToast('❌ 入宫失败，请重试');return;}
-playerId=d.player_id;localStorage.setItem('gongdou_playerId',playerId);
+playerId=d.player_id;localStorage.setItem('gongdou_playerId',playerId);trackKnownPlayerId(playerId);
 localStorage.setItem('gongdou_save_slot','default');
 localStorage.setItem('gongdou_player_name', name);
 showLoading(true,{title:'入宫选秀中…',sub:'正在载入宫廷名册…',icon:'📜'});
 await syncConfigToBackend(playerId);
-eventLogs=[];flipTriggeredThisRound=false;addLogEntry(`🌸 欢迎入宫，${name}！`,'system');updateUI(d);document.getElementById('scenarioOverlayContainer').innerHTML='';showToast(`🌸 欢迎入宫，${name}！`);
+eventLogs=[];flipTriggeredThisRound=false;addLogEntry(`🌸 欢迎入宫，${name}！`,'system');
+if(d.first_impression&&d.first_impression.message){addLogEntry(d.first_impression.message,'system');showToast(`👑 ${d.first_impression.impression||'初印象'}：宠爱+${d.first_impression.favor_gain||0} 威望+${d.first_impression.prestige_gain||0}`);}
+updateUI(d);document.getElementById('scenarioOverlayContainer').innerHTML='';showToast(`🌸 欢迎入宫，${name}！`);
 }catch(e){console.error(e);showToast('❌ 入宫失败：'+e.message);}
 finally{if(startBtn){startBtn.disabled=false;}showLoading(false);}
 }
@@ -2845,6 +2878,9 @@ createScenarioOverlay();
 initConfigFromStorage();
 bindConfigAutoSave('main');
 async function initApp() {
+    getClientId();
+    const storedPid = localStorage.getItem('gongdou_playerId');
+    if (storedPid) trackKnownPlayerId(storedPid);
     const cached = sessionStorage.getItem('gongdou_detected_base');
     if (cached) API_BASE = cached.replace(/\/$/, '');
     detectGameBase().then(base => { API_BASE = base; GAME_BASE = base; });

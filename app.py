@@ -87,6 +87,47 @@ load_events()
 
 user_configs = {}
 
+def extract_client_id(request=None, data=None):
+    if data and data.get("client_id"):
+        return str(data["client_id"]).strip()
+    if request:
+        header = request.headers.get("X-Client-Id")
+        if header:
+            return str(header).strip()
+        arg = request.args.get("client_id")
+        if arg:
+            return str(arg).strip()
+    return None
+
+
+def save_belongs_to_client(save_data, client_id, known_player_ids=None):
+    if not client_id:
+        return False
+    gs = save_data.get("game_state", save_data)
+    owner = gs.get("client_id") or save_data.get("client_id")
+    if owner:
+        return owner == client_id
+    pid = gs.get("player_id")
+    if known_player_ids and pid in known_player_ids:
+        return True
+    return False
+
+
+def ensure_game_state_client_id(game_state, client_id):
+    if client_id and not getattr(game_state, "client_id", None):
+        game_state.client_id = client_id
+    return game_state.client_id
+
+
+def parse_known_player_ids(raw):
+    if raw is None:
+        return set()
+    if isinstance(raw, list):
+        return {str(x).strip() for x in raw if str(x).strip()}
+    if isinstance(raw, str):
+        return {x.strip() for x in raw.split(",") if x.strip()}
+    return set()
+
 # ============================================================
 #  会话持久化：从存档恢复 + 自动存档
 # ============================================================
@@ -252,15 +293,16 @@ PROMOTION_THRESHOLDS = {
 }
 
 MIN_RANK_TENURE = {
-    "宫女": 1, "更衣": 1, "官女子": 2, "秀女": 2, "答应": 3,
-    "常在": 3, "贵人": 4, "才人": 4, "美人": 5, "婕妤": 5,
-    "嫔": 6, "妃": 8,
-    "淑妃": 10, "德妃": 10, "贤妃": 10, "宸妃": 10,
-    "贵妃": 10, "皇贵妃": 12,
+    "宫女": 2, "更衣": 2, "官女子": 3, "秀女": 3, "答应": 5,
+    "常在": 5, "贵人": 6, "才人": 6, "美人": 7, "婕妤": 7,
+    "嫔": 8, "妃": 10,
+    "淑妃": 12, "德妃": 12, "贤妃": 12, "宸妃": 12,
+    "贵妃": 14, "皇贵妃": 16,
 }
 
-SPECIAL_FAVOR_RATIO = 1.45   # 宠爱达门槛 145% → 可破格跳过资历
-SUPER_FAVOR_RATIO = 1.75     # 宠爱达门槛 175% → 属性要求降至 88%
+SPECIAL_FAVOR_RATIO = 1.70   # 宠爱达门槛 170% → 可破格跳过资历（专宠）
+SUPER_FAVOR_RATIO = 2.05     # 宠爱达门槛 205% → 属性要求略降
+SPECIAL_FAVOR_ABSOLUTE_MIN = 95  # 低位份门槛过低时，专宠至少须达此宠爱
 
 DEMOTION_SEVERE_CONFLICTS = {"陷害", "告发"}
 DEMOTION_MODERATE_CONFLICTS = {"谣言", "争辩", "争宠"}
@@ -557,13 +599,15 @@ def is_special_favor(game_state):
     """皇帝专宠：宠爱远超当阶门槛，可破格跳过资历限制。"""
     favor = game_state.attributes.get("宠爱", 0)
     required = get_favor_threshold(game_state.rank.name)
-    return favor >= int(required * SPECIAL_FAVOR_RATIO)
+    ratio_req = int(required * SPECIAL_FAVOR_RATIO)
+    return favor >= max(ratio_req, SPECIAL_FAVOR_ABSOLUTE_MIN)
 
 def is_super_favor(game_state):
     """圣宠无极：属性要求亦略降。"""
     favor = game_state.attributes.get("宠爱", 0)
     required = get_favor_threshold(game_state.rank.name)
-    return favor >= int(required * SUPER_FAVOR_RATIO)
+    ratio_req = int(required * SUPER_FAVOR_RATIO)
+    return favor >= max(ratio_req, SPECIAL_FAVOR_ABSOLUTE_MIN + 40)
 
 def get_promotion_block_reason(game_state):
     step = get_promotion_step(game_state)
@@ -665,11 +709,9 @@ def generate_reward(game_state, source="emperor"):
         favor_gain = random.randint(2, 8)
         return {"type": "珍宝", "name": treasure, "desc": f"赏赐「{treasure}」一件", "silver": 0, "effects": {"宠爱": favor_gain}}
     elif reward_type == "位份":
-        step = get_promotion_step(game_state)
-        if step:
-            promo_msg = apply_promotion_step(game_state, step)
-            if promo_msg:
-                return {"type": "位份", "name": game_state.get_display_rank(), "desc": promo_msg.replace("📜 圣旨到！", ""), "silver": 0, "effects": {"宠爱": 10, "威望": 10}, "is_promotion": True}
+        promo_msg = try_player_promotion(game_state)
+        if promo_msg:
+            return {"type": "位份", "name": game_state.get_display_rank(), "desc": promo_msg.replace("📜 圣旨到！", ""), "silver": 0, "effects": {"宠爱": 10, "威望": 10}, "is_promotion": True}
         amount = random.randint(30, 80)
         return {"type": "银两", "name": f"白银{amount}两", "desc": f"赏赐白银{amount}两（暂未能晋封）", "silver": amount, "effects": {}}
     elif reward_type == "封号":
@@ -1649,7 +1691,13 @@ def check_promotion_condition(game_state):
         return False
     if game_state.rank.name == "皇后":
         return False
-    attr_ratio = 0.88 if is_super_favor(game_state) else 1.0
+    favor_req = get_favor_threshold(game_state.rank.name)
+    favor = game_state.attributes.get("宠爱", 0)
+    # 宠爱单独校验：专宠折扣仅略降，不能靠威望/才情绕过
+    favor_ratio = 0.92 if is_super_favor(game_state) else 1.0
+    if favor < int(favor_req * favor_ratio):
+        return False
+    attr_ratio = 0.94 if is_super_favor(game_state) else 1.0
     if not check_promotion_thresholds_met(game_state, attr_ratio):
         return False
     if get_promotion_block_reason(game_state):
@@ -1658,6 +1706,43 @@ def check_promotion_condition(game_state):
         return False
     return True
 
+
+def check_birth_promotion_eligible(game_state):
+    """诞子晋封：略减属性门槛，但仍须宠爱达标且至少有基本资历。"""
+    if game_state.rank.name == "皇后":
+        return False
+    favor_req = get_favor_threshold(game_state.rank.name)
+    favor = game_state.attributes.get("宠爱", 0)
+    if favor < int(favor_req * 0.85):
+        return False
+    if not check_promotion_thresholds_met(game_state, 0.88):
+        return False
+    if get_promotion_block_reason(game_state):
+        return False
+    if get_rank_periods(game_state) < max(2, get_min_tenure(game_state.rank.name) // 2):
+        return False
+    return True
+
+
+def try_player_promotion(game_state, allow_birth=False):
+    """统一晋升入口：赏赐、转旬、生子等都必须经过条件检测。"""
+    if getattr(game_state, "_promotion_done", False):
+        return None
+    eligible = check_birth_promotion_eligible(game_state) if allow_birth else check_promotion_condition(game_state)
+    if not eligible:
+        return None
+    step = get_promotion_step(game_state)
+    if not step:
+        return None
+    if step["type"] == "位份" and not can_promote_to_rank(game_state, step.get("target", "")):
+        return None
+    promo_msg = apply_promotion_step(game_state, step)
+    if promo_msg:
+        game_state._promotion_done = True
+        game_state.add_memory(f"晋升为{game_state.get_display_rank()}")
+        game_state.story_flags.append("晋升成功")
+    return promo_msg
+
 def get_promotion_wait_message(game_state):
     """属性已够但尚未晋升时，返回等待原因。"""
     if game_state.rank.name == "皇后":
@@ -1665,10 +1750,14 @@ def get_promotion_wait_message(game_state):
     block = get_promotion_block_reason(game_state)
     if block:
         return f"⚠️ {block}"
-    attr_ratio = 0.88 if is_super_favor(game_state) else 1.0
+    attr_ratio = 0.94 if is_super_favor(game_state) else 1.0
     if not check_promotion_thresholds_met(game_state, attr_ratio):
         if is_special_favor(game_state):
             return "⚠️ 虽有圣宠，但威望才情等尚不足以服众，还需历练"
+        favor_req = get_favor_threshold(game_state.rank.name)
+        favor = game_state.attributes.get("宠爱", 0)
+        if favor < favor_req:
+            return f"⚠️ 圣宠不足（需宠爱≥{favor_req}，当前{favor}），还需邀宠"
         return None
     if not check_tenure_met(game_state) and not is_special_favor(game_state):
         need = get_min_tenure(game_state.rank.name) - get_rank_periods(game_state)
@@ -2278,12 +2367,10 @@ def next_period():
                 game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes["威望"] + 15)
                 pregnancy_update = f"👶 你诞下{gender}，取名{child_name}！宠爱+20，威望+15"
                 game_state.add_memory(f"诞下{gender}，取名{child_name}")
-                if random.random() < 0.5:
-                    step = get_promotion_step(game_state)
-                    if step and (step["type"] == "赐封号" or can_promote_to_rank(game_state, step.get("target", ""))):
-                        promo_msg = apply_promotion_step(game_state, step)
-                        if promo_msg:
-                            pregnancy_update += f" 母凭子贵，{promo_msg.replace('📜 圣旨到！', '').strip()}"
+                if random.random() < 0.35:
+                    promo_msg = try_player_promotion(game_state, allow_birth=True)
+                    if promo_msg:
+                        pregnancy_update += f" 母凭子贵，{promo_msg.replace('📜 圣旨到！', '').strip()}"
         elif game_state.is_pregnant:
             month = int(game_state.pregnancy_month)
             if month == 2:
@@ -2357,26 +2444,22 @@ def next_period():
     depose_queen_message = None
     promoted_this_period = False
     if check_promotion_condition(game_state):
-        step = get_promotion_step(game_state)
-        if step:
-            target_label = step.get("target") or "赐封号"
-            if step["type"] == "赐封号" or can_promote_to_rank(game_state, step.get("target", "")):
-                exceptional = is_exceptional_promotion(game_state)
-                promotion_msg = apply_promotion_step(game_state, step)
-                if promotion_msg:
-                    if exceptional:
-                        promotion_msg += "（皇帝专宠，破格晋封）"
-                    promotion_message = promotion_msg
-                    game_state.add_memory(f"晋升为{game_state.get_display_rank()}")
-                    game_state.story_flags.append("晋升成功")
-                    game_state._promotion_done = True
-                    promoted_this_period = True
-                else:
-                    promotion_message = f"⚠️ 晋封「{target_label}」失败，请稍后再试。"
-            else:
-                promotion_message = f"⚠️ {target_label} 人数已满，暂无法晋升。"
+        exceptional = is_exceptional_promotion(game_state)
+        promotion_msg = try_player_promotion(game_state)
+        if promotion_msg:
+            if exceptional:
+                promotion_msg += "（皇帝专宠，破格晋封）"
+            promotion_message = promotion_msg
+            promoted_this_period = True
         else:
-            promotion_message = "你已位极人臣，无法再晋升。"
+            step = get_promotion_step(game_state)
+            target_label = (step.get("target") or "赐封号") if step else ""
+            if step and step["type"] == "位份" and not can_promote_to_rank(game_state, step.get("target", "")):
+                promotion_message = f"⚠️ {target_label} 人数已满，暂无法晋升。"
+            elif step:
+                promotion_message = f"⚠️ 晋封「{target_label}」条件未满足，请继续历练。"
+            else:
+                promotion_message = "你已位极人臣，无法再晋升。"
     else:
         wait_msg = get_promotion_wait_message(game_state)
         if wait_msg:
@@ -2659,6 +2742,77 @@ def get_random_event():
         return jsonify({"event": None, "message": "今日无事发生"})
     return jsonify({"event": random.choice(available)})
 
+CREATION_ATTR_KEYS = frozenset({"容貌", "才情", "心计", "健康", "才艺", "谋略", "魅力", "福运", "倾向"})
+
+
+def apply_emperor_first_impression(game_state):
+    """殿选后根据皇帝性格与玩家属性随机赐予宠爱、威望，并设定初印象。"""
+    emperor = game_state.emperor or {}
+    personality = emperor.get("personality", "明君")
+    factors = emperor.get("favor_factors", {}).get(
+        personality, {"容貌": 0.3, "才情": 0.3, "心计": 0.4}
+    )
+    attrs = game_state.attributes
+    match_score = sum(attrs.get(attr, 40) * float(weight) for attr, weight in factors.items()) / 100.0
+
+    stats = emperor.get("stats", {})
+    lust = stats.get("好色", 40) / 100.0
+    majesty = stats.get("威严", 50) / 100.0
+
+    roll = random.random() * 0.35 + match_score * 0.5 + lust * 0.12 + random.uniform(-0.06, 0.1)
+    if roll >= 0.78:
+        impression = "一见倾心"
+    elif roll >= 0.62:
+        impression = "颇有好感"
+    elif roll >= 0.46:
+        impression = "清婉可人"
+    elif roll >= 0.30:
+        impression = "平平无奇"
+    elif roll >= 0.16:
+        impression = "冷淡疏离"
+    else:
+        impression = "心存戒备"
+
+    rank_lift = max(0, game_state.rank.value - Rank.答应.value)
+    favor_gain = int(random.randint(10, 24) + match_score * 20 + lust * 10 + rank_lift * 2)
+    prestige_gain = int(random.randint(5, 14) + match_score * 8 + majesty * 6 + rank_lift)
+
+    if impression == "一见倾心":
+        favor_gain += random.randint(10, 18)
+        prestige_gain += random.randint(4, 10)
+    elif impression == "颇有好感":
+        favor_gain += random.randint(5, 12)
+        prestige_gain += random.randint(2, 6)
+    elif impression in ("冷淡疏离", "心存戒备"):
+        favor_gain = max(6, favor_gain - random.randint(8, 16))
+        prestige_gain = max(4, prestige_gain - random.randint(2, 6))
+
+    game_state.attributes["宠爱"] = min(
+        game_state.get_attr_max("宠爱"),
+        game_state.attributes.get("宠爱", 10) + favor_gain,
+    )
+    game_state.attributes["威望"] = min(
+        game_state.get_attr_max("威望"),
+        game_state.attributes.get("威望", 10) + prestige_gain,
+    )
+
+    rel_favor = min(100, max(5, 10 + favor_gain // 2))
+    game_state.relationships.setdefault("皇帝", {"好感": 10, "印象": "初识", "互动次数": 0})
+    game_state.relationships["皇帝"]["印象"] = impression
+    game_state.relationships["皇帝"]["好感"] = rel_favor
+
+    emp_name = emperor.get("name", "皇帝")
+    msg = f"殿选之后，{emp_name}对你印象「{impression}」，宠爱+{favor_gain}，威望+{prestige_gain}"
+    game_state.add_memory(msg)
+    game_state.add_attr_change({"宠爱": favor_gain, "威望": prestige_gain}, "皇帝初印象")
+    return {
+        "impression": impression,
+        "favor_gain": favor_gain,
+        "prestige_gain": prestige_gain,
+        "message": msg,
+    }
+
+
 @app.route('/api/start', methods=['POST'])
 def start_game():
     data = request.get_json()
@@ -2670,8 +2824,10 @@ def start_game():
     emperor_data = data.get('emperor', None)
     character = data.get('character', {})
     api_config = get_user_api_config(request)
+    client_id = extract_client_id(request, data)
     player_id = str(uuid.uuid4())
     game_state = GameState(player_id, Rank.答应)
+    ensure_game_state_client_id(game_state, client_id)
     game_state.name = player_name
     game_state.appearance = character.get('appearance', '')
     game_state.talent = character.get('talent', '')
@@ -2705,6 +2861,8 @@ def start_game():
     
     if player_attributes:
         for attr, value in player_attributes.items():
+            if attr not in CREATION_ATTR_KEYS:
+                continue
             if attr in game_state.attributes:
                 max_attr = game_state.get_attr_max(attr)
                 game_state.attributes[attr] = max(0, min(max_attr, value * 5))
@@ -2719,6 +2877,9 @@ def start_game():
         emp_name = generate_emperor_name(api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'))
         from models import EmperorPersonality
         game_state.emperor = {"name": emp_name, "age": random.randint(25,55), "personality": random.choice([p.value for p in EmperorPersonality]), "stats": {"威严": random.randint(40,90), "仁德": random.randint(30,85), "勤政": random.randint(30,85), "好色": random.randint(10,80)}, "favor_factors": {"明君": {"容貌":0.2,"才情":0.5,"心计":0.3}, "昏君": {"容貌":0.8,"才情":0.1,"心计":0.1}, "痴情": {"容貌":0.3,"才情":0.3,"心计":0.4}, "多疑": {"容貌":0.2,"才情":0.2,"心计":0.6}}}
+
+    game_state.attributes["宠爱"] = 10
+    first_impression = apply_emperor_first_impression(game_state)
     
     game_state.npcs = generate_all_npcs(10)
     if "太后" not in game_state.npcs:
@@ -2750,7 +2911,7 @@ def start_game():
     
     npcs_with_children = serialize_npcs_for_client(game_state)
     autosave_session(player_id)
-    return jsonify({"player_id": player_id, "player_name": player_name, "family_background": game_state.family_background, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "emperor": game_state.emperor, "storyline": game_state.storyline.value, "silver": game_state.silver, "npcs": npcs_with_children, "narration": story.get("narration","欢迎来到后宫。"), "choices": story.get("choices",["四处看看","去请安","回宫休息"]), "effects": story.get("effects",{}), "is_pregnant": game_state.is_pregnant, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "servants": [], "romance_mode": game_state.romance_mode, "year": game_state.year, "month": game_state.month, "day": game_state.day, "calendar_str": game_state.get_calendar_str(), "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": game_state.appearance, "talent": game_state.talent, "personality": game_state.personality, "traits": game_state.traits, "custom_story": game_state.custom_story})
+    return jsonify({"player_id": player_id, "player_name": player_name, "family_background": game_state.family_background, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "emperor": game_state.emperor, "storyline": game_state.storyline.value, "silver": game_state.silver, "npcs": npcs_with_children, "narration": story.get("narration","欢迎来到后宫。"), "choices": story.get("choices",["四处看看","去请安","回宫休息"]), "effects": story.get("effects",{}), "is_pregnant": game_state.is_pregnant, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "servants": [], "romance_mode": game_state.romance_mode, "year": game_state.year, "month": game_state.month, "day": game_state.day, "calendar_str": game_state.get_calendar_str(), "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": game_state.appearance, "talent": game_state.talent, "personality": game_state.personality, "traits": game_state.traits, "custom_story": game_state.custom_story, "first_impression": first_impression})
 
 @app.route('/api/act', methods=['POST'])
 def player_action():
@@ -2846,23 +3007,54 @@ def get_storylines():
 
 @app.route('/api/all_saves', methods=['GET'])
 def all_saves():
+    """已废弃：请使用 /api/saves/mine 并按设备 client_id 过滤。"""
+    client_id = extract_client_id(request=request)
+    if not client_id:
+        return jsonify({"saves": [], "error": "请使用本设备存档列表"}), 400
+    known_raw = request.args.get("known_player_ids", "")
+    known_ids = parse_known_player_ids(known_raw)
+    return _list_saves_for_client(client_id, known_ids)
+
+
+def _list_saves_for_client(client_id, known_player_ids=None):
+    known_player_ids = set(known_player_ids or [])
     saves = []
     if not os.path.exists(SAVE_DIR):
         return jsonify({"saves": []})
     for filename in os.listdir(SAVE_DIR):
-        if filename.endswith('.json'):
-            try:
-                with open(os.path.join(SAVE_DIR, filename), 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    game_data = data.get("game_state", {})
-                    base = filename[:-5]
-                    parts = base.split('_', 1)
-                    if len(parts) == 2:
-                        saves.append({"player_id": parts[0], "slot": parts[1], "save_time": data.get("save_time","未知"), "player_name": game_data.get("name","未知"), "rank": game_data.get("display_rank", game_data.get("rank","未知")), "day": game_data.get("day",1)})
-            except:
+        if not filename.endswith('.json'):
+            continue
+        try:
+            with open(os.path.join(SAVE_DIR, filename), 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not save_belongs_to_client(data, client_id, known_player_ids):
                 continue
-    saves.sort(key=lambda x: x.get("save_time",""), reverse=True)
+            game_data = data.get("game_state", {})
+            base = filename[:-5]
+            parts = base.split('_', 1)
+            if len(parts) == 2:
+                saves.append({
+                    "player_id": parts[0],
+                    "slot": parts[1],
+                    "save_time": data.get("save_time", "未知"),
+                    "player_name": game_data.get("name", "未知"),
+                    "rank": game_data.get("display_rank", game_data.get("rank", "未知")),
+                    "day": game_data.get("day", 1),
+                })
+        except Exception:
+            continue
+    saves.sort(key=lambda x: x.get("save_time", ""), reverse=True)
     return jsonify({"saves": saves})
+
+
+@app.route('/api/saves/mine', methods=['GET'])
+def my_saves():
+    client_id = extract_client_id(request=request)
+    if not client_id:
+        return jsonify({"error": "缺少设备标识 client_id"}), 400
+    known_raw = request.args.get("known_player_ids", "")
+    known_ids = parse_known_player_ids(known_raw)
+    return _list_saves_for_client(client_id, known_ids)
 
 @app.route('/api/save', methods=['POST'])
 def save_game():
@@ -2871,9 +3063,26 @@ def save_game():
     slot_name = data.get('slot_name', 'default')
     if not player_id:
         return jsonify({"error": "缺少玩家ID"}), 400
+    client_id = extract_client_id(request, data)
+    if not client_id:
+        return jsonify({"error": "缺少设备标识 client_id"}), 400
+    known_ids = parse_known_player_ids(data.get("known_player_ids"))
     game_state, err = session_or_404(player_id, "会话不存在")
     if err:
         return err
+    session_cid = getattr(game_state, "client_id", None)
+    if session_cid and session_cid != client_id:
+        return jsonify({"error": "会话与当前设备不匹配，无法保存"}), 403
+    filename = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                existing = json.load(f)
+            if not save_belongs_to_client(existing, client_id, known_ids):
+                return jsonify({"error": "无权保存到该存档"}), 403
+        except Exception:
+            return jsonify({"error": "存档数据损坏"}), 500
+    ensure_game_state_client_id(game_state, client_id)
     save_data = game_state.to_save_data()
     filename = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
     try:
@@ -2890,15 +3099,22 @@ def load_game():
     slot_name = data.get('slot_name', 'default')
     if not player_id:
         return jsonify({"error": "缺少玩家ID"}), 400
+    client_id = extract_client_id(request, data)
+    if not client_id:
+        return jsonify({"error": "缺少设备标识 client_id"}), 400
+    known_ids = parse_known_player_ids(data.get("known_player_ids"))
     filename = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
     if not os.path.exists(filename):
         return jsonify({"error": f"存档不存在: {slot_name}"}), 404
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             save_data = json.load(f)
+        if not save_belongs_to_client(save_data, client_id, known_ids):
+            return jsonify({"error": "无权读取该存档（可能属于其他设备）"}), 403
         if "game_state" not in save_data:
             return jsonify({"error": "存档数据损坏"}), 500
         game_state = GameState.from_save_data(save_data)
+        ensure_game_state_client_id(game_state, client_id)
         if not hasattr(game_state, 'npcs') or not game_state.npcs:
             game_state.npcs = generate_all_npcs(10)
             for name, npc in game_state.npcs.items():
@@ -2927,6 +3143,10 @@ def load_game():
 
 @app.route('/api/saves/<player_id>', methods=['GET'])
 def list_saves(player_id):
+    client_id = extract_client_id(request=request)
+    if not client_id:
+        return jsonify({"saves": [], "error": "缺少设备标识 client_id"}), 400
+    known_ids = parse_known_player_ids(request.args.get("known_player_ids", ""))
     saves = []
     pattern = f"{player_id}_"
     if not os.path.exists(SAVE_DIR):
@@ -2936,9 +3156,11 @@ def list_saves(player_id):
             try:
                 with open(os.path.join(SAVE_DIR, filename), 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    game_data = data.get("game_state", {})
-                    slot_name = filename[len(pattern):-5]
-                    saves.append({"slot": slot_name, "save_time": data.get("save_time","未知"), "player_name": game_data.get("name","未知"), "rank": game_data.get("display_rank", game_data.get("rank","未知"))})
+                if client_id and not save_belongs_to_client(data, client_id, known_ids):
+                    continue
+                game_data = data.get("game_state", {})
+                slot_name = filename[len(pattern):-5]
+                saves.append({"slot": slot_name, "save_time": data.get("save_time","未知"), "player_name": game_data.get("name","未知"), "rank": game_data.get("display_rank", game_data.get("rank","未知"))})
             except:
                 continue
     saves.sort(key=lambda x: x.get("save_time",""), reverse=True)
@@ -2951,11 +3173,22 @@ def delete_save():
     slot_name = data.get('slot_name', 'default')
     if not player_id:
         return jsonify({"error": "缺少玩家ID"}), 400
+    client_id = extract_client_id(request, data)
+    if not client_id:
+        return jsonify({"error": "缺少设备标识 client_id"}), 400
+    known_ids = parse_known_player_ids(data.get("known_player_ids"))
     filename = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
-    if os.path.exists(filename):
-        os.remove(filename)
-        return jsonify({"success": True, "message": f"已删除存档 ({slot_name})"})
-    return jsonify({"error": "存档不存在"}), 404
+    if not os.path.exists(filename):
+        return jsonify({"error": "存档不存在"}), 404
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            save_data = json.load(f)
+        if not save_belongs_to_client(save_data, client_id, known_ids):
+            return jsonify({"error": "无权删除该存档"}), 403
+    except Exception:
+        return jsonify({"error": "存档数据损坏"}), 500
+    os.remove(filename)
+    return jsonify({"success": True, "message": f"已删除存档 ({slot_name})"})
 
 @app.route('/api/duel/start', methods=['POST'])
 def api_duel_start():
