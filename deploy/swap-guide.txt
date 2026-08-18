@@ -1,0 +1,65 @@
+Swap（交换空间）是什么？
+========================
+
+Swap 是硬盘上划出的一块空间，当物理内存（RAM）不够用时，Linux 会把暂时不用的数据挪到 Swap 里，腾出内存给正在跑的任务（比如 Docker 构建镜像）。
+
+类比：RAM 是桌面，Swap 是旁边的抽屉。桌面放不下时，先把东西塞进抽屉，需要时再拿回来。
+
+对你这台服务器意味着什么：
+- 游戏容器 + Docker 构建镜像时，内存峰值可能超过 1～2GB
+- 没有 Swap 时，内存一满系统会卡死、SSH 断连、只能重启
+- 加 2GB Swap 后，构建会慢一些，但通常不会直接死机
+
+注意：
+- Swap 在硬盘上，比内存慢，只是「救命」用，不能替代加内存
+- 长期跑大服务仍建议升级云服务器配置（如 4GB 内存）
+
+
+一键配置（推荐）
+================
+SSH 登录服务器后执行：
+
+  cd /root/gongdou
+  git pull
+  bash deploy/setup-swap.sh
+
+默认创建 2GB Swap。若要 4GB：
+
+  bash deploy/setup-swap.sh 4G
+
+
+手动配置（2GB 示例）
+====================
+# 1. 查看当前内存与 Swap
+free -h
+swapon --show
+
+# 2. 创建 2GB 交换文件
+fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+
+# 3. 开机自动启用（只执行一次）
+grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+
+# 4. 尽量先用内存，内存紧张再用 Swap（服务器常用）
+sysctl vm.swappiness=10
+echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf
+
+# 5. 确认
+free -h
+swapon --show
+
+
+删除 Swap（一般不需要）
+======================
+swapoff /swapfile
+rm -f /swapfile
+sed -i '/\/swapfile/d' /etc/fstab
+
+
+与游戏更新的推荐顺序
+====================
+1. bash deploy/setup-swap.sh        # 首次加 Swap
+2. bash deploy/update.sh              # 先停旧容器再构建

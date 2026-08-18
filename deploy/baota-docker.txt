@@ -68,7 +68,9 @@ docker compose up -d game
 
 或在宝塔 Docker管理器 里：先停止/删除 fengyi-game 容器，再重建。
 
-若仍卡死：多半是内存不足，可临时加 swap 或升级配置后再更新。
+若仍卡死：多半是内存不足，可先配置 Swap 再更新：
+bash deploy/setup-swap.sh
+详见 deploy/swap-guide.txt
 
 
 四、常见问题
