@@ -2701,6 +2701,7 @@ def start_game():
             break
     
     game_state = apply_scenario(game_state, scenario_key)
+    game_state.max_servants = 6 + game_state.rank.value // 2
     
     if player_attributes:
         for attr, value in player_attributes.items():

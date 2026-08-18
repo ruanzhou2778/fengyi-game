@@ -31,17 +31,18 @@
         { key: '嫡', weight: 32, rank_offset: 0, score_mod: 12, attr: { '威望': 2, '魅力': 2 } },
         { key: '庶', weight: 38, rank_offset: 1, score_mod: 0, attr: { '心计': 2 } },
         { key: '养', weight: 18, rank_offset: 2, score_mod: -10, attr: { '福运': 1, '心计': 1 } },
-        { key: '私生', weight: 12, rank_offset: 3, score_mod: -20, attr: { '心计': 3, '容貌': -1 } },
+        { key: '私生', weight: 12, rank_offset: 2, score_mod: -20, attr: { '心计': 3, '容貌': -1 } },
     ];
 
     const PLAYER_START_RANKS = ['秀女', '答应', '常在', '贵人', '嫔'];
 
-    const GRADE_BASE_RANK_INDEX = { 1: 3, 2: 2, 3: 2, 4: 1, 5: 1, 6: 0, 7: 0, 8: 0, 9: 0 };
+    const GRADE_BASE_RANK_INDEX = { 1: 4, 2: 4, 3: 3, 4: 3, 5: 2, 6: 2, 7: 1, 8: 1, 9: 0 };
 
     const GRADE_BASE_SCORE = { 1: 88, 2: 78, 3: 70, 4: 62, 5: 55, 6: 48, 7: 42, 8: 36, 9: 30 };
 
     const GRADE_WEIGHTS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     const GRADE_WEIGHT_VALUES = [2, 3, 6, 10, 14, 18, 16, 12, 6];
+    const PLAYER_GRADE_WEIGHT_VALUES = [3, 5, 8, 12, 16, 14, 10, 6, 4];
 
     const GRADE_ATTR_BONUS = {
         1: { '威望': 5, '才情': 3, '魅力': 3 },
@@ -212,7 +213,9 @@
     function generateOfficialBackground(surname, forPlayer) {
         surname = (surname || '').trim() || randomSurname(NPC_SURNAMES);
 
-        const grade = weightedChoice(GRADE_WEIGHTS, GRADE_WEIGHT_VALUES);
+        const grade = forPlayer
+            ? weightedChoice(GRADE_WEIGHTS, PLAYER_GRADE_WEIGHT_VALUES)
+            : weightedChoice(GRADE_WEIGHTS, GRADE_WEIGHT_VALUES);
         const title = _pickOfficialTitle(grade);
         const status = _pickDaughterStatus();
         const given = _officialGivenName();

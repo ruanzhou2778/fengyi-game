@@ -1,9 +1,11 @@
 # scenarios.py
 from models import Rank
+from family_backgrounds import resolve_start_rank
 
 START_SCENARIOS = {
     "世家贵女": {
         "description": "你是当朝重臣之女，家族势力庞大，入宫便是贵人。",
+        "starting_rank": "贵人",
         "attributes_bonus": {"容貌": 10, "威望": 30, "才情": 5},
         "relationships_bonus": {"太后": 20, "皇后": 10},
         "initial_flag": "世家背景",
@@ -11,6 +13,7 @@ START_SCENARIOS = {
     },
     "才女入宫": {
         "description": "你以才情闻名天下，是选秀中的佼佼者。",
+        "starting_rank": "常在",
         "attributes_bonus": {"才情": 30, "容貌": 10, "心计": 5},
         "relationships_bonus": {"皇帝": 20},
         "initial_flag": "才女之名",
@@ -18,6 +21,7 @@ START_SCENARIOS = {
     },
     "宫女逆袭": {
         "description": "你本是御前奉茶宫女，因机缘巧合被皇帝注意。",
+        "starting_rank": "答应",
         "attributes_bonus": {"心计": 20, "容貌": 5, "威望": 5},
         "relationships_bonus": {"皇帝": 15},
         "initial_flag": "宫女出身",
@@ -25,6 +29,7 @@ START_SCENARIOS = {
     },
     "和亲公主": {
         "description": "你是边陲小国的公主，为两国和平入宫和亲。",
+        "starting_rank": "嫔",
         "attributes_bonus": {"容貌": 20, "心计": 10, "才情": 5},
         "relationships_bonus": {"太后": -10, "皇后": -20},
         "initial_flag": "和亲公主",
@@ -32,18 +37,29 @@ START_SCENARIOS = {
     }
 }
 
+SCENARIO_RANK_FLOORS = {k: v.get("starting_rank") for k, v in START_SCENARIOS.items()}
+
+
 def apply_scenario(base_state, scenario_key):
-    """应用场景卡（只加属性，不改变位份）"""
-    scenario = START_SCENARIOS[scenario_key]
-    # 属性加成
+    """应用场景卡：属性加成 + 与家世合并后的初始位份。"""
+    scenario = START_SCENARIOS.get(scenario_key, START_SCENARIOS["才女入宫"])
     for attr, bonus in scenario.get("attributes_bonus", {}).items():
         if attr in base_state.attributes:
             base_state.attributes[attr] = min(100, base_state.attributes[attr] + bonus)
-    # 关系加成
     for person, bonus in scenario.get("relationships_bonus", {}).items():
         if person in base_state.relationships:
             base_state.relationships[person] = min(100, base_state.relationships[person] + bonus)
-    # 剧情标志
     base_state.story_flags.append(scenario.get("initial_flag", ""))
     base_state.history.append(scenario.get("starting_history", ""))
+
+    scenario_rank = scenario.get("starting_rank")
+    if scenario_rank:
+        prev_rank = base_state.rank.name
+        final_rank = resolve_start_rank(prev_rank, scenario_rank)
+        if final_rank != prev_rank:
+            for rank_enum in Rank:
+                if rank_enum.name == final_rank:
+                    base_state.rank = rank_enum
+                    break
+            base_state.history.append(f"册封位份：{final_rank}（{scenario_key}）")
     return base_state

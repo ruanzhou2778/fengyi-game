@@ -627,11 +627,38 @@ function shouldShowLoadingForUrl(url) {
     return SLOW_API_PATTERNS.some(p => url.includes(p));
 }
 
+function isLatin1HeaderValue(val) {
+    if (val == null || val === '') return true;
+    return /^[\x00-\xFF]*$/.test(String(val));
+}
+
+function setSafeRequestHeader(headers, key, value) {
+    if (value == null || value === '') return;
+    const str = String(value);
+    if (isLatin1HeaderValue(str)) headers[key] = str;
+}
+
+function mergeApiConfigIntoJsonBody(options) {
+    if (!options.body || options.method !== 'POST') return;
+    const ct = (options.headers && options.headers['Content-Type']) || '';
+    if (!ct.includes('application/json')) return;
+    try {
+        const body = JSON.parse(options.body);
+        const cfg = getConfigFromStorage();
+        if (cfg.api_key && body.api_key == null) body.api_key = cfg.api_key;
+        if (cfg.api_base && body.api_base == null) body.api_base = cfg.api_base;
+        if (cfg.api_model && body.api_model == null) body.api_model = cfg.api_model;
+        options.body = JSON.stringify(body);
+    } catch (e) { /* keep original body */ }
+}
+
 async function myFetch(url, options = {}) {
     options.headers = options.headers || {};
-    options.headers['X-API-Base'] = localStorage.getItem('gongdou_ai_api_base') || 'https://cn.jixiangai.xyz/v1';
-    options.headers['X-API-Key'] = localStorage.getItem('gongdou_api_key') || '';
-    options.headers['X-API-Model'] = localStorage.getItem('gongdou_api_model') || 'Qwen/Qwen2.5-72B-Instruct';
+    const cfg = getConfigFromStorage();
+    setSafeRequestHeader(options.headers, 'X-API-Base', cfg.api_base);
+    setSafeRequestHeader(options.headers, 'X-API-Key', cfg.api_key);
+    setSafeRequestHeader(options.headers, 'X-API-Model', cfg.api_model);
+    mergeApiConfigIntoJsonBody(options);
     const skipLoading = options.skipLoading || !shouldShowLoadingForUrl(url);
     if (skipLoading) delete options.skipLoading;
     if (!skipLoading) showLoading(true);
@@ -2403,7 +2430,7 @@ const startBtn=document.getElementById('startBtn');
 showLoading(true,{title:'入宫选秀中…',sub:'正在安排殿选与册封，请稍候',icon:'🏯'});
 if(startBtn){startBtn.disabled=true;}
 try{
-const r=await myFetch(`${API_BASE}/api/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:'才女入宫',name:name,background:bg.id,background_data:bg,attributes:attrs,emperor:currentEmperor,character:{appearance,talent,personality,traits,background_desc:bgDesc,custom_story:customStory}}),skipLoading:true});
+const r=await myFetch(`${API_BASE}/api/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:'才女入宫',name:name,background:bg.id,background_data:bg,attributes:attrs,emperor:currentEmperor,character:{appearance,talent,personality,traits,background_desc:bgDesc,custom_story:customStory},...getConfigFromStorage()}),skipLoading:true});
 const d=await r.json();
 if(!d.player_id){showToast('❌ 入宫失败，请重试');return;}
 playerId=d.player_id;localStorage.setItem('gongdou_playerId',playerId);

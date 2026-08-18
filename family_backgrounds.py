@@ -15,17 +15,20 @@ DAUGHTER_STATUSES = [
     {"key": "嫡", "weight": 32, "rank_offset": 0, "score_mod": 12, "attr": {"威望": 2, "魅力": 2}},
     {"key": "庶", "weight": 38, "rank_offset": 1, "score_mod": 0, "attr": {"心计": 2}},
     {"key": "养", "weight": 18, "rank_offset": 2, "score_mod": -10, "attr": {"福运": 1, "心计": 1}},
-    {"key": "私生", "weight": 12, "rank_offset": 3, "score_mod": -20, "attr": {"心计": 3, "容貌": -1}},
+    {"key": "私生", "weight": 12, "rank_offset": 2, "score_mod": -20, "attr": {"心计": 3, "容貌": -1}},
 ]
 
 PLAYER_START_RANKS = ["秀女", "答应", "常在", "贵人", "嫔"]
 
-GRADE_BASE_RANK_INDEX = {1: 3, 2: 2, 3: 2, 4: 1, 5: 1, 6: 0, 7: 0, 8: 0, 9: 0}
+# 官阶 → 初始位份索引（0=秀女 … 4=嫔）
+GRADE_BASE_RANK_INDEX = {1: 4, 2: 4, 3: 3, 4: 3, 5: 2, 6: 2, 7: 1, 8: 1, 9: 0}
 
 GRADE_BASE_SCORE = {1: 88, 2: 78, 3: 70, 4: 62, 5: 55, 6: 48, 7: 42, 8: 36, 9: 30}
 
 GRADE_WEIGHTS = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 GRADE_WEIGHT_VALUES = [2, 3, 6, 10, 14, 18, 16, 12, 6]
+# 玩家选秀：略向中高门第倾斜，避免人人秀女/答应
+PLAYER_GRADE_WEIGHT_VALUES = [3, 5, 8, 12, 16, 14, 10, 6, 4]
 
 GRADE_ATTR_BONUS = {
     1: {"威望": 5, "才情": 3, "魅力": 3},
@@ -74,6 +77,31 @@ def _official_given_name():
     return random_given(EMPEROR_GIVEN, 0.55)
 
 
+def rank_to_index(rank_name):
+    try:
+        return PLAYER_START_RANKS.index(rank_name)
+    except ValueError:
+        return 1
+
+
+def index_to_rank(idx):
+    idx = max(0, min(len(PLAYER_START_RANKS) - 1, idx))
+    return PLAYER_START_RANKS[idx]
+
+
+def resolve_start_rank(*rank_names):
+    """取多个位份候选中的最高者（用于家世 + 场景卡合并）。"""
+    best = 0
+    for name in rank_names:
+        if name:
+            best = max(best, rank_to_index(name))
+    return index_to_rank(best)
+
+
+def _pick_player_grade():
+    return random.choices(GRADE_WEIGHTS, weights=PLAYER_GRADE_WEIGHT_VALUES)[0]
+
+
 def _rank_bonus_for(grade, status):
     base_idx = GRADE_BASE_RANK_INDEX.get(grade, 0)
     idx = max(0, min(len(PLAYER_START_RANKS) - 1, base_idx - status["rank_offset"]))
@@ -95,7 +123,7 @@ def generate_official_background(surname, for_player=False):
     """根据女儿姓氏生成同姓父亲官家背景。显示：礼部尚书林子敬（嫡）女"""
     surname = (surname or "").strip() or random_surname(NPC_SURNAMES)
 
-    grade = random.choices(GRADE_WEIGHTS, weights=GRADE_WEIGHT_VALUES)[0]
+    grade = _pick_player_grade() if for_player else random.choices(GRADE_WEIGHTS, weights=GRADE_WEIGHT_VALUES)[0]
     title = _pick_official_title(grade)
     status = _pick_daughter_status()
     given = _official_given_name()
