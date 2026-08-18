@@ -6,7 +6,15 @@ import uuid
 import json
 import os
 import random
+import sys
 from datetime import datetime
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 load_dotenv()
 from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort
@@ -45,7 +53,7 @@ CORS(app, resources={r"/api/*": {
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-API-Base,X-API-Key,X-API-Model')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-API-Base,X-API-Key,X-API-Model,X-Client-Id')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
@@ -843,10 +851,10 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     # ===== 尝试AI生成故事 =====
     narration = None
     try:
-        if api_key and api_base and api_key.strip() and api_base.strip():
+        if api_key and api_base and api_model and api_key.strip() and api_base.strip():
             client = get_openai_client(api_key, api_base)
             if client:
-                model = api_model or "Qwen/Qwen2.5-72B-Instruct"
+                model = api_model
                 prompt = f"""【重要声明】这是一个虚构的宫斗角色扮演游戏，所有情节均为小说创作，不涉及现实。请以宫斗小说作家的身份，允许描写包括争宠、陷害、结盟、甚至打胎等权谋手段，这些是虚构情节，不构成真实伤害。
 你是一个宫斗小说作家，请生成一段精彩的宫斗情节（80-120字）。
 
@@ -878,14 +886,8 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         print(f"AI生成宫斗事件失败: {e}")
     
     if not narration or len(narration) < 10:
-        narrations = [
-            f"{initiator}与{target}在御花园相遇，因言语不合起了冲突。",
-            f"{initiator}暗中设计，在{target}的茶中动了手脚。",
-            f"{initiator}在皇帝面前说{target}的坏话，意图挑拨。",
-            f"宫中传言四起，说是{target}暗中勾结外臣。",
-            f"{initiator}与{target}在宫宴上针锋相对，气氛紧张。"
-        ]
-        narration = random.choice(narrations)
+        from events import generate_conflict_fallback_narration
+        narration = generate_conflict_fallback_narration(initiator, target)
 
     assist_notes = []
     if assist_used and initiator == game_state.name:
@@ -1522,6 +1524,41 @@ def get_openai_client(api_key=None, api_base=None):
         return OpenAI(api_key=api_key, base_url=api_base, http_client=http_client)
     return None
 
+def mask_api_key(key):
+    if not key:
+        return "(empty)"
+    k = str(key).strip()
+    if len(k) <= 8:
+        return "***"
+    return f"{k[:4]}...{k[-4:]}"
+
+def is_model_unavailable_error(err):
+    msg = str(err).lower()
+    return "model_not_found" in msg or "no available channel" in msg
+
+def call_ai_chat(client, model, messages):
+    if not model:
+        print("[ai] 未提供模型，跳过 AI 调用")
+        return None, None, None
+    last_err = None
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.8,
+            max_tokens=800,
+            top_p=0.95,
+            timeout=10,
+        )
+        return response, model, None
+    except Exception as e:
+        last_err = e
+        if is_model_unavailable_error(e):
+            print(f"[ai] model unavailable: {model}")
+        else:
+            raise
+    return None, model, last_err
+
 def generate_emperor_name(api_key=None, api_base=None, api_model=None):
     return generate_emperor_name_local()
 
@@ -1602,37 +1639,39 @@ def build_prompt(game_state, player_action, npc_names, event=None):
 def generate_story(game_state, player_action, npc_names=None, api_key=None, api_base=None, api_model=None):
     if npc_names is None:
         npc_names = list(game_state.npcs.keys())
-    from events import check_event, generate_local_events
+    from events import check_event, generate_local_events, generate_fallback_story
     event = check_event(game_state)
     prompt = build_prompt(game_state, player_action, npc_names, event)
     
-    print(f"📌 generate_story 收到 api_key: {api_key}, api_base: {api_base}")
-    print(f"📝 完整 prompt:\n{prompt}\n---")
+    print(f"[ai] generate_story key={mask_api_key(api_key)} base={api_base} model={api_model}")
     
     narration = None
-    if api_key is not None and api_base is not None and api_key.strip() and api_base.strip():
+    ai_warning = None
+    if api_key is not None and api_base is not None and api_model and api_key.strip() and api_base.strip():
         try:
             client = get_openai_client(api_key, api_base)
             if client:
-                model = api_model or "Qwen/Qwen2.5-72B-Instruct"
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": "你是才华横溢的宫斗小说作家，只输出故事内容，不要任何格式标记。尽量使用名单中的人物。"},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.8,
-                    max_tokens=800,
-                    top_p=0.95,
-                    timeout=10
-                )
-                narration = response.choices[0].message.content.strip()
-                print(f"✅ AI 返回原始内容长度: {len(narration)}")
+                model = api_model
+                messages = [
+                    {"role": "system", "content": "你是才华横溢的宫斗小说作家，只输出故事内容，不要任何格式标记。尽量使用名单中的人物。"},
+                    {"role": "user", "content": prompt}
+                ]
+                response, used_model, err = call_ai_chat(client, model, messages)
+                if response:
+                    narration = response.choices[0].message.content.strip()
+                    print(f"[ai] ok len={len(narration)} model={used_model}")
+                elif err:
+                    print(f"[ai] failed: {err}")
+                    if is_model_unavailable_error(err):
+                        ai_warning = f"AI 模型不可用（{model}），已改用本地剧情。请在设置中点击「获取」刷新模型列表"
+                    else:
+                        ai_warning = "AI 调用失败，已改用本地剧情"
         except Exception as e:
-            print(f"❌ AI调用失败: {e}")
+            print(f"[ai] failed: {e}")
+            ai_warning = "AI 调用失败，已改用本地剧情"
             narration = None
     else:
-        print("⚠️ 未提供有效的 API Key，跳过 AI")
+        print("[ai] no valid api key, skip")
 
     # ===== 处理 AI 返回内容 =====
     if narration is not None:
@@ -1650,10 +1689,10 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, api_
         for attr, change in base_changes.items():
             if attr in game_state.attributes:
                 game_state.attributes[attr] = max(0, min(game_state.get_attr_max(attr), game_state.attributes[attr] + change))
-        return {"narration": narration, "choices": ["继续", "查看状态", "保存游戏"], "effects": base_changes, "event_triggered": event["name"] if event else None}
+        return {"narration": narration, "choices": ["继续", "查看状态", "保存游戏"], "effects": base_changes, "event_triggered": event["name"] if event else None, "ai_warning": ai_warning}
 
     # ===== AI 未返回任何内容（None），使用本地事件 =====
-    print("⚠️ AI 未返回有效内容，使用本地事件")
+    print("[ai] using local fallback story")
     local_events = generate_local_events(game_state, max_count=1)
     if local_events:
         evt = local_events[0]
@@ -1662,14 +1701,7 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, api_
             if attr in game_state.attributes:
                 game_state.attributes[attr] = max(0, min(game_state.get_attr_max(attr), game_state.attributes[attr] + delta))
     else:
-        fallback_narrations = [
-            "你正在宫中散步，恰巧遇到了几位妃嫔在亭中品茶闲聊。",
-            "御花园里花开正好，你独自赏花时，听见远处传来阵阵琴声。",
-            "今日天气晴朗，你正在读书时，宫女来报说太后召见。",
-            "你刚用完午膳，便听说了皇帝最近常去皇后宫中用膳的消息。",
-            "宫中来了一位新的乐师，琴艺高超，引得各宫妃嫔纷纷前往聆听。"
-        ]
-        narration = random.choice(fallback_narrations)
+        narration = generate_fallback_story(game_state)
 
     base_changes = {"宠爱": random.randint(-1, 3), "威望": random.randint(-1, 2), "心计": random.randint(-1, 2), "健康": random.randint(-1, 2)}
     if event:
@@ -1679,7 +1711,7 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, api_
     for attr, change in base_changes.items():
         if attr in game_state.attributes:
             game_state.attributes[attr] = max(0, min(game_state.get_attr_max(attr), game_state.attributes[attr] + change))
-    return {"narration": narration, "choices": ["继续", "查看状态", "保存游戏"], "effects": base_changes, "event_triggered": event["name"] if event else None}
+    return {"narration": narration, "choices": ["继续", "查看状态", "保存游戏"], "effects": base_changes, "event_triggered": event["name"] if event else None, "ai_warning": ai_warning}
 
 # ============================================================
 #  晋升条件（真实属性阈值 + 防重复）
@@ -1827,19 +1859,21 @@ def get_user_api_config(request, player_id=None):
         header_key = request.headers.get('Authorization', '').replace('Bearer ', '')
     config['api_key'] = header_key or ''
     config['api_base'] = request.headers.get('X-API-Base') or 'https://cn.jixiangai.xyz/v1'
-    config['api_model'] = request.headers.get('X-API-Model') or 'Qwen/Qwen2.5-72B-Instruct'
+    config['api_model'] = request.headers.get('X-API-Model') or ''
     if request.is_json:
         data = request.get_json(silent=True) or {}
         if data.get('api_key'):
             config['api_key'] = data.get('api_key', '')
         config['api_base'] = config['api_base'] or data.get('api_base', 'https://cn.jixiangai.xyz/v1')
-        config['api_model'] = config['api_model'] or data.get('api_model', 'Qwen/Qwen2.5-72B-Instruct')
+        if not config['api_model']:
+            config['api_model'] = data.get('api_model', '')
     if player_id and player_id in user_configs:
         stored = user_configs[player_id]
         if not is_valid_api_key(config['api_key']):
             config['api_key'] = stored.get('api_key', '')
         config['api_base'] = config['api_base'] or stored.get('api_base', 'https://cn.jixiangai.xyz/v1')
-        config['api_model'] = config['api_model'] or stored.get('api_model', 'Qwen/Qwen2.5-72B-Instruct')
+        if not config['api_model']:
+            config['api_model'] = stored.get('api_model', '')
     # 浏览器已发送 X-API-Key（含空值）时，不偷偷用服务器 .env，避免全员走慢速 AI
     if request.headers.get('X-API-Key') is not None:
         config['api_key'] = config['api_key'] if is_valid_api_key(config['api_key']) else ''
@@ -1866,7 +1900,7 @@ def handle_config():
     if not player_id:
         return jsonify({"error": "缺少player_id"}), 400
     if request.method == 'GET':
-        config = user_configs.get(player_id, {"custom_prompt": "", "romance_mode": False, "api_base": "https://cn.jixiangai.xyz/v1", "api_key": "", "api_model": "Qwen/Qwen2.5-72B-Instruct"})
+        config = user_configs.get(player_id, {"custom_prompt": "", "romance_mode": False, "api_base": "https://cn.jixiangai.xyz/v1", "api_key": "", "api_model": ""})
         return jsonify(config)
     data = request.get_json()
     user_configs[player_id] = {
@@ -1874,7 +1908,7 @@ def handle_config():
         "romance_mode": data.get('romance_mode', False),
         "api_base": data.get('api_base', 'https://cn.jixiangai.xyz/v1'),
         "api_key": data.get('api_key', ''),
-        "api_model": data.get('api_model', 'Qwen/Qwen2.5-72B-Instruct')
+        "api_model": data.get('api_model', '')
     }
     if player_id in sessions:
         game_state = sessions[player_id]
@@ -2905,13 +2939,13 @@ def start_game():
     game_state._pending_promotion = None
     game_state._promotion_done = False
     sessions[player_id] = game_state
-    user_configs[player_id] = {"custom_prompt": "", "romance_mode": False, "api_base": api_config.get('api_base', 'https://cn.jixiangai.xyz/v1'), "api_key": api_config.get('api_key', ''), "api_model": api_config.get('api_model', 'Qwen/Qwen2.5-72B-Instruct')}
+    user_configs[player_id] = {"custom_prompt": "", "romance_mode": False, "api_base": api_config.get('api_base', 'https://cn.jixiangai.xyz/v1'), "api_key": api_config.get('api_key', ''), "api_model": api_config.get('api_model', '')}
     npc_names = list(game_state.npcs.keys())
     story = generate_story(game_state, "入宫选秀，开启了后宫生涯", npc_names, api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'))
     
     npcs_with_children = serialize_npcs_for_client(game_state)
     autosave_session(player_id)
-    return jsonify({"player_id": player_id, "player_name": player_name, "family_background": game_state.family_background, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "emperor": game_state.emperor, "storyline": game_state.storyline.value, "silver": game_state.silver, "npcs": npcs_with_children, "narration": story.get("narration","欢迎来到后宫。"), "choices": story.get("choices",["四处看看","去请安","回宫休息"]), "effects": story.get("effects",{}), "is_pregnant": game_state.is_pregnant, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "servants": [], "romance_mode": game_state.romance_mode, "year": game_state.year, "month": game_state.month, "day": game_state.day, "calendar_str": game_state.get_calendar_str(), "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": game_state.appearance, "talent": game_state.talent, "personality": game_state.personality, "traits": game_state.traits, "custom_story": game_state.custom_story, "first_impression": first_impression})
+    return jsonify({"player_id": player_id, "player_name": player_name, "family_background": game_state.family_background, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "emperor": game_state.emperor, "storyline": game_state.storyline.value, "silver": game_state.silver, "npcs": npcs_with_children, "narration": story.get("narration","欢迎来到后宫。"), "choices": story.get("choices",["四处看看","去请安","回宫休息"]), "effects": story.get("effects",{}), "ai_warning": story.get("ai_warning"), "is_pregnant": game_state.is_pregnant, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "servants": [], "romance_mode": game_state.romance_mode, "year": game_state.year, "month": game_state.month, "day": game_state.day, "calendar_str": game_state.get_calendar_str(), "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": game_state.appearance, "talent": game_state.talent, "personality": game_state.personality, "traits": game_state.traits, "custom_story": game_state.custom_story, "first_impression": first_impression})
 
 @app.route('/api/act', methods=['POST'])
 def player_action():
@@ -2967,7 +3001,7 @@ def player_action():
         game_state.add_attr_change(story["effects"], choice)
     npcs_with_children = serialize_npcs_for_client(game_state)
     autosave_session(player_id)
-    return jsonify({"player_id": player_id, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "family_background": game_state.family_background, "npcs": npcs_with_children, "narration": story.get("narration","宫中岁月静好。"), "choices": story.get("choices",["继续","查看状态","保存游戏"]), "effects": story.get("effects",{}), "rivalry_event": rivalry_event, "event_triggered": story.get("event_triggered"), "memories": game_state.get_recent_memories(3), "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "attr_change_log": game_state.attr_change_log[-5:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
+    return jsonify({"player_id": player_id, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "family_background": game_state.family_background, "npcs": npcs_with_children, "narration": story.get("narration","宫中岁月静好。"), "choices": story.get("choices",["继续","查看状态","保存游戏"]), "effects": story.get("effects",{}), "ai_warning": story.get("ai_warning"), "rivalry_event": rivalry_event, "event_triggered": story.get("event_triggered"), "memories": game_state.get_recent_memories(3), "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "attr_change_log": game_state.attr_change_log[-5:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
 @app.route('/api/state/<player_id>', methods=['GET'])
 def get_state(player_id):
@@ -3135,7 +3169,7 @@ def load_game():
             "romance_mode": getattr(game_state, "romance_mode", False) if hasattr(game_state, "romance_mode") else existing.get("romance_mode", False),
             "api_base": api_config.get("api_base") or existing.get("api_base", "https://cn.jixiangai.xyz/v1"),
             "api_key": api_config.get("api_key") or existing.get("api_key", ""),
-            "api_model": api_config.get("api_model") or existing.get("api_model", "Qwen/Qwen2.5-72B-Instruct"),
+            "api_model": api_config.get("api_model") or existing.get("api_model", ""),
         }
         return jsonify({"success": True, "message": f"读取存档成功 ({slot_name})", "game_state": game_state.to_dict()})
     except Exception as e:
@@ -3698,9 +3732,9 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     print("=" * 60)
-    print("🌸 凤仪天下 - 宫斗游戏后端 v1.4.0 ")
+    print("Fengyi Game Backend v1.4.0")
     print("=" * 60)
-    print(f"🚀 访问: http://0.0.0.0:{port}")
-    print("📱 前端与 API 同域部署，分享链接即可游玩")
+    print(f"Open: http://0.0.0.0:{port}")
+    print("Frontend and API are served from the same origin")
     print("=" * 60)
     app.run(host='0.0.0.0', port=port, debug=debug)

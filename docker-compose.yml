@@ -10,7 +10,6 @@ services:
       FLASK_DEBUG: "false"
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
-      OPENAI_MODEL: ${OPENAI_MODEL:-Qwen/Qwen2.5-72B-Instruct}
     volumes:
       - ./saves:/app/saves
     healthcheck:

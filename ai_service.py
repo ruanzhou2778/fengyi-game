@@ -17,9 +17,6 @@ def get_openai_client(api_key=None, base_url=None):
         base_url = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
     return OpenAI(api_key=api_key, base_url=base_url)
 
-# 默认模型
-DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen2.5-72B-Instruct")
-
 NARRATIONS = [
     "你在御花园中漫步，花香袭人。",
     "宫中一片宁静，你独自走在长廊上。",
@@ -96,9 +93,6 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, base
     from events import check_event
     event = check_event(game_state)
     prompt = build_prompt(game_state, player_action, npc_names, event)
-    
-    if model is None:
-        model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
     
     try:
         client = get_openai_client(api_key, base_url)
@@ -189,8 +183,7 @@ def generate_promotion_event(game_state, api_key=None, base_url=None, model=None
     rels = game_state.relationships
     emperor = game_state.emperor
     
-    if model is None:
-        model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
+    
     
     prompt = f"""你是一个宫斗小说作家，请根据以下信息生成一个晋升剧情事件，格式为JSON。
 
@@ -338,8 +331,6 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     
     # 尝试AI生成故事
     narration = None
-    if model is None:
-        model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
     
     try:
         prompt = f"""你是一个宫斗小说作家，请生成一段精彩的宫斗情节（80-120字）。
@@ -422,9 +413,6 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
 
 def generate_emperor_name(api_key=None, base_url=None, model=None):
     """AI生成皇帝名字"""
-    if model is None:
-        model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
-    
     try:
         prompt = """请生成一个古代中国风格的天子名字，风格类似"萧景琰"、"慕容九"、"李承乾"。
 要求：
@@ -561,13 +549,10 @@ def generate_period_events(game_state, npc_names=None, api_key=None, base_url=No
         player_name = getattr(game_state, "name", "玩家")
         pregnant_hint = f" 玩家{player_name}有孕（约{int(getattr(game_state, 'pregnancy_month', 0))}月）。"
 
-    if not (api_key and base_url and str(api_key).strip() and str(base_url).strip()):
-        print("⚠️ generate_period_events: 未配置 API Key，使用本地情报")
+    if not (api_key and base_url and model and str(api_key).strip() and str(base_url).strip() and str(model).strip()):
+        print("⚠️ generate_period_events: 未配置 API Key 或模型，使用本地情报")
         events = _period_events_local_fallback(game_state, target_count)
-        return {"events": events, "ai_used": False, "reason": "no_api_key", "fallback": True}
-
-    if model is None:
-        model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
+        return {"events": events, "ai_used": False, "reason": "no_api_config", "fallback": True}
 
     ai_events = []
     ai_parsed_count = 0

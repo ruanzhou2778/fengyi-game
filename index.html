@@ -401,6 +401,7 @@
                             <label>🤖 模型名称</label>
                             <div style="display:flex;gap:2px;">
                                 <select id="apiModelSelect" style="flex:1;padding:1px 3px;border:1px solid var(--border-light);border-radius:3px;background:var(--bg-card);color:var(--text-dark);font-family:inherit;font-size:8px;outline:none;">
+                                    <option value="">—— 未选模型（尝试本地剧情）——</option>
                                     <option value="Qwen/Qwen2.5-72B-Instruct">Qwen/Qwen2.5-72B-Instruct</option>
                                     <option value="gpt-4">gpt-4</option>
                                     <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
@@ -752,7 +753,7 @@ function getConfigFromStorage() {
     return {
         api_base: localStorage.getItem('gongdou_ai_api_base') || 'https://cn.jixiangai.xyz/v1',
         api_key: localStorage.getItem('gongdou_api_key') || '',
-        api_model: localStorage.getItem('gongdou_api_model') || 'Qwen/Qwen2.5-72B-Instruct',
+        api_model: localStorage.getItem('gongdou_api_model') || '',
         custom_prompt: localStorage.getItem('gongdou_custom_prompt') || '',
         romance_mode: localStorage.getItem('gongdou_romance_mode') === 'true'
     };
@@ -762,7 +763,7 @@ function saveConfigToStorage(cfg) {
     const gameBase = (cfg.gameBase || '').trim();
     const apiBase = (cfg.apiBase || '').trim() || 'https://cn.jixiangai.xyz/v1';
     const apiKey = (cfg.apiKey || '').trim();
-    const apiModel = (cfg.apiModel || '').trim() || 'Qwen/Qwen2.5-72B-Instruct';
+    const apiModel = (cfg.apiModel || '').trim();
     localStorage.setItem('gongdou_game_base', gameBase);
     localStorage.setItem('gongdou_ai_api_base', apiBase);
     localStorage.setItem('gongdou_api_key', apiKey);
@@ -804,7 +805,7 @@ function populateConfigInputs(prefix) {
     const storedGameBase = localStorage.getItem('gongdou_game_base') || '';
     const apiBase = localStorage.getItem('gongdou_ai_api_base') || 'https://cn.jixiangai.xyz/v1';
     const apiKey = localStorage.getItem('gongdou_api_key') || '';
-    const apiModel = localStorage.getItem('gongdou_api_model') || 'Qwen/Qwen2.5-72B-Instruct';
+    const apiModel = localStorage.getItem('gongdou_api_model') || '';
     const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
     setVal(ids.gameBase, storedGameBase);
     setVal(ids.apiBase, apiBase);
@@ -901,7 +902,11 @@ let currentCharData={
     name:'', background:null, backgroundDesc:'', appearance:'', talent:'琴艺',
     personality:'温婉贤淑', traits:[], customStory:'', attrs:{}, attrRange:{min:0,max:20}
 };
-CREATION_ATTR_KEYS.forEach(k=>currentCharData.attrs[k]=11);
+let initRem=TOTAL_POINTS;
+CREATION_ATTR_KEYS.forEach((k,i)=>{
+    if(i===CREATION_ATTR_KEYS.length-1)currentCharData.attrs[k]=initRem;
+    else{const v=Math.floor(TOTAL_POINTS/CREATION_ATTR_KEYS.length);currentCharData.attrs[k]=v;initRem-=v;}
+});
 let currentEmperor=null;
 
 const logContent=document.getElementById('logContent'),logArea=document.getElementById('logArea'),loading=document.getElementById('loading');
@@ -1027,6 +1032,22 @@ function setStoryText(story){
 }
 function getUsedPoints(){let t=0;CREATION_ATTR_KEYS.forEach(k=>t+=currentCharData.attrs[k]||0);return t;}
 function getRemainingPoints(){return TOTAL_POINTS-getUsedPoints();}
+
+function fillRemainingAttrPoints(){
+    const range=currentCharData.attrRange||{min:0,max:20};
+    let rem=getRemainingPoints();
+    if(rem<=0)return 0;
+    const pool=[...CREATION_ATTR_KEYS];
+    while(rem>0&&pool.length){
+        const k=pool[Math.floor(Math.random()*pool.length)];
+        const cur=currentCharData.attrs[k]||0;
+        if(cur>=range.max){pool.splice(pool.indexOf(k),1);continue;}
+        currentCharData.attrs[k]=cur+1;
+        rem--;
+    }
+    updateAttrDisplay();
+    return getRemainingPoints();
+}
 
 function updateAttrDisplay(){
 const rem=getRemainingPoints();document.getElementById('totalPointsDisplay').textContent=`已分配 ${getUsedPoints()}/${TOTAL_POINTS} 点`;
@@ -2384,6 +2405,7 @@ container.innerHTML=`<div class="scenario-overlay" id="scenarioOverlay"><div cla
 <div class="card-row"><span class="label">API地址</span><input type="text" id="scenarioApiBaseInput" placeholder="https://cn.jixiangai.xyz/v1" style="font-size:8px;flex:1;"></div>
 <div class="card-row"><span class="label">API Key</span><input type="password" id="scenarioApiKeyInput" placeholder="sk-xxx" style="font-size:8px;flex:1;"></div>
 <div class="card-row"><span class="label">模型</span><div style="display:flex;gap:2px;flex:1;"><select id="scenarioApiModelSelect" style="font-size:8px;flex:1;">
+<option value="">—— 未选模型（尝试本地剧情）——</option>
 <option value="Qwen/Qwen2.5-72B-Instruct">Qwen/Qwen2.5-72B-Instruct</option>
 <option value="gpt-4">gpt-4</option>
 <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
@@ -2455,8 +2477,15 @@ const talent=document.getElementById('talentSelect').value||'琴艺';
 const personality=document.getElementById('personalitySelect').value||'温婉贤淑';
 const traits=currentCharData.traits;
 const customStory=document.getElementById('customStoryInput').value.trim()||'';
-const attrs={};CREATION_ATTR_KEYS.forEach(k=>attrs[k]=currentCharData.attrs[k]||11);
-if(getRemainingPoints()!==0){showToast('⚠️ 请分配完所有属性点（剩余 '+getRemainingPoints()+' 点）');return;}
+const attrs={};CREATION_ATTR_KEYS.forEach(k=>attrs[k]=currentCharData.attrs[k]||0);
+let remPoints=getRemainingPoints();
+if(remPoints>0){
+    const autoFill=remPoints;
+    fillRemainingAttrPoints();
+    remPoints=getRemainingPoints();
+    if(remPoints>0){showToast('⚠️ 属性点已满上限，请手动调整后再入宫（剩余 '+remPoints+' 点）');return;}
+    showToast('已自动分配剩余 '+autoFill+' 点属性');
+}
 const startBtn=document.getElementById('startBtn');
 showLoading(true,{title:'入宫选秀中…',sub:'正在安排殿选与册封，请稍候',icon:'🏯'});
 if(startBtn){startBtn.disabled=true;}
@@ -2471,7 +2500,7 @@ showLoading(true,{title:'入宫选秀中…',sub:'正在载入宫廷名册…',i
 await syncConfigToBackend(playerId);
 eventLogs=[];flipTriggeredThisRound=false;addLogEntry(`🌸 欢迎入宫，${name}！`,'system');
 if(d.first_impression&&d.first_impression.message){addLogEntry(d.first_impression.message,'system');showToast(`👑 ${d.first_impression.impression||'初印象'}：宠爱+${d.first_impression.favor_gain||0} 威望+${d.first_impression.prestige_gain||0}`);}
-updateUI(d);document.getElementById('scenarioOverlayContainer').innerHTML='';showToast(`🌸 欢迎入宫，${name}！`);
+updateUI(d);document.getElementById('scenarioOverlayContainer').innerHTML='';showToast(`🌸 欢迎入宫，${name}！`);if(d.ai_warning)showToast('⚠️ '+d.ai_warning);
 }catch(e){console.error(e);showToast('❌ 入宫失败：'+e.message);}
 finally{if(startBtn){startBtn.disabled=false;}showLoading(false);}
 }
@@ -2832,12 +2861,19 @@ async function fetchModels(prefix = 'main') {
         if (!resp.ok) throw new Error('获取模型列表失败: ' + resp.status);
         const data = await resp.json();
         select.innerHTML = '';
+        const addPlaceholder = () => {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = '—— 未选模型（尝试本地剧情）——';
+            select.appendChild(opt);
+        };
         const addOption = (id) => {
             const opt = document.createElement('option');
             opt.value = id;
             opt.textContent = id;
             select.appendChild(opt);
         };
+        addPlaceholder();
         if (data.data && Array.isArray(data.data)) {
             data.data.forEach(m => addOption(m.id));
         } else if (data.models && Array.isArray(data.models)) {
@@ -2859,6 +2895,8 @@ async function fetchModels(prefix = 'main') {
         }
         if (savedModel && [...select.options].some(o => o.value === savedModel)) {
             select.value = savedModel;
+        } else {
+            select.value = '';
         }
         saveConfigFromInputs(prefix, true);
         showToast('✅ 模型列表已更新');
