@@ -54,10 +54,21 @@ rm -f /root/install_panel.sh
 
 三、以后更新
 ------------------------------------------------
+推荐（脚本会自动先停旧容器再构建，避免卡死）：
 cd /root/gongdou
 bash deploy/update.sh
 
-或在宝塔 Docker管理器 里对容器点「重建」。
+手动步骤（与脚本相同逻辑）：
+cd /root/gongdou
+docker compose stop --timeout 20 game
+docker compose down --remove-orphans --timeout 20
+git pull
+docker compose build game
+docker compose up -d game
+
+或在宝塔 Docker管理器 里：先停止/删除 fengyi-game 容器，再重建。
+
+若仍卡死：多半是内存不足，可临时加 swap 或升级配置后再更新。
 
 
 四、常见问题
