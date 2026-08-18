@@ -87,8 +87,105 @@ load_events()
 user_configs = {}
 
 # ============================================================
-#  位份体系
+#  会话持久化：从存档恢复 + 自动存档
 # ============================================================
+def find_best_save_path(player_id, slot_name='default'):
+    default_path = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
+    if os.path.exists(default_path):
+        return default_path
+    if not os.path.exists(SAVE_DIR):
+        return None
+    pattern_prefix = f"{player_id}_"
+    best_path = None
+    best_time = ''
+    for filename in os.listdir(SAVE_DIR):
+        if filename.startswith(pattern_prefix) and filename.endswith('.json'):
+            filepath = os.path.join(SAVE_DIR, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                st = data.get('save_time', '')
+                if st >= best_time:
+                    best_time = st
+                    best_path = filepath
+            except Exception:
+                continue
+    return best_path
+
+
+def restore_session_from_file(player_id, slot_name='default'):
+    filepath = find_best_save_path(player_id, slot_name)
+    if not filepath:
+        return None
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            save_data = json.load(f)
+        if "game_state" not in save_data:
+            return None
+        game_state = GameState.from_save_data(save_data)
+        if not hasattr(game_state, 'npcs') or not game_state.npcs:
+            game_state.npcs = generate_all_npcs(10)
+            for name, npc in game_state.npcs.items():
+                if name not in game_state.relationships:
+                    game_state.relationships[name] = npc.get("relationship", {"好感": 0, "印象": "陌生", "互动次数": 0})
+        if not hasattr(game_state, '_pending_promotion'):
+            game_state._pending_promotion = None
+        game_state._promotion_done = False
+        sessions[player_id] = game_state
+        return game_state
+    except Exception as e:
+        print(f"[warn] restore session {player_id} failed: {e}")
+        return None
+
+
+def get_or_restore_session(player_id, slot_name='default'):
+    if not player_id:
+        return None
+    if player_id in sessions:
+        return sessions[player_id]
+    return restore_session_from_file(player_id, slot_name)
+
+
+def session_or_404(player_id, error_msg="会话无效"):
+    if not player_id:
+        return None, (jsonify({"error": error_msg}), 404)
+    game_state = get_or_restore_session(player_id)
+    if not game_state:
+        return None, (jsonify({"error": error_msg}), 404)
+    return game_state, None
+
+
+def autosave_session(player_id, slot_name='default'):
+    if not player_id or player_id not in sessions:
+        return
+    try:
+        game_state = sessions[player_id]
+        save_data = game_state.to_save_data()
+        filename = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(save_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[warn] autosave {player_id} failed: {e}")
+
+
+def restore_sessions_on_startup():
+    if not os.path.exists(SAVE_DIR):
+        return
+    player_ids = set()
+    for filename in os.listdir(SAVE_DIR):
+        if not filename.endswith('.json'):
+            continue
+        base = filename[:-5]
+        parts = base.split('_', 1)
+        if len(parts) == 2:
+            player_ids.add(parts[0])
+    restored = 0
+    for pid in player_ids:
+        if pid not in sessions and restore_session_from_file(pid):
+            restored += 1
+    if restored:
+        print(f"[ok] restored {restored} sessions from saves")
+
 RANK_ORDER = ["更衣", "官女子", "答应", "常在", "贵人", "才人", "美人", "婕妤", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
 RANK_LEVELS = {name: i for i, name in enumerate(RANK_ORDER)}
 
@@ -929,9 +1026,9 @@ def handle_config():
 @app.route('/api/servants', methods=['GET'])
 def get_servants():
     player_id = request.args.get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     return jsonify({"servants": [s.to_dict() for s in game_state.get_active_servants()], "max": game_state.max_servants, "count": len(game_state.get_active_servants())})
 
 @app.route('/api/servant/hire', methods=['POST'])
@@ -939,9 +1036,9 @@ def hire_servant():
     data = request.get_json()
     player_id = data.get('player_id')
     servant_type = data.get('type', '宫女')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -965,9 +1062,9 @@ def dismiss_servant():
     data = request.get_json()
     player_id = data.get('player_id')
     name = data.get('name')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     success, msg = game_state.remove_servant(name)
     if not success:
         return jsonify({"error": msg}), 400
@@ -978,9 +1075,9 @@ def train_servant():
     data = request.get_json()
     player_id = data.get('player_id')
     name = data.get('name')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -1009,9 +1106,9 @@ def get_npcs():
 @app.route('/api/npc/<name>', methods=['GET'])
 def get_npc_detail(name):
     player_id = request.args.get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     if name not in game_state.npcs:
         return jsonify({"error": "NPC不存在"}), 404
     npc = game_state.npcs[name]
@@ -1034,9 +1131,9 @@ def interact_npc():
     player_id = data.get('player_id')
     npc_name = data.get('npc_name')
     action = data.get('action')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -1106,9 +1203,9 @@ def emperor_interact():
     data = request.get_json()
     player_id = data.get('player_id')
     action = data.get('action')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -1166,9 +1263,9 @@ def dowager_interact():
     data = request.get_json()
     player_id = data.get('player_id')
     action = data.get('action')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -1224,9 +1321,9 @@ def promotion_choose():
 def emperor_flip():
     data = request.get_json()
     player_id = data.get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     
     candidates = get_flip_candidates(game_state)
     if not candidates:
@@ -1324,9 +1421,9 @@ def emperor_flip():
 def next_period():
     data = request.get_json()
     player_id = data.get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     api_config = get_user_api_config(request, player_id)
 
     # ---- 时间推进 ----
@@ -1545,6 +1642,7 @@ def next_period():
 
     npcs_with_children = serialize_npcs_for_client(game_state)
 
+    autosave_session(player_id)
     return jsonify({
         "success": True,
         "day": game_state.day,
@@ -1590,9 +1688,9 @@ def scheme_action():
     player_id = data.get('player_id')
     target = data.get('target')
     action = data.get('action')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -1655,9 +1753,9 @@ def perform_action():
     data = request.get_json()
     player_id = data.get('player_id')
     action = data.get('action')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -1678,14 +1776,15 @@ def perform_action():
     action_name = action_names.get(action, action)
     game_state.add_attr_change(changes, f"行为：{action_name}")
     game_state.add_memory(f"进行了{action_name}，{change_desc}")
+    autosave_session(player_id)
     return jsonify({"success": True, "effects": changes, "attributes": game_state.attributes, "silver": game_state.silver, "message": f"你完成了{action_name}，{change_desc}", "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
 @app.route('/api/event/random', methods=['POST'])
 def get_random_event():
     player_id = request.get_json().get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     attrs = game_state.attributes
     if not EVENT_POOL:
         return jsonify({"event": None, "message": "暂无事件库"})
@@ -1801,7 +1900,7 @@ def start_game():
     story = generate_story(game_state, "入宫选秀，开启了后宫生涯", npc_names, api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'))
     
     npcs_with_children = serialize_npcs_for_client(game_state)
-    
+    autosave_session(player_id)
     return jsonify({"player_id": player_id, "player_name": player_name, "family_background": game_state.family_background, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "emperor": game_state.emperor, "storyline": game_state.storyline.value, "silver": game_state.silver, "npcs": npcs_with_children, "narration": story.get("narration","欢迎来到后宫。"), "choices": story.get("choices",["四处看看","去请安","回宫休息"]), "effects": story.get("effects",{}), "is_pregnant": game_state.is_pregnant, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "servants": [], "romance_mode": game_state.romance_mode, "year": game_state.year, "month": game_state.month, "day": game_state.day, "calendar_str": game_state.get_calendar_str(), "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": game_state.appearance, "talent": game_state.talent, "personality": game_state.personality, "traits": game_state.traits, "custom_story": game_state.custom_story})
 
 @app.route('/api/act', methods=['POST'])
@@ -1813,9 +1912,9 @@ def player_action():
     action_type = data.get('action_type', 'story')
     api_config = get_user_api_config(request, player_id)
     
-    if player_id not in sessions:
-        return jsonify({"error": "会话已过期"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id, "会话已过期")
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -1857,14 +1956,16 @@ def player_action():
     if story.get("effects"):
         game_state.add_attr_change(story["effects"], choice)
     npcs_with_children = serialize_npcs_for_client(game_state)
+    autosave_session(player_id)
     return jsonify({"player_id": player_id, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "family_background": game_state.family_background, "npcs": npcs_with_children, "narration": story.get("narration","宫中岁月静好。"), "choices": story.get("choices",["继续","查看状态","保存游戏"]), "effects": story.get("effects",{}), "rivalry_event": rivalry_event, "event_triggered": story.get("event_triggered"), "memories": game_state.get_recent_memories(3), "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "attr_change_log": game_state.attr_change_log[-5:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
 @app.route('/api/state/<player_id>', methods=['GET'])
 def get_state(player_id):
     try:
-        if player_id not in sessions:
+        need_restore = player_id not in sessions
+        game_state = get_or_restore_session(player_id)
+        if not game_state:
             return jsonify({"error": "会话不存在"}), 404
-        game_state = sessions[player_id]
         if not hasattr(game_state, 'npcs') or game_state.npcs is None:
             game_state.npcs = {}
         if not hasattr(game_state, 'servants') or game_state.servants is None:
@@ -1880,7 +1981,7 @@ def get_state(player_id):
         if not hasattr(game_state, 'children') or game_state.children is None:
             game_state.children = []
         npcs_with_children = serialize_npcs_for_client(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "name": game_state.name, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story','')})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "name": game_state.name, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "restored_from_save": need_restore})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1921,9 +2022,9 @@ def save_game():
     slot_name = data.get('slot_name', 'default')
     if not player_id:
         return jsonify({"error": "缺少玩家ID"}), 400
-    if player_id not in sessions:
-        return jsonify({"error": "会话不存在"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id, "会话不存在")
+    if err:
+        return err
     save_data = game_state.to_save_data()
     filename = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
     try:
@@ -2008,9 +2109,9 @@ def api_duel_start():
     data = request.get_json() or {}
     player_id = data.get('player_id')
     target = data.get('target')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     existing = getattr(game_state, "_active_duel", None)
     resuming = bool(existing and not existing.get("finished"))
     if not resuming:
@@ -2033,11 +2134,12 @@ def api_duel_skill():
     data = request.get_json() or {}
     player_id = data.get('player_id')
     skill = data.get('skill')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    duel, err = play_duel_skill(sessions[player_id], skill)
+    game_state, err = session_or_404(player_id)
     if err:
-        return jsonify({"error": err}), 400
+        return err
+    duel, duel_err = play_duel_skill(game_state, skill)
+    if duel_err:
+        return jsonify({"error": duel_err}), 400
     left = [{"key": k, "name": k, "desc": DUEL_SKILLS[k]["desc"]} for k in duel["player_left"]]
     return jsonify({"success": True, "duel": duel, "skills": left})
 
@@ -2046,9 +2148,9 @@ def api_duel_resolve():
     data = request.get_json() or {}
     player_id = data.get('player_id')
     drain = data.get('drain')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     result, err = resolve_duel(game_state, drain)
     if err:
         return jsonify({"error": err}), 400
@@ -2065,9 +2167,9 @@ def api_pray():
     player_id = data.get('player_id')
     mode = data.get('mode', 'bless')
     target = data.get('target')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -2085,9 +2187,9 @@ def api_pray():
 def random_conflict():
     data = request.get_json()
     player_id = data.get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     api_config = get_user_api_config(request, player_id)
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
@@ -2105,9 +2207,9 @@ def initiate_conflict():
     target = data.get('target')
     conflict_type = data.get('type', '争宠')
     api_config = get_user_api_config(request, player_id)
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -2129,18 +2231,18 @@ def get_conflict_types():
 @app.route('/api/conflict/targets', methods=['GET'])
 def get_conflict_targets():
     player_id = request.args.get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     targets = [{"name": name, "rank": npc.get("rank","妃嫔"), "personality": npc.get("personality","未知"), "icon": npc.get("icon","🌸")} for name, npc in game_state.npcs.items() if name != "太后"]
     return jsonify({"targets": targets})
 
 @app.route('/api/npc/pregnancy/status', methods=['GET'])
 def get_npc_pregnancy_status():
     player_id = request.args.get('player_id')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     pregnancy_status = {}
     for name, npc in game_state.npcs.items():
         if name == "太后" or npc.get("rank") == "皇后" or name == game_state.name:
@@ -2217,9 +2319,9 @@ def child_interact():
     action = data.get('action')
     child_index = data.get('child_index', 0)
     mother_name = data.get('mother_name')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -2297,9 +2399,9 @@ def abort_pregnancy():
     data = request.get_json()
     player_id = data.get('player_id')
     target = data.get('target')
-    if not player_id or player_id not in sessions:
-        return jsonify({"error": "会话无效"}), 404
-    game_state = sessions[player_id]
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
@@ -2336,6 +2438,8 @@ def serve_static(filename):
     if filename.startswith('api/'):
         return jsonify({"error": "接口不存在，请确认游戏后端已启动"}), 404
     return send_from_directory('.', filename)
+
+restore_sessions_on_startup()
 
 if __name__ == '__main__':
     load_events()

@@ -1856,9 +1856,46 @@ async function nextPeriod() {
 
 async function performAction(action){isProcessing=true;loading.style.display='block';showToast('⏳ 执行中...');try{const ar=await myFetch(`${API_BASE}/api/action`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,action:action})});const ad=await ar.json();if(!ad.success){showToast('❌ '+(ad.error||'行为失败'));loading.style.display='none';isProcessing=false;return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);const sd=await sr.json();if(ad.message)addLogEntry(ad.message);updateUI({...sd,...ad,display_rank:sd.display_rank||sd.rank||'秀女',day:sd.day||1,silver:sd.silver||0,attributes:sd.attributes||{},attr_max:sd.attr_max||{宠爱:999,威望:3000},calendar_str:sd.calendar_str||'建元元年一月上旬',remaining_actions:sd.remaining_actions!==undefined?sd.remaining_actions:7,max_actions:sd.max_actions||7,inventory:sd.inventory||[],player_id:playerId});showToast('✅ '+(ad.message||'完成'));}catch(e){showToast('❌ 操作失败：'+e.message);}loading.style.display='none';isProcessing=false;}
 
-async function saveGame(slot){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,slot_name:slot||'default'})});const d=await r.json();showToast(d.success?'💾 '+d.message:'❌ '+d.error);}catch(e){showToast('❌ 保存失败');}}
+async function saveGame(slot){if(!playerId)return;const slotName=slot||'default';try{const r=await myFetch(`${API_BASE}/api/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,slot_name:slotName})});const d=await r.json();if(d.success)localStorage.setItem('gongdou_save_slot',slotName);showToast(d.success?'💾 '+d.message:'❌ '+d.error);}catch(e){showToast('❌ 保存失败');}}
 
-async function autoResume(){const sid=localStorage.getItem('gongdou_playerId');if(!sid)return;try{const r=await myFetch(`${API_BASE}/api/state/${sid}`);if(!r.ok){localStorage.removeItem('gongdou_playerId');return;}const d=await r.json();if(d.error){localStorage.removeItem('gongdou_playerId');return;}playerId=sid;await syncConfigToBackend(playerId);eventLogs=[];flipTriggeredThisRound=false;if(d.memories)d.memories.forEach(m=>addLogEntry(m.replace(/触发了事件：/g,''),'system'));updateUI({...d,player_id:sid});document.getElementById('scenarioOverlayContainer').innerHTML='';showToast('✅ 已恢复进度');}catch(e){localStorage.removeItem('gongdou_playerId');}}
+async function applyRestoredGameState(pid,gs,fromSave){
+playerId=pid;localStorage.setItem('gongdou_playerId',pid);
+await syncConfigToBackend(playerId);
+eventLogs=[];flipTriggeredThisRound=false;
+if(gs.memories)gs.memories.forEach(m=>addLogEntry(m.replace(/触发了事件：/g,''),'system'));
+updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',inventory:gs.inventory||[],npcs:gs.npcs||{},emperor:gs.emperor||{},children:gs.children||[],is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,has_children:gs.has_children||false,rivalries:gs.rivalries||{},alliances:gs.alliances||{},servants:gs.servants||[],romance_mode:gs.romance_mode||false,remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,player_id:pid});
+document.getElementById('scenarioOverlayContainer').innerHTML='';
+showToast(fromSave?'📂 已从存档恢复进度':'✅ 已恢复进度');
+}
+
+async function autoResume(){
+const sid=localStorage.getItem('gongdou_playerId');
+if(!sid)return;
+const slot=localStorage.getItem('gongdou_save_slot')||'default';
+showLoading(true,{title:'恢复进度中…',sub:'正在载入宫廷档案',icon:'📜'});
+try{
+const r=await myFetch(`${API_BASE}/api/state/${sid}`,{skipLoading:true});
+if(r.ok){
+const d=await r.json();
+if(!d.error){
+await applyRestoredGameState(sid,d,d.restored_from_save);
+return;
+}
+}
+const lr=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:sid,slot_name:slot}),skipLoading:true});
+const ld=await lr.json();
+if(ld.success&&ld.game_state){
+localStorage.setItem('gongdou_save_slot',slot);
+await applyRestoredGameState(sid,ld.game_state,true);
+return;
+}
+localStorage.removeItem('gongdou_playerId');
+}catch(e){
+localStorage.removeItem('gongdou_playerId');
+}finally{
+showLoading(false);
+}
+}
 
 function confirmReset(){
 if(!playerId){showToast('当前没有进行中的游戏');return;}
@@ -1999,6 +2036,7 @@ const r=await myFetch(`${API_BASE}/api/start`,{method:'POST',headers:{'Content-T
 const d=await r.json();
 if(!d.player_id){showToast('❌ 入宫失败，请重试');return;}
 playerId=d.player_id;localStorage.setItem('gongdou_playerId',playerId);
+localStorage.setItem('gongdou_save_slot','default');
 localStorage.setItem('gongdou_player_name', name);
 showLoading(true,{title:'入宫选秀中…',sub:'正在载入宫廷名册…',icon:'📜'});
 await syncConfigToBackend(playerId);
