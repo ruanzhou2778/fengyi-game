@@ -8,7 +8,7 @@
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         :root { --bg-primary: #f5ede5; --bg-card: #fcf8f4; --bg-nav: #e8ddd0; --gold: #b8945a; --gold-light: #e8d5b5; --gold-dark: #a07840; --text-dark: #3a2a1a; --text-mid: #5a4a3a; --text-body: #4a3a2a; --text-light: #8a7a6a; --border-light: #d5c8bc; --shadow: 0 4px 20px rgba(80,60,40,0.08); --radius: 16px; --radius-sm: 10px; }
         body { font-family: 'Georgia','楷体','KaiTi','SimSun',serif; background: var(--bg-primary); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 10px; }
-        .phone-frame { width: 100%; max-width: 420px; height: 780px; max-height: 95vh; background: var(--bg-card); border-radius: 32px; box-shadow: 0 20px 60px rgba(60,40,30,0.2); overflow: hidden; display: flex; flex-direction: column; position: relative; }
+        .phone-frame { width: 100%; max-width: 420px; height: 720px; max-height: 92dvh; background: var(--bg-card); border-radius: 32px; box-shadow: 0 20px 60px rgba(60,40,30,0.2); overflow: hidden; display: flex; flex-direction: column; position: relative; }
         .app-header { background: linear-gradient(180deg, #e8ddd0, #f0e8e0); padding: 4px 8px; border-bottom: 1px solid var(--border-light); flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 2px; }
         .app-header .title-area { display: flex; align-items: center; gap: 3px; }
         .app-header .title-area .title { font-size: 13px; color: var(--text-dark); font-weight: 600; letter-spacing: 1px; }
@@ -31,7 +31,8 @@
         .page::-webkit-scrollbar-track { background: #e0d5cc; border-radius: 2px; }
         .page::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 2px; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-        .log-area { flex: 1; background: var(--bg-card); border-radius: var(--radius); padding: 8px 10px; overflow-y: auto; border: 1px solid var(--border-light); margin-bottom: 4px; min-height: 160px; max-height: none; box-shadow: var(--shadow); }
+        .story-scroll { height: 100%; display: flex; flex-direction: column; min-height: 0; gap: 2px; }
+        .log-area { flex: 1; min-height: 0; background: var(--bg-card); border-radius: var(--radius); padding: 6px 8px; overflow-y: auto; border: 1px solid var(--border-light); margin-bottom: 2px; box-shadow: var(--shadow); }
         .log-area::-webkit-scrollbar { width: 3px; }
         .log-area::-webkit-scrollbar-track { background: #e0d5cc; border-radius: 2px; }
         .log-area::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 2px; }
@@ -197,29 +198,48 @@
         .child-gender-princess { border-left:3px solid #e91e63; }
         @media (max-width:400px) { .child-grid { grid-template-columns:1fr; } }
         @media (max-width:450px) {
-            .phone-frame { border-radius:20px; height:100vh; max-height:100vh; }
-            .page { padding:3px 4px 2px 4px; }
-            .log-area { padding:5px 6px; min-height:120px; }
-            .log-entry { font-size:10px; }
-            .action-grid { grid-template-columns:1fr 1fr 1fr; gap:2px; }
-            .action-grid .action-btn { font-size:7px; padding:2px 1px; }
-            .action-grid .action-btn .icon { font-size:10px; }
-            .input-area input { font-size:10px; padding:4px 6px; }
-            .input-area button { font-size:10px; padding:4px 8px; }
-            .app-header .title-area .title { font-size:11px; letter-spacing:1px; }
-            .app-header .status-mini span { font-size:6px; padding:0 3px; }
-            .app-header .save-btns button { font-size:7px; padding:1px 4px; }
-            .action-bar button { font-size:8px; padding:2px 6px; }
-            .char-card { padding:4px 6px; }
-            .char-card .card-row { font-size:8px; }
-            .char-card .card-row input, .char-card .card-row select { font-size:8px; }
-            .char-card .card-row textarea { font-size:8px; min-height:28px; }
-            .story-editor-wrap textarea { font-size:7px; min-height:40px; max-height:72px; padding:3px 5px; }
-            .story-editor-footer { font-size:5px; }
-            .scenario-overlay { padding:4px 6px; }
-            .modal-box { max-width:95vw; max-height:90vh; }
+            body { padding: 0; align-items: stretch; min-height: 100dvh; }
+            .phone-frame { border-radius: 0; width: 100%; max-width: 100%; height: 100dvh; max-height: 100dvh; box-shadow: none; padding-bottom: env(safe-area-inset-bottom, 0); }
+            .app-header { padding: 2px 5px; gap: 1px; padding-top: max(2px, env(safe-area-inset-top, 0)); }
+            .page { padding: 2px 4px 1px 4px; }
+            .app-header .title-area .title { font-size: 10px; letter-spacing: 0.5px; }
+            .app-header .status-mini { gap: 2px; }
+            .app-header .status-mini span { font-size: 6px; padding: 0 3px; }
+            .app-header .save-btns button { font-size: 6px; padding: 1px 4px; }
+            .story-scroll { gap: 1px; }
+            #currentStoryDisplay { font-size: 10px; max-height: 48px; padding: 4px 6px; line-height: 1.4; margin-bottom: 1px; }
+            .log-area { padding: 3px 5px; margin-bottom: 1px; min-height: 0; }
+            .log-entry { font-size: 9px; padding: 2px 0; line-height: 1.35; }
+            .action-bar { margin: 1px 0; }
+            .action-bar button { font-size: 7px; padding: 1px 5px; }
+            .input-area { padding: 1px 0; gap: 3px; }
+            .input-area input { font-size: 9px; padding: 3px 5px; }
+            .input-area button { font-size: 9px; padding: 3px 7px; }
+            .action-grid { grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 1px 0 2px 0; }
+            .action-grid .action-btn { font-size: 7px; padding: 2px 1px; gap: 0; }
+            .action-grid .action-btn .icon { font-size: 9px; }
+            .action-grid .action-btn .sub { display: none; }
+            .bottom-nav .nav-item { padding: 2px 0 3px 0; font-size: 7px; }
+            .bottom-nav .nav-item .nav-icon { font-size: 12px; margin-bottom: 0; }
+            .char-card { padding: 3px 5px; margin-bottom: 3px; }
+            .char-card .card-title { font-size: 7px; margin-bottom: 2px; padding-bottom: 1px; }
+            .char-card .card-row { font-size: 7px; padding: 1px 0; }
+            .char-card .card-row input, .char-card .card-row select { font-size: 7px; }
+            .char-card .card-row textarea { font-size: 7px; min-height: 24px; }
+            .story-editor-wrap textarea { font-size: 7px; min-height: 32px; max-height: 56px; padding: 3px 5px; }
+            .story-editor-footer { font-size: 5px; }
+            .scenario-overlay { padding: 4px 6px 6px 6px; }
+            .scenario-hero { padding: 1px 0 0 0 !important; }
+            .scenario-hero > div:first-child { font-size: 14px !important; letter-spacing: 1px !important; }
+            .modal-box { max-width: 95vw; max-height: 85vh; }
+            #statusTags { margin: 0; }
+            #edictContainer { margin: 0; }
+            .loading { padding: 1px; }
         }
-        @media (max-width:380px) { .action-grid { grid-template-columns:1fr 1fr; } }
+        @media (max-width:380px) {
+            .action-grid { grid-template-columns: repeat(3, 1fr); }
+            #currentStoryDisplay { max-height: 42px; font-size: 9px; }
+        }
         .status-tag { font-size:7px; padding:1px 5px; border-radius:8px; display:inline-block; margin:1px 2px; }
         .status-tag.pregnant { background:#f0d5d0; color:#8a3a2a; }
         .status-tag.child { background:#d5e0d8; color:#2a5a4a; }
@@ -249,14 +269,17 @@
         #currentStoryDisplay {
             background: var(--bg-card);
             border-radius: var(--radius-sm);
-            padding: 8px 10px;
-            margin-bottom: 4px;
+            padding: 6px 8px;
+            margin-bottom: 2px;
             border: 1px solid var(--gold-light);
-            font-size: 13px;
+            font-size: 12px;
             color: var(--text-dark);
-            min-height: 50px;
+            min-height: 0;
+            max-height: 64px;
+            overflow-y: auto;
+            flex-shrink: 0;
             box-shadow: var(--shadow);
-            line-height: 1.6;
+            line-height: 1.45;
         }
     </style>
 </head>
@@ -279,7 +302,7 @@
     </div>
     <div class="page-container">
         <div class="page active" id="pageStory">
-            <div class="story-scroll" style="height:100%; display:flex; flex-direction:column;">
+            <div class="story-scroll">
                 <div id="currentStoryDisplay">🌸 点击"入宫选秀"开始你的后宫之旅...</div>
                 <div class="log-area" id="logArea"><div id="logContent"><div style="color:var(--text-light);text-align:center;padding:14px;">暂无事件，开始你的宫斗之旅吧。</div></div></div>
                 <div class="status-tags" id="statusTags"></div>
@@ -1914,7 +1937,7 @@ showToast('🔄 已重置，重新选秀吧');
 // ============================================================
 function createScenarioOverlay(){
 const container=document.getElementById('scenarioOverlayContainer');
-container.innerHTML=`<div class="scenario-overlay" id="scenarioOverlay"><div style="text-align:center;padding:3px 0 1px 0;"><div style="font-size:17px;color:var(--text-dark);letter-spacing:3px;font-weight:400;">凤<span style="color:#a03020;">仪</span><span style="color:var(--gold);">天</span>下</div><div style="color:var(--text-light);font-size:6px;letter-spacing:2px;margin-top:1px;">— 自 由 定 制 你 的 人 设 —</div></div>
+container.innerHTML=`<div class="scenario-overlay" id="scenarioOverlay"><div class="scenario-hero" style="text-align:center;padding:2px 0 0 0;"><div style="font-size:15px;color:var(--text-dark);letter-spacing:2px;font-weight:400;">凤<span style="color:#a03020;">仪</span><span style="color:var(--gold);">天</span>下</div><div style="color:var(--text-light);font-size:6px;letter-spacing:1px;margin-top:1px;">— 自由定制人设 —</div></div>
 <div class="char-card"><div class="card-title">📋 基 本 信 息</div>
 <div class="card-row"><span class="label">姓名</span><input type="text" id="playerName" placeholder="输入名字..." maxlength="8" value="林婉儿"><button class="btn" id="randNameBtn" style="padding:1px 6px;font-size:8px;">🎲</button></div></div>
 <div class="char-card"><div class="card-title">🏛️ 官 家 出 身</div>
