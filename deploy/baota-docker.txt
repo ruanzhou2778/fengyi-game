@@ -1,0 +1,72 @@
+宝塔面板 + Docker 部署「凤仪天下」
+================================
+
+前提：宝塔已安装，并已安装「Docker管理器」插件。
+
+一、清理冲突（仅当你之前跑过 install-huawei-ecs.sh 时）
+------------------------------------------------
+# 停止我们脚本起的容器
+cd /root/gongdou && docker compose down 2>/dev/null || true
+
+# 删除脚本添加的独立 Nginx 站点（避免和宝塔 Nginx 冲突）
+rm -f /etc/nginx/sites-enabled/fengyi
+rm -f /etc/nginx/sites-available/fengyi
+# 宝塔 Nginx 不要用 systemctl 管理，在面板里重启即可
+
+# install_panel.sh 只是宝塔安装包，宝塔已装好可删
+rm -f /root/install_panel.sh
+
+说明：
+- 不要卸载宝塔本身
+- 不要删 /root/gongdou 项目目录和 saves/ 存档
+
+
+二、用宝塔 Docker 部署游戏
+------------------------------------------------
+1. 确认项目在 /root/gongdou（或上传到 /www/wwwroot/gongdou）
+
+2. SSH 执行：
+   cd /root/gongdou
+   cp .env.example .env    # 首次
+   nano .env               # 填写 OPENAI_API_KEY
+
+3. 构建并启动（二选一）
+
+   方式 A - SSH：
+   docker compose up -d --build
+
+   方式 B - 宝塔面板：
+   Docker管理器 → 编排/Compose → 导入 /root/gongdou/docker-compose.yml → 启动
+
+4. 宝塔 → 网站 → 添加站点
+   - 域名：你的域名 或 直接用 IP
+   - 根目录随意（例如 /www/wwwroot/gongdou-placeholder）
+
+5. 站点设置 → 反向代理 → 添加反向代理
+   - 代理名称：game
+   - 目标 URL：http://127.0.0.1:5000
+   - 发送域名：$host
+
+6. 华为云安全组放行 80、443
+
+7. 访问 http://你的IP 或 https://你的域名
+
+
+三、以后更新
+------------------------------------------------
+cd /root/gongdou
+bash deploy/update.sh
+
+或在宝塔 Docker管理器 里对容器点「重建」。
+
+
+四、常见问题
+------------------------------------------------
+Q: 宝塔和 Docker 会冲突吗？
+A: 不会。宝塔管 Nginx/面板，Docker 跑游戏，反代到 5000 即可。
+
+Q: 还要装我们脚本里的 Nginx 吗？
+A: 不需要，用宝塔自带的 Nginx 反向代理。
+
+Q: install_panel.sh 能删吗？
+A: 宝塔已安装完成就可以删，只是安装脚本，不是运行服务。
