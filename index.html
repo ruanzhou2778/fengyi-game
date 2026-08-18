@@ -169,6 +169,8 @@
         .interact-btn { padding:2px 5px; border:1px solid var(--border-light); border-radius:3px; background:var(--bg-card); cursor:pointer; font-family:inherit; font-size:8px; transition:all 0.2s; }
         .interact-btn:hover { background:var(--gold-light); border-color:var(--gold); }
         .interact-btn:disabled { opacity:0.4; cursor:not-allowed; }
+        .interact-result-area { margin-top:6px; padding:6px 8px; border-radius:6px; background:#f5ede5; border:1px solid var(--gold-light); font-size:9px; color:var(--text-dark); line-height:1.5; max-height:140px; overflow-y:auto; }
+        .interact-result-area:empty { display:none; }
         .edict-modal-content { text-align:center; padding:3px 0; }
         .edict-modal-content .edict-icon { font-size:28px; display:block; margin-bottom:2px; }
         .edict-modal-content .edict-title { font-size:14px; color:#c0392b; font-weight:600; letter-spacing:3px; margin-bottom:2px; }
@@ -207,7 +209,7 @@
             .app-header .status-mini span { font-size: 6px; padding: 0 3px; }
             .app-header .save-btns button { font-size: 6px; padding: 1px 4px; }
             .story-scroll { gap: 1px; }
-            #currentStoryDisplay { font-size: 10px; max-height: 48px; padding: 4px 6px; line-height: 1.4; margin-bottom: 1px; }
+            #currentStoryDisplay { font-size: 10px; max-height: 72px; padding: 4px 6px; line-height: 1.4; margin-bottom: 1px; }
             .log-area { padding: 3px 5px; margin-bottom: 1px; min-height: 0; }
             .log-entry { font-size: 9px; padding: 2px 0; line-height: 1.35; }
             .action-bar { margin: 1px 0; }
@@ -238,7 +240,7 @@
         }
         @media (max-width:380px) {
             .action-grid { grid-template-columns: repeat(3, 1fr); }
-            #currentStoryDisplay { max-height: 42px; font-size: 9px; }
+            #currentStoryDisplay { max-height: 64px; font-size: 9px; }
         }
         .status-tag { font-size:7px; padding:1px 5px; border-radius:8px; display:inline-block; margin:1px 2px; }
         .status-tag.pregnant { background:#f0d5d0; color:#8a3a2a; }
@@ -784,6 +786,28 @@ if(pageId==='pageConflict') loadConflictTargets();
 
 function showToast(msg){const e=document.querySelector('.toast-notification');if(e)e.remove();const t=document.createElement('div');t.className='toast-notification';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity 0.5s ease';setTimeout(()=>t.remove(),500);},2000);}
 
+function showInteractFeedback(narration, who, effects) {
+    const text = (narration || '').trim();
+    if (!text) return;
+    const label = who ? `【${who}】` : '';
+    addLogEntry(label + text);
+    const storyEl = document.getElementById('currentStoryDisplay');
+    if (storyEl) storyEl.innerHTML = text;
+    if (effects && Object.keys(effects).length > 0) {
+        const eff = Object.entries(effects).map(([k, v]) => `${k}${v > 0 ? '+' : ''}${v}`).join(' ');
+        addLogEntry(`📊 ${eff}`);
+    }
+    showToast(text.length > 36 ? text.slice(0, 36) + '…' : text);
+}
+
+function setInteractResult(areaId, html) {
+    const ra = document.getElementById(areaId);
+    if (!ra) return;
+    ra.className = 'interact-result-area';
+    ra.innerHTML = html || '';
+    ra.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
 let modalCallback=null;
 function openModal(title,body,confirmText,callback,isHtml=false){
 document.getElementById('modalTitle').textContent=title;
@@ -1304,7 +1328,7 @@ async function openInteract(type, name) {
                     <button onclick="interactAction('${d.name}','rival')" class="interact-btn">⚔️ 陷害</button>
                     <button onclick="closeModal();startDuelFromPage('${d.name}')" class="interact-btn">🗡️ 争锋</button>
                 </div>
-                <div id="interactResultArea" style="margin-top:4px;padding:4px 6px;border-radius:4px;background:#f5ede5;border:1px solid var(--border-light);font-size:8px;display:none;"></div>
+                <div id="interactResultArea" class="interact-result-area"></div>
             </div>
         `;
 
@@ -1355,7 +1379,7 @@ function openQueenInteract(name) {
                         <button onclick="interactAction('${d.name}','ally')" class="interact-btn" style="background:#e8e0f0;">🤝 结盟</button>
                         <button onclick="interactAction('${d.name}','rival')" class="interact-btn" style="background:#f0d5d0;">⚔️ 陷害</button>
                     </div>
-                    <div id="interactResultArea" style="margin-top:4px;padding:4px 6px;border-radius:4px;background:#f5ede5;border:1px solid var(--border-light);font-size:8px;display:none;"></div>
+                    <div id="interactResultArea" class="interact-result-area"></div>
                     <div style="font-size:7px;color:var(--text-light);text-align:center;padding-top:2px;">💡 皇后乃六宫之主，谨慎相处</div>
                 </div>
             `;
@@ -1515,7 +1539,7 @@ function openEmperorInteract() {
                 <button onclick="emperorInteract('recite_poem')" class="interact-btn" style="background:#e8e8f0;">📝 献诗</button>
                 <button onclick="emperorInteract('ask_reward')" class="interact-btn" style="background:#f0e0d8;">🎁 求赏赐</button>
             </div>
-            <div id="emperorResultArea" style="margin-top:4px;padding:4px 6px;border-radius:4px;background:#f5ede5;border:1px solid var(--border-light);font-size:8px;display:none;"></div>
+            <div id="emperorResultArea" class="interact-result-area"></div>
             <div style="font-size:7px;color:var(--text-light);text-align:center;padding-top:2px;">💡 与皇帝奏对可提升宠爱与威望</div>
         </div>
     `;
@@ -1550,7 +1574,7 @@ function openDowagerInteract() {
                 <button onclick="dowagerInteract('chat')" class="interact-btn" style="background:#e8e8f0;">💬 陪聊</button>
                 <button onclick="dowagerInteract('ask_favor')" class="interact-btn" style="background:#f0e0e0;">🙏 求恩典</button>
             </div>
-            <div id="dowagerResultArea" style="margin-top:4px;padding:4px 6px;border-radius:4px;background:#f5ede5;border:1px solid var(--border-light);font-size:8px;display:none;"></div>
+            <div id="dowagerResultArea" class="interact-result-area"></div>
             <div style="font-size:7px;color:var(--text-light);text-align:center;padding-top:2px;">💡 太后恩典可助你晋升更易</div>
         </div>
     `;
@@ -1567,12 +1591,13 @@ async function emperorInteract(action) {
         });
         const d = await r.json();
         if (d.error) { showToast('❌ '+d.error); return; }
+        const narration = d.narration || '操作完成';
+        showInteractFeedback(narration, '皇帝', d.effects);
+        setInteractResult('emperorResultArea', narration);
         if (d.pregnancy) {
             addLogEntry(`🤰 ${d.pregnancy}`, 'pregnancy');
             showToast(`🤰 ${d.pregnancy}`);
         }
-        const ra = document.getElementById('emperorResultArea');
-        if (ra) { ra.style.display = 'block'; ra.innerHTML = d.narration || '操作完成'; }
         if (d.reward) {
             const reward = d.reward;
             const iconMap = {"银两":"🪙","珍宝":"💎","位份":"📜","封号":"🏷️","恩典":"✨"};
@@ -1613,8 +1638,9 @@ async function dowagerInteract(action) {
         });
         const d = await r.json();
         if (d.error) { showToast('❌ '+d.error); return; }
-        const ra = document.getElementById('dowagerResultArea');
-        if (ra) { ra.style.display = 'block'; ra.innerHTML = d.narration || '操作完成'; }
+        const narration = d.narration || '操作完成';
+        showInteractFeedback(narration, '太后', d.effects);
+        setInteractResult('dowagerResultArea', narration);
         if (d.reward) {
             const reward = d.reward;
             const iconMap = {"银两":"🪙","珍宝":"💎","恩典":"✨"};
@@ -1655,9 +1681,10 @@ async function interactAction(name, action) {
         });
         const d = await r.json();
         if (d.error) { showToast('❌ '+d.error); return; }
-        const ra = document.getElementById('interactResultArea');
-        if (ra) { ra.style.display = 'block'; ra.innerHTML = d.narration || '操作完成'; }
-        
+        const narration = d.narration || '操作完成';
+        showInteractFeedback(narration, name, d.effects);
+        setInteractResult('interactResultArea', narration);
+
         if (action === 'ally') {
             await myFetch(`${API_BASE}/api/interact`, {
                 method: 'POST',
@@ -1673,21 +1700,18 @@ async function interactAction(name, action) {
             }).catch(()=>{});
             showToast('⚔️ 已结仇（盟友关系已清除）');
         }
-        
+
         const sr = await myFetch(`${API_BASE}/api/state/${playerId}`);
         updateUI(await sr.json());
-        closeModal();
-        setTimeout(() => openInteract('npc', name), 300);
-        showToast('✅ 操作成功');
     } catch (e) { showToast('❌ 操作失败'); }
 }
 
 function openServantDetail(servant){
-const html=`<div style="display:flex;flex-direction:column;gap:2px;font-size:9px;color:var(--text-mid);"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:12px;font-weight:600;color:var(--text-dark);">${servant.type==='宫女'?'👩':'🧑'} ${servant.name}</span><span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;">${servant.type}</span></div><div><span style="color:var(--text-light);">忠诚度：</span>${servant.loyalty}</div><div><span style="color:var(--text-light);">技能：</span>${servant.skill}</div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><button onclick="trainServant('${servant.name}')" class="interact-btn">📚 训练 (15两)</button><button onclick="dismissServant('${servant.name}')" class="interact-btn" style="border-color:#d48c7a;color:#8a3a2a;">🚪 遣散</button></div><div id="servantResultArea" style="margin-top:2px;padding:2px 5px;border-radius:3px;background:#f5ede5;border:1px solid var(--border-light);font-size:8px;display:none;"></div></div>`;
+const html=`<div style="display:flex;flex-direction:column;gap:2px;font-size:9px;color:var(--text-mid);"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:12px;font-weight:600;color:var(--text-dark);">${servant.type==='宫女'?'👩':'🧑'} ${servant.name}</span><span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;">${servant.type}</span></div><div><span style="color:var(--text-light);">忠诚度：</span>${servant.loyalty}</div><div><span style="color:var(--text-light);">技能：</span>${servant.skill}</div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><button onclick="trainServant('${servant.name}')" class="interact-btn">📚 训练 (15两)</button><button onclick="dismissServant('${servant.name}')" class="interact-btn" style="border-color:#d48c7a;color:#8a3a2a;">🚪 遣散</button></div><div id="servantResultArea" class="interact-result-area"></div></div>`;
 openModal(`👤 ${servant.name}`,html,'关闭',null,true);
 }
 
-async function trainServant(name){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/train`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const ra=document.getElementById('servantResultArea');if(ra){ra.style.display='block';ra.innerHTML=d.message||'训练完成';}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ 训练成功');}catch(e){showToast('❌ 操作失败');}}
+async function trainServant(name){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/train`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const msg=d.message||'训练完成';showInteractFeedback(msg,name);setInteractResult('servantResultArea',msg);const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());}catch(e){showToast('❌ 操作失败');}}
 async function dismissServant(name){if(!playerId)return;if(!confirm(`确定要遣散 ${name} 吗？`))return;try{const r=await myFetch(`${API_BASE}/api/servant/dismiss`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());closeModal();showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
 async function hireServant(type){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/hire`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,type:type})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
 
