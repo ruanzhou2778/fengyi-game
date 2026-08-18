@@ -613,30 +613,62 @@ def can_npc_get_pregnant(npc):
     return True
 
 def npc_conception_chance(npc):
+    """NPC 每月受孕概率（仅在月初统一检测）。"""
     fertility = npc.get("fertility", 50)
     health = npc.get("attributes", {}).get("健康", 50)
-    return fertility / 100.0 * 0.12 + max(0, (health - 50) / 250.0)
+    return fertility / 100.0 * 0.035 + max(0, (health - 50) / 1200.0)
 
-def player_conception_chance(base=0.18, game_state=None):
+def monthly_player_conception_chance(game_state):
+    """玩家每月受孕概率，取决于当月承宠次数与属性。"""
     if not game_state or game_state.is_pregnant:
+        return 0
+    intimacy = getattr(game_state, "monthly_intimacy", 0)
+    if intimacy <= 0:
         return 0
     favor = game_state.attributes.get("宠爱", 30)
     health = game_state.attributes.get("健康", 50)
-    chance = base + favor / 500 + max(0, (health - 50) / 500)
-    return min(0.35, chance)
+    chance = 0.025 + intimacy * 0.006 + favor / 1500 + max(0, (health - 50) / 1500)
+    return min(0.08, chance)
 
-def try_player_conception(game_state, base_chance=0.18, source="翻牌"):
+def record_player_intimacy(game_state, weight=1):
     if game_state.is_pregnant:
-        return None
-    chance = player_conception_chance(base_chance, game_state)
-    if random.random() >= chance:
-        return None
+        return
+    game_state.monthly_intimacy = min(6, getattr(game_state, "monthly_intimacy", 0) + weight)
+
+def apply_player_pregnancy(game_state, source="月末诊脉"):
     game_state.is_pregnant = True
     game_state.pregnancy_month = 0
+    game_state.monthly_intimacy = 0
     game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + 20)
     game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 10)
     game_state.add_memory(f"被诊断出怀孕（{source}）")
-    return f"🤰 你有喜了！（{source}）皇帝龙颜大悦，宠爱+20，威望+10"
+    return f"🤰 太医请脉，你有喜了！（{source}）皇帝龙颜大悦，宠爱+20，威望+10"
+
+def run_monthly_conception_checks(game_state):
+    """每月初统一检测玩家与 NPC 是否受孕。"""
+    player_msg = None
+    npc_events = []
+    if not game_state.is_pregnant:
+        chance = monthly_player_conception_chance(game_state)
+        if chance > 0 and random.random() < chance:
+            player_msg = apply_player_pregnancy(game_state, "月末诊脉")
+        game_state.monthly_intimacy = 0
+    else:
+        game_state.monthly_intimacy = 0
+    for name, npc in game_state.npcs.items():
+        if name == game_state.name or name == "太后" or npc.get("rank") == "皇后":
+            continue
+        if npc.get("is_pregnant", False):
+            continue
+        if can_npc_get_pregnant(npc) and random.random() < npc_conception_chance(npc):
+            npc["is_pregnant"] = True
+            npc["pregnancy_month"] = 0
+            npc_events.append(f"{name} 被诊出有喜！")
+            npc["pregnancy_bonus"] = {"宠爱": random.randint(5, 12), "威望": random.randint(3, 8), "健康": random.randint(-3, 3)}
+            for attr, bonus in npc["pregnancy_bonus"].items():
+                if attr in npc["attributes"]:
+                    npc["attributes"][attr] = max(0, min(100, npc["attributes"][attr] + bonus))
+    return player_msg, npc_events
 
 def check_player_miscarriage(game_state):
     """孕期 3/6/9 月检查小产，返回消息或 None。"""
@@ -699,14 +731,6 @@ def process_npc_pregnancy(game_state):
                                 birth_events.append(f"  {name} 母凭子贵，晋升为 {next_rank}！")
                     npc["attributes"]["宠爱"] = min(100, npc["attributes"].get("宠爱", 0) + 12)
                     npc["attributes"]["威望"] = min(100, npc["attributes"].get("威望", 0) + 8)
-        elif can_npc_get_pregnant(npc) and random.random() < npc_conception_chance(npc):
-            npc["is_pregnant"] = True
-            npc["pregnancy_month"] = 0
-            pregnancy_events.append(f"{name} 被诊出有喜！")
-            npc["pregnancy_bonus"] = {"宠爱": random.randint(5,12), "威望": random.randint(3,8), "健康": random.randint(-3,3)}
-            for attr, bonus in npc["pregnancy_bonus"].items():
-                if attr in npc["attributes"]:
-                    npc["attributes"][attr] = max(0, min(100, npc["attributes"][attr] + bonus))
     return pregnancy_events, birth_events
 
 def update_npc_children_growth(game_state):
@@ -1250,13 +1274,10 @@ def emperor_interact():
             narration += "一切如常。"
     game_state.add_memory(f"皇帝{act['desc']}，{narration}")
     game_state.add_attr_change(changes, f"皇帝{act['desc']}")
-    pregnancy_msg = None
-    conception_rates = {'serve_tea': 0.05, 'discuss': 0.08, 'recite_poem': 0.12, 'ask_reward': 0.03}
-    if action in conception_rates:
-        pregnancy_msg = try_player_conception(game_state, conception_rates[action], f"皇帝{act['desc']}")
-        if pregnancy_msg:
-            narration = f"{narration.rstrip('。')}。{pregnancy_msg}"
-    return jsonify({"success": True, "narration": narration, "effects": changes, "reward": reward_info, "pregnancy": pregnancy_msg, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "attributes": game_state.attributes, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
+    intimacy_weights = {'serve_tea': 1, 'discuss': 1, 'recite_poem': 2, 'ask_reward': 1}
+    if action in intimacy_weights:
+        record_player_intimacy(game_state, intimacy_weights[action])
+    return jsonify({"success": True, "narration": narration, "effects": changes, "reward": reward_info, "pregnancy": None, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "attributes": game_state.attributes, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
 @app.route('/api/dowager/interact', methods=['POST'])
 def dowager_interact():
@@ -1383,8 +1404,8 @@ def emperor_flip():
         if chosen in game_state.relationships:
             game_state.relationships[chosen]["好感"] = min(100, game_state.relationships[chosen]["好感"] + random.randint(5, 15))
         if chosen == game_state.name and not game_state.is_pregnant:
-            conception_msg = try_player_conception(game_state, 0.18, "翻牌")
-            pregnancy_msg = conception_msg or "翻牌后并未有孕，继续努力"
+            record_player_intimacy(game_state, 3)
+            pregnancy_msg = "翻牌承宠，月末太医请脉方知有无身孕"
     
     reward_info = None
     if random.random() < 0.30:
@@ -1427,7 +1448,9 @@ def next_period():
     api_config = get_user_api_config(request, player_id)
 
     # ---- 时间推进 ----
+    old_month, old_year = game_state.month, game_state.year
     game_state.advance_calendar()
+    month_changed = game_state.month != old_month or game_state.year != old_year
     game_state.reset_actions()
     game_state.current_time = "卯时"
 
@@ -1537,8 +1560,17 @@ def next_period():
                 intelligence.append(f"👑 皇帝前来探望孕中的你，宠爱+{favor_gain}，健康+{health_gain}")
                 game_state.add_memory(f"皇帝探望，宠爱+{favor_gain}，健康+{health_gain}")
 
-    # ---- NPC怀孕、子嗣成长 ----
-    pregnancy_events, birth_events = process_npc_pregnancy(game_state)
+    # ---- 每月初统一检测受孕 ----
+    monthly_npc_conceptions = []
+    if month_changed:
+        monthly_player_msg, monthly_npc_conceptions = run_monthly_conception_checks(game_state)
+        if monthly_player_msg:
+            pregnancy_update = monthly_player_msg
+
+    # ---- NPC怀孕进展、子嗣成长 ----
+    pregnancy_events = list(monthly_npc_conceptions)
+    pregnancy_progress, birth_events = process_npc_pregnancy(game_state)
+    pregnancy_events.extend(pregnancy_progress)
     if pregnancy_events:
         for msg in pregnancy_events:
             game_state.add_memory(msg)

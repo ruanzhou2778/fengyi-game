@@ -119,6 +119,7 @@ class GameState:
         self.custom_prompt = ""
         self.is_pregnant = False
         self.pregnancy_month = 0
+        self.monthly_intimacy = 0
         self.children = []
         self.has_children = False
         self.rivalries = {}
@@ -282,6 +283,7 @@ class GameState:
             "servants": [s.to_dict() for s in self.get_active_servants()],
             "is_pregnant": self.is_pregnant,
             "pregnancy_month": self.pregnancy_month,
+            "monthly_intimacy": getattr(self, "monthly_intimacy", 0),
             "children": self.children,
             "has_children": self.has_children,
             "rivalries": self.rivalries,
@@ -349,6 +351,7 @@ class GameState:
             game_state.max_servants = 6 + game_state.rank.value // 2
             game_state.is_pregnant = data.get("is_pregnant", False)
             game_state.pregnancy_month = data.get("pregnancy_month", 0)
+            game_state.monthly_intimacy = data.get("monthly_intimacy", 0)
             game_state.children = data.get("children", [])
             game_state.has_children = data.get("has_children", False)
             game_state.rivalries = data.get("rivalries", {})
