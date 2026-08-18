@@ -137,7 +137,8 @@ class GameState:
         # 晋升事件标记
         self._pending_promotion = None
         self._promotion_fail_count = 0
-        self._promotion_done = False  # 本次周期晋升标志
+        self._promotion_done = False  # 本旬晋升标志
+        self.scandal_strikes = 0  # 宫斗丑闻累积，满则更易降位
         self.last_duel_period = None
         self._active_duel = None
 
@@ -292,6 +293,7 @@ class GameState:
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
             "last_duel_period": getattr(self, "last_duel_period", None),
+            "scandal_strikes": getattr(self, "scandal_strikes", 0),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -364,6 +366,7 @@ class GameState:
             game_state._pending_promotion = None
             game_state._promotion_fail_count = data.get("_promotion_fail_count", 0)
             game_state._promotion_done = data.get("_promotion_done", False)
+            game_state.scandal_strikes = data.get("scandal_strikes", 0)
             storyline_value = data.get("storyline", "主线")
             for sl in Storyline:
                 if sl.value == storyline_value:

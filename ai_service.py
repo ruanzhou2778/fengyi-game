@@ -524,7 +524,7 @@ def _call_period_events_ai(client, model, npc_list, children_hint, pregnant_hint
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         temperature=0.75 if json_mode else 0.85,
         max_tokens=600,
-        timeout=25,
+        timeout=12,
         **kwargs,
     )
     text = (response.choices[0].message.content or "").strip()
@@ -560,7 +560,7 @@ def generate_period_events(game_state, npc_names=None, api_key=None, base_url=No
     ai_called = False
     client = get_openai_client(api_key, base_url)
 
-    for attempt, use_json in enumerate((True, False)):
+    for attempt, use_json in enumerate((True,)):
         try:
             print(f"📌 generate_period_events: 调用 AI model={model}, base={base_url}, json={use_json}, attempt={attempt + 1}")
             parsed, _raw_text = _call_period_events_ai(
@@ -574,8 +574,7 @@ def generate_period_events(game_state, npc_names=None, api_key=None, base_url=No
             print(f"⚠️ generate_period_events: 第 {attempt + 1} 次解析仅 {ai_parsed_count} 条，重试…")
         except Exception as e:
             print(f"❌ generate_period_events 第 {attempt + 1} 次失败: {e}")
-            if attempt == 1:
-                break
+            break
 
     used_fallback = False
     if len(ai_events) < target_count:

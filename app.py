@@ -131,6 +131,8 @@ def restore_session_from_file(player_id, slot_name='default'):
         if not hasattr(game_state, '_pending_promotion'):
             game_state._pending_promotion = None
         game_state._promotion_done = False
+        if not hasattr(game_state, 'scandal_strikes'):
+            game_state.scandal_strikes = 0
         sessions[player_id] = game_state
         return game_state
     except Exception as e:
@@ -186,30 +188,104 @@ def restore_sessions_on_startup():
     if restored:
         print(f"[ok] restored {restored} sessions from saves")
 
-RANK_ORDER = ["更衣", "官女子", "答应", "常在", "贵人", "才人", "美人", "婕妤", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
+RANK_ORDER = ["宫女", "秀女", "答应", "常在", "贵人", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
 RANK_LEVELS = {name: i for i, name in enumerate(RANK_ORDER)}
 
 RANK_BONUS = {
-    "更衣": {"容貌": 0, "才情": 0, "心计": 0, "威望": 0},
-    "官女子": {"容貌": 2, "才情": 2, "心计": 2, "威望": 0},
+    "宫女": {"容貌": 0, "才情": 0, "心计": 0, "威望": 0},
+    "秀女": {"容貌": 2, "才情": 2, "心计": 2, "威望": 0},
     "答应": {"容貌": 5, "才情": 5, "心计": 3, "威望": 2},
     "常在": {"容貌": 8, "才情": 8, "心计": 5, "威望": 5},
     "贵人": {"容貌": 12, "才情": 12, "心计": 8, "威望": 8},
-    "才人": {"容貌": 15, "才情": 15, "心计": 10, "威望": 10},
-    "美人": {"容貌": 18, "才情": 18, "心计": 12, "威望": 12},
-    "婕妤": {"容貌": 22, "才情": 22, "心计": 15, "威望": 15},
-    "嫔": {"容貌": 26, "才情": 26, "心计": 18, "威望": 18},
-    "妃": {"容貌": 30, "才情": 30, "心计": 22, "威望": 22},
-    "贵妃": {"容貌": 35, "才情": 35, "心计": 26, "威望": 26},
-    "皇贵妃": {"容貌": 40, "才情": 40, "心计": 30, "威望": 30},
-    "皇后": {"容貌": 45, "才情": 45, "心计": 35, "威望": 35}
+    "嫔": {"容貌": 18, "才情": 18, "心计": 12, "威望": 12},
+    "妃": {"容貌": 24, "才情": 24, "心计": 16, "威望": 16},
+    "贵妃": {"容貌": 30, "才情": 30, "心计": 20, "威望": 20},
+    "皇贵妃": {"容貌": 36, "才情": 36, "心计": 24, "威望": 24},
+    "皇后": {"容貌": 42, "才情": 42, "心计": 28, "威望": 28},
 }
 
 RANK_LIMITS = {
     "皇后": 1, "皇贵妃": 1, "贵妃": 2, "妃": 4, "嫔": 6,
-    "婕妤": 6, "美人": 8, "才人": 8, "贵人": 10, "常在": 12,
-    "答应": 15, "官女子": 20, "更衣": 30
+    "贵人": 10, "常在": 12, "答应": 15, "秀女": 20, "宫女": 30,
 }
+
+PROMOTION_THRESHOLDS = {
+    "宫女": {"宠爱": 15, "威望": 10},
+    "秀女": {"宠爱": 25, "威望": 20, "才情": 20},
+    "答应": {"宠爱": 40, "威望": 35, "才情": 30, "心计": 25},
+    "常在": {"宠爱": 55, "威望": 50, "才情": 40, "心计": 35},
+    "贵人": {"宠爱": 75, "威望": 65, "才情": 50, "心计": 45},
+    "嫔": {"宠爱": 100, "威望": 85, "才情": 60, "心计": 55},
+    "妃": {"宠爱": 150, "威望": 110, "才情": 70, "心计": 65},
+    "贵妃": {"宠爱": 220, "威望": 140, "才情": 75, "心计": 70},
+    "皇贵妃": {"宠爱": 320, "威望": 180, "才情": 80, "心计": 75},
+}
+
+DEMOTION_SEVERE_CONFLICTS = {"陷害", "告发"}
+DEMOTION_MODERATE_CONFLICTS = {"谣言", "争辩", "争宠"}
+
+def get_prev_rank(rank_name):
+    if rank_name not in RANK_LEVELS:
+        return None
+    idx = RANK_LEVELS[rank_name]
+    if idx <= 0:
+        return None
+    return RANK_ORDER[idx - 1]
+
+def set_player_rank(game_state, rank_name):
+    try:
+        game_state.rank = Rank[rank_name]
+        return True
+    except KeyError:
+        return False
+
+def demote_player(game_state, reason=""):
+    """降位一级，返回降位消息或 None。"""
+    current = game_state.rank.name
+    if current == "宫女":
+        return None
+    prev = get_prev_rank(current)
+    if not prev or not set_player_rank(game_state, prev):
+        return None
+    if game_state.rank.value < Rank.嫔.value and game_state.nobletitle:
+        game_state.nobletitle = None
+    game_state._promotion_done = False
+    msg = f"📉 降位旨意：由「{current}」降为「{game_state.get_display_rank()}」"
+    if reason:
+        msg += f"。{reason}"
+    game_state.add_memory(msg)
+    game_state.scandal_strikes = 0
+    return msg
+
+def try_conflict_demotion(game_state, player_lost, conflict_type, opponent_name):
+    """宫斗失利时按概率降位。"""
+    if not player_lost:
+        return None
+    if game_state.rank.name == "宫女":
+        return None
+    favor = game_state.attributes.get("宠爱", 0)
+    prestige = game_state.attributes.get("威望", 0)
+    base_chance = 0.08
+    if conflict_type in DEMOTION_SEVERE_CONFLICTS:
+        base_chance = 0.30
+    elif conflict_type in DEMOTION_MODERATE_CONFLICTS:
+        base_chance = 0.16
+    if favor < 30:
+        base_chance += 0.12
+    elif favor < 60:
+        base_chance += 0.06
+    if prestige < 40:
+        base_chance += 0.05
+    if game_state.rivalries.get(opponent_name, 0) >= 30:
+        base_chance += 0.08
+    strikes = getattr(game_state, "scandal_strikes", 0)
+    if strikes >= 2:
+        base_chance += 0.18
+    if random.random() >= min(base_chance, 0.65):
+        game_state.scandal_strikes = strikes + 1
+        return None
+    reason = f"因「{conflict_type}」失利，{opponent_name}趁机弹劾"
+    return demote_player(game_state, reason)
 
 def get_rank_bonus(rank_name):
     return RANK_BONUS.get(rank_name, {"容貌": 0, "才情": 0, "心计": 0, "威望": 0})
@@ -273,11 +349,7 @@ def generate_reward(game_state, source="emperor"):
             idx = RANK_LEVELS[current_rank_name]
             if idx < len(RANK_ORDER) - 1:
                 next_rank = RANK_ORDER[idx + 1]
-                if can_promote_to_rank(game_state, next_rank):
-                    for rank_enum in Rank:
-                        if rank_enum.name == next_rank:
-                            game_state.rank = rank_enum
-                            break
+                if can_promote_to_rank(game_state, next_rank) and set_player_rank(game_state, next_rank):
                     return {"type": "位份", "name": game_state.get_display_rank(), "desc": f"晋封为「{game_state.get_display_rank()}」！", "silver": 0, "effects": {"宠爱": 10, "威望": 10}, "is_promotion": True}
         amount = random.randint(30, 80)
         return {"type": "银两", "name": f"白银{amount}两", "desc": f"赏赐白银{amount}两（暂未能晋封）", "silver": amount, "effects": {}}
@@ -316,7 +388,7 @@ CONFLICT_TYPES = {
     "争辩": {"desc": "当面与对手争辩", "effects": {"威望": (-5, 8), "心计": (3, 8), "宠爱": (-3, 5)}},
 }
 
-def generate_palace_conflict(game_state, initiator=None, target=None, api_key=None, api_base=None, api_model=None):
+def generate_palace_conflict(game_state, initiator=None, target=None, api_key=None, api_base=None, api_model=None, conflict_type=None):
     if initiator is None:
         all_names = [game_state.name] + list(game_state.npcs.keys())
         all_names = [n for n in all_names if n != "太后"]
@@ -328,7 +400,13 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     if not all_names:
         return None
     target = random.choice(all_names) if target is None else target
-    conflict_type = random.choice(list(CONFLICT_TYPES.keys()))
+    type_aliases = {"造谣": "谣言", "掌嘴": "争辩", "下毒": "陷害"}
+    if conflict_type:
+        conflict_type = type_aliases.get(conflict_type, conflict_type)
+    if conflict_type and conflict_type in CONFLICT_TYPES:
+        pass
+    else:
+        conflict_type = random.choice(list(CONFLICT_TYPES.keys()))
     conflict_info = CONFLICT_TYPES[conflict_type]
     
     initiator_rank = game_state.rank.name if initiator == game_state.name else game_state.npcs.get(initiator, {}).get("rank", "妃嫔")
@@ -373,7 +451,7 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
                     ],
                     temperature=0.7,
                     max_tokens=800,
-                    timeout=15
+                    timeout=10
                 )
                 narration = response.choices[0].message.content.strip()
     except Exception as e:
@@ -418,7 +496,18 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
             game_state.rivalries[initiator] += 10
         else:
             game_state.rivalries[initiator] = 15
-    
+
+    demotion_message = None
+    player_lost = (initiator == game_state.name and not initiator_win) or (target == game_state.name and initiator_win)
+    if player_lost:
+        opponent = target if initiator == game_state.name else initiator
+        demotion_message = try_conflict_demotion(game_state, True, conflict_type, opponent)
+        if demotion_message:
+            game_state.attributes["宠爱"] = max(0, game_state.attributes.get("宠爱", 0) - random.randint(8, 18))
+            game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - random.randint(5, 12))
+    elif initiator == game_state.name and initiator_win:
+        game_state.scandal_strikes = max(0, getattr(game_state, "scandal_strikes", 0) - 1)
+
     return {
         "type": conflict_type,
         "initiator": initiator,
@@ -426,7 +515,10 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         "initiator_win": initiator_win,
         "narration": narration,
         "effects": effects,
-        "rivalries": game_state.rivalries
+        "rivalries": game_state.rivalries,
+        "demotion_message": demotion_message,
+        "display_rank": game_state.get_display_rank(),
+        "rank": game_state.rank.name,
     }
 
 # ============================================================
@@ -448,7 +540,7 @@ PERSONALITIES = [
 ]
 
 def generate_npc_rank():
-    rank_weights = {"更衣":20,"官女子":18,"答应":15,"常在":12,"贵人":10,"才人":8,"美人":6,"婕妤":4,"嫔":3,"妃":2,"贵妃":1,"皇贵妃":0,"皇后":0}
+    rank_weights = {"宫女": 18, "秀女": 16, "答应": 14, "常在": 12, "贵人": 10, "嫔": 6, "妃": 3, "贵妃": 1, "皇贵妃": 0, "皇后": 0}
     weights = [rank_weights.get(r, 0) for r in RANK_ORDER]
     return random.choices(RANK_ORDER, weights=weights)[0]
 
@@ -537,12 +629,50 @@ def generate_all_npcs(count=10):
 PREGNANCY_STEP = 10 / 30
 CHILD_AGE_STEP = 1 / 12
 EDUCATION_TRAITS = ["文才出众", "武艺超群", "聪慧过人", "品行端正", "琴棋书画"]
+CHILD_TALENT_LABELS = ["平平无奇", "伶俐可爱", "聪慧过人", "天资卓绝", "龙凤之姿"]
+CHILD_PERSONALITIES = ["活泼好动", "安静乖巧", "聪慧机敏", "倔强叛逆", "温顺可人"]
+CHILD_MOODS = ["开心", "平静", "思念", "兴奋", "闷闷不乐"]
+CHILD_MOOD_EMOJI = {"开心": "😊", "平静": "😌", "思念": "🥺", "兴奋": "🤩", "闷闷不乐": "😔", "生病": "🤒"}
+STORY_THEMES = ["嫦娥奔月", "武松打虎", "孔融让梨", "司马光砸缸", "精卫填海", "牛郎织女"]
 
 def newborn_trait(gender):
     return "🍼 襁褓" if gender == "皇子" else "🎀 襁褓"
 
+def child_mood_emoji(mood):
+    return CHILD_MOOD_EMOJI.get(mood, "😌")
+
+def add_child_event(child, text):
+    events = child.setdefault("recent_events", [])
+    events.insert(0, text)
+    child["recent_events"] = events[:5]
+
+def ensure_child_fields(child):
+    """补全子嗣字段（兼容旧存档）。"""
+    child.setdefault("affection", random.randint(20, 50))
+    child.setdefault("talent", random.randint(30, 70))
+    child.setdefault("health", random.randint(65, 90))
+    child.setdefault("wit", random.randint(25, 60))
+    child.setdefault("emperor_favor", random.randint(15, 40))
+    child.setdefault("tutor_level", 0)
+    child.setdefault("personality", random.choice(CHILD_PERSONALITIES))
+    child.setdefault("mood", random.choice(["平静", "开心"]))
+    child.setdefault("recent_events", [])
+    return child
+
+def child_talent_label(talent):
+    t = int(talent or 50)
+    if t >= 85:
+        return CHILD_TALENT_LABELS[4]
+    if t >= 70:
+        return CHILD_TALENT_LABELS[3]
+    if t >= 55:
+        return CHILD_TALENT_LABELS[2]
+    if t >= 40:
+        return CHILD_TALENT_LABELS[1]
+    return CHILD_TALENT_LABELS[0]
+
 def create_newborn_child(gender, name, game_state):
-    return {
+    child = {
         "name": name,
         "gender": gender,
         "age": 0,
@@ -550,7 +680,17 @@ def create_newborn_child(gender, name, game_state):
         "birth_month": game_state.month,
         "birth_year": game_state.year,
         "trait": newborn_trait(gender),
+        "affection": random.randint(35, 55),
+        "talent": random.randint(40, 75),
+        "health": random.randint(70, 95),
+        "wit": random.randint(20, 50),
+        "emperor_favor": random.randint(20, 45),
+        "tutor_level": 0,
+        "personality": random.choice(CHILD_PERSONALITIES),
+        "mood": random.choice(["平静", "开心"]),
+        "recent_events": [],
     }
+    return child
 
 def process_child_milestones(child, prefix, game_state=None):
     """处理子嗣成长节点，返回事件消息列表。game_state 不为 None 时为玩家子嗣，会发放属性奖励。"""
@@ -579,8 +719,138 @@ def process_child_milestones(child, prefix, game_state=None):
         child["six_years"] = True
         child["education"] = random.choice(EDUCATION_TRAITS)
         child["trait"] = f"📚 {child['education']}"
+        child["wit"] = min(100, child.get("wit", 30) + random.randint(5, 12))
         events.append(f"📚 {prefix}{gender} {child_name} 开始启蒙，{child['education']}！")
+    elif age_years == 8 and not child.get("eight_years", False):
+        child["eight_years"] = True
+        child["talent"] = min(100, child.get("talent", 50) + random.randint(3, 8))
+        events.append(f"🎋 {prefix}{gender} {child_name} 八岁进学，{child_talent_label(child['talent'])}！")
+        if game_state:
+            game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes["威望"] + 3)
+    elif age_years == 10 and not child.get("ten_years", False):
+        child["ten_years"] = True
+        if gender == "皇子":
+            child["title"] = random.choice(["雍王", "晋王", "楚王", "齐王"])
+            events.append(f"🏛️ {prefix}皇子 {child_name} 十岁开府，封 {child['title']}！")
+            child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + random.randint(5, 12))
+        else:
+            events.append(f"🌸 {prefix}公主 {child_name} 十岁及笄预备，宫中瞩目。")
+            child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + random.randint(3, 8))
+        if game_state:
+            game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes["宠爱"] + 5)
+    elif age_years == 12 and not child.get("twelve_years", False):
+        child["twelve_years"] = True
+        boost = random.randint(8, 15)
+        child["wit"] = min(100, child.get("wit", 40) + boost)
+        if gender == "皇子" and child.get("emperor_favor", 0) >= 60:
+            events.append(f"📜 朝臣奏称 {child_name} 聪慧贤德，有储君之相！")
+            if game_state:
+                game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes["威望"] + 12)
+        else:
+            events.append(f"✨ {prefix}{gender} {child_name} 十二岁才名初显，学识精进！")
     return events
+
+def process_player_child_events(game_state):
+    """转旬时玩家子嗣随机动态。"""
+    events = []
+    children = game_state.children
+    for child in children:
+        ensure_child_fields(child)
+        age = int(child.get("age", 0))
+        name = child.get("name", "皇嗣")
+        gender = child.get("gender", "")
+        # 心情自然变化
+        if random.random() < 0.15:
+            if child.get("health", 70) < 50:
+                child["mood"] = "生病"
+            elif child.get("affection", 30) < 35:
+                child["mood"] = random.choice(["思念", "闷闷不乐"])
+            else:
+                child["mood"] = random.choice(["开心", "平静", "兴奋"])
+        if age < 1 or random.random() > 0.28:
+            continue
+        roll = random.random()
+        if roll < 0.22:
+            gain = random.randint(3, 8)
+            child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + gain)
+            child["mood"] = "兴奋"
+            msg = f"👑 皇帝夸赞{name}，恩宠+{gain}"
+            events.append(msg)
+            add_child_event(child, msg)
+            game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + 2)
+        elif roll < 0.38:
+            loss = random.randint(2, 6)
+            child["health"] = max(20, child.get("health", 70) - loss)
+            child["mood"] = "生病"
+            msg = f"🤒 {name} 略感不适，健康-{loss}，需多加照料"
+            events.append(msg)
+            add_child_event(child, msg)
+        elif roll < 0.55:
+            gain = random.randint(2, 5)
+            child["affection"] = min(100, child.get("affection", 30) + gain)
+            child["mood"] = "开心"
+            msg = f"💕 {name} 近日格外依恋你，亲密度+{gain}"
+            events.append(msg)
+            add_child_event(child, msg)
+        elif roll < 0.68 and gender == "皇子":
+            gain = random.randint(2, 6)
+            child["wit"] = min(100, child.get("wit", 40) + gain)
+            msg = f"📖 师傅称赞{name}进学刻苦，学识+{gain}"
+            events.append(msg)
+            add_child_event(child, msg)
+        elif roll < 0.78 and len(children) >= 2:
+            sibling = random.choice([c for c in children if c is not child])
+            sib_name = sibling.get("name", "手足")
+            if random.random() < 0.5:
+                gain = random.randint(2, 5)
+                child["affection"] = min(100, child.get("affection", 30) + gain)
+                sibling["affection"] = min(100, sibling.get("affection", 30) + gain)
+                msg = f"👫 {name}与{sib_name}一同嬉戏，手足情深"
+            else:
+                loss = random.randint(1, 3)
+                child["health"] = max(25, child.get("health", 70) - loss)
+                child["mood"] = "闷闷不乐"
+                msg = f"😤 {name}与{sib_name}争抢玩具，闹了小别扭"
+            events.append(msg)
+            add_child_event(child, msg)
+        elif roll < 0.88 and child.get("personality") == "聪慧机敏":
+            gain = random.randint(3, 7)
+            child["wit"] = min(100, child.get("wit", 40) + gain)
+            msg = f"💡 {name}忽发奇问，令太傅称奇，学识+{gain}"
+            events.append(msg)
+            add_child_event(child, msg)
+        else:
+            gain = random.randint(1, 4)
+            child["talent"] = min(100, child.get("talent", 50) + gain)
+            msg = f"🌟 {name} 展露{child_talent_label(child['talent'])}之姿"
+            events.append(msg)
+            add_child_event(child, msg)
+    return events
+
+def maybe_child_bonus_event(game_state, child, child_name):
+    """互动时小概率触发额外事件，返回附加叙述或空串。"""
+    if random.random() > 0.12:
+        return ""
+    roll = random.random()
+    if roll < 0.35:
+        gain = random.randint(4, 10)
+        child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + gain)
+        pf = random.randint(2, 5)
+        game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + pf)
+        msg = f"皇帝恰好路过，见{child_name}乖巧可爱，龙颜大悦，圣宠+{gain}"
+        add_child_event(child, f"👑 {msg}")
+        return f"【意外之喜】{msg}，你的宠爱+{pf}"
+    if roll < 0.6:
+        gain = random.randint(2, 6)
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + gain)
+        msg = f"太后听闻你悉心教养{child_name}，特赐褒奖"
+        add_child_event(child, f"👵 {msg}")
+        return f"【太后恩典】{msg}，威望+{gain}"
+    gain = random.randint(3, 8)
+    child["affection"] = min(100, child.get("affection", 30) + gain)
+    msg = f"{child_name}扑进你怀中，一声「母妃」叫得你心都化了"
+    add_child_event(child, f"💕 {msg}")
+    return f"【温情时刻】{msg}，亲密度+{gain}"
 
 def serialize_npcs_for_client(game_state):
     result = {}
@@ -862,7 +1132,7 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, api_
                     temperature=0.8,
                     max_tokens=800,
                     top_p=0.95,
-                    timeout=15
+                    timeout=10
                 )
                 narration = response.choices[0].message.content.strip()
                 print(f"✅ AI 返回原始内容长度: {len(narration)}")
@@ -923,7 +1193,6 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, api_
 #  晋升条件（真实属性阈值 + 防重复）
 # ============================================================
 def check_promotion_condition(game_state):
-    # 防止本次周期内重复晋升
     if getattr(game_state, "_promotion_done", False):
         return False
     if getattr(game_state, "_pending_promotion", None) is not None:
@@ -931,28 +1200,14 @@ def check_promotion_condition(game_state):
     current_rank_name = game_state.rank.name
     if current_rank_name == "皇后":
         return False
-    rank_thresholds = {
-        "更衣": {"宠爱": 10, "威望": 10},
-        "官女子": {"宠爱": 20, "威望": 20},
-        "答应": {"宠爱": 40, "威望": 30, "才情": 30, "心计": 25},
-        "常在": {"宠爱": 60, "威望": 40, "才情": 40, "心计": 35},
-        "贵人": {"宠爱": 80, "威望": 50, "才情": 50, "心计": 45},
-        "才人": {"宠爱": 100, "威望": 60, "才情": 55, "心计": 50},
-        "美人": {"宠爱": 120, "威望": 70, "才情": 60, "心计": 55},
-        "婕妤": {"宠爱": 150, "威望": 85, "才情": 65, "心计": 60},
-        "嫔": {"宠爱": 200, "威望": 100, "才情": 70, "心计": 65},
-        "妃": {"宠爱": 250, "威望": 120, "才情": 75, "心计": 70},
-        "贵妃": {"宠爱": 300, "威望": 140, "才情": 80, "心计": 75},
-        "皇贵妃": {"宠爱": 400, "威望": 160, "才情": 85, "心计": 80},
-    }
-    if current_rank_name in rank_thresholds:
-        threshold = rank_thresholds[current_rank_name]
-        attrs = game_state.attributes
-        for attr, value in threshold.items():
-            if attrs.get(attr, 0) < value:
-                return False
-        return True
-    return False
+    if current_rank_name not in PROMOTION_THRESHOLDS:
+        return False
+    threshold = PROMOTION_THRESHOLDS[current_rank_name]
+    attrs = game_state.attributes
+    for attr, value in threshold.items():
+        if attrs.get(attr, 0) < value:
+            return False
+    return True
 
 # ============================================================
 #  晋升事件（废弃，保留占位）
@@ -994,23 +1249,43 @@ def get_flip_candidates(game_state):
 #  Flask 路由
 # ============================================================
 
+def is_valid_api_key(key):
+    if not key or not str(key).strip():
+        return False
+    k = str(key).strip()
+    if k.lower() in ('sk-xxx', 'sk-xx', 'xxx', 'your-api-key', 'none'):
+        return False
+    if len(k) < 20:
+        return False
+    return True
+
+
 def get_user_api_config(request, player_id=None):
     config = {}
-    config['api_key'] = request.headers.get('X-API-Key') or request.headers.get('Authorization', '').replace('Bearer ', '')
+    header_key = request.headers.get('X-API-Key')
+    if header_key is None:
+        header_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+    config['api_key'] = header_key or ''
     config['api_base'] = request.headers.get('X-API-Base') or 'https://cn.jixiangai.xyz/v1'
     config['api_model'] = request.headers.get('X-API-Model') or 'Qwen/Qwen2.5-72B-Instruct'
     if request.is_json:
         data = request.get_json(silent=True) or {}
-        config['api_key'] = config['api_key'] or data.get('api_key', '')
+        if data.get('api_key'):
+            config['api_key'] = data.get('api_key', '')
         config['api_base'] = config['api_base'] or data.get('api_base', 'https://cn.jixiangai.xyz/v1')
         config['api_model'] = config['api_model'] or data.get('api_model', 'Qwen/Qwen2.5-72B-Instruct')
     if player_id and player_id in user_configs:
         stored = user_configs[player_id]
-        config['api_key'] = config['api_key'] or stored.get('api_key', '')
+        if not is_valid_api_key(config['api_key']):
+            config['api_key'] = stored.get('api_key', '')
         config['api_base'] = config['api_base'] or stored.get('api_base', 'https://cn.jixiangai.xyz/v1')
         config['api_model'] = config['api_model'] or stored.get('api_model', 'Qwen/Qwen2.5-72B-Instruct')
-    if not config['api_key']:
-        config['api_key'] = os.getenv('OPENAI_API_KEY', '')
+    # 浏览器已发送 X-API-Key（含空值）时，不偷偷用服务器 .env，避免全员走慢速 AI
+    if request.headers.get('X-API-Key') is not None:
+        config['api_key'] = config['api_key'] if is_valid_api_key(config['api_key']) else ''
+    elif not is_valid_api_key(config['api_key']):
+        env_key = os.getenv('OPENAI_API_KEY', '')
+        config['api_key'] = env_key if is_valid_api_key(env_key) else ''
     if not config['api_base']:
         config['api_base'] = os.getenv('OPENAI_BASE_URL', 'https://cn.jixiangai.xyz/v1')
     return config
@@ -1453,6 +1728,7 @@ def next_period():
     month_changed = game_state.month != old_month or game_state.year != old_year
     game_state.reset_actions()
     game_state.current_time = "卯时"
+    game_state._promotion_done = False
 
     intelligence = []
 
@@ -1534,11 +1810,11 @@ def next_period():
                     if idx < len(RANK_ORDER) - 2 and random.random() < 0.5:
                         next_rank_name = RANK_ORDER[idx + 1]
                         if can_promote_to_rank(game_state, next_rank_name):
-                            for rank_enum in Rank:
-                                if rank_enum.name == next_rank_name:
-                                    game_state.rank = rank_enum
-                                    pregnancy_update += f" 母凭子贵，晋升为「{game_state.get_display_rank()}」！"
-                                    break
+                            if set_player_rank(game_state, next_rank_name):
+                                title_msg = game_state.grant_nobletitle()
+                                pregnancy_update += f" 母凭子贵，晋升为「{game_state.get_display_rank()}」！"
+                                if title_msg:
+                                    pregnancy_update += f" {title_msg}"
         elif game_state.is_pregnant:
             month = int(game_state.pregnancy_month)
             if month == 2:
@@ -1591,14 +1867,18 @@ def next_period():
 
     prince_events = []
     for child in game_state.children:
+        ensure_child_fields(child)
         child["age"] = child.get("age", 0) + CHILD_AGE_STEP
         prince_events.extend(process_child_milestones(child, "你的", game_state))
+    child_life_events = process_player_child_events(game_state)
+    prince_events.extend(child_life_events)
     if prince_events:
         for evt in prince_events:
             game_state.add_memory(evt)
 
-    # ===== 晋升触发（直接晋升，防重复） =====
+    # ===== 晋升触发（转旬时检测） =====
     promotion_message = None
+    demotion_message = None
     if check_promotion_condition(game_state):
         current_rank_name = game_state.rank.name
         if current_rank_name in RANK_LEVELS:
@@ -1606,20 +1886,29 @@ def next_period():
             if idx < len(RANK_ORDER) - 1:
                 next_rank_name = RANK_ORDER[idx + 1]
                 if can_promote_to_rank(game_state, next_rank_name):
-                    # 直接通过枚举名赋值
-                    game_state.rank = Rank[next_rank_name]
-                    title_msg = game_state.grant_nobletitle()
-                    promotion_msg = f"📜 圣旨到！恭喜晋升为「{game_state.get_display_rank()}」！"
-                    if title_msg:
-                        promotion_msg += f"\n{title_msg}"
-                    promotion_message = promotion_msg
-                    game_state.add_memory(f"晋升为{game_state.get_display_rank()}")
-                    game_state.story_flags.append("晋升成功")
-                    game_state._promotion_done = True
+                    if set_player_rank(game_state, next_rank_name):
+                        title_msg = game_state.grant_nobletitle()
+                        promotion_msg = f"📜 圣旨到！恭喜晋升为「{game_state.get_display_rank()}」！"
+                        if title_msg:
+                            promotion_msg += f"\n{title_msg}"
+                        promotion_message = promotion_msg
+                        game_state.add_memory(f"晋升为{game_state.get_display_rank()}")
+                        game_state.story_flags.append("晋升成功")
+                        game_state._promotion_done = True
+                    else:
+                        promotion_message = f"⚠️ 晋封「{next_rank_name}」失败，请稍后再试。"
                 else:
                     promotion_message = f"⚠️ {next_rank_name} 人数已满，暂无法晋升。"
             else:
                 promotion_message = "你已位极人臣，无法再晋升。"
+
+    # ===== 圣宠尽失时可能被降位 =====
+    if not demotion_message and game_state.rank.name not in ("宫女", "秀女"):
+        favor = game_state.attributes.get("宠爱", 0)
+        if favor < 12 and random.random() < 0.12:
+            demotion_message = demote_player(game_state, "圣宠尽失，朝野议论，被迫降位")
+            if demotion_message:
+                game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - random.randint(8, 15))
 
     # ---- NPC晋升 ----
     other_promotions = []
@@ -1703,6 +1992,8 @@ def next_period():
         "remaining_actions": game_state.remaining_actions,
         "max_actions": game_state.max_actions,
         "promotion_message": promotion_message,
+        "demotion_message": demotion_message,
+        "rank": game_state.rank.name,
         "other_promotions": other_promotions,
         "new_concubine": new_concubine,
         "pregnancy_update": pregnancy_update,
@@ -2090,6 +2381,8 @@ def load_game():
         if not hasattr(game_state, '_pending_promotion'):
             game_state._pending_promotion = None
         game_state._promotion_done = False
+        if not hasattr(game_state, 'scandal_strikes'):
+            game_state.scandal_strikes = 0
         sessions[player_id] = game_state
         api_config = get_user_api_config(request, player_id)
         existing = user_configs.get(player_id, {})
@@ -2230,7 +2523,15 @@ def random_conflict():
     if not event:
         return jsonify({"error": "没有合适的宫斗对象"}), 400
     game_state.add_memory(f"宫斗事件：{event['narration'][:30]}...")
-    return jsonify({"success": True, "event": event, "attributes": game_state.attributes, "relationships": game_state.relationships, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
+    autosave_session(player_id)
+    return jsonify({
+        "success": True, "event": event,
+        "attributes": game_state.attributes, "relationships": game_state.relationships,
+        "rivalries": game_state.rivalries, "alliances": game_state.alliances,
+        "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions,
+        "demotion_message": event.get("demotion_message"),
+        "rank": game_state.rank.name, "display_rank": game_state.get_display_rank(),
+    })
 
 @app.route('/api/conflict/initiate', methods=['POST'])
 def initiate_conflict():
@@ -2249,12 +2550,20 @@ def initiate_conflict():
         return jsonify({"error": "目标不存在"}), 404
     if target == game_state.name:
         return jsonify({"error": "不能对自己发起宫斗"}), 400
-    event = generate_palace_conflict(game_state, game_state.name, target, api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'))
+    event = generate_palace_conflict(game_state, game_state.name, target, api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'), conflict_type)
     if not event:
         return jsonify({"error": "宫斗事件生成失败"}), 400
     event["type"] = conflict_type
     game_state.add_memory(f"主动宫斗：{event['narration'][:30]}...")
-    return jsonify({"success": True, "event": event, "attributes": game_state.attributes, "relationships": game_state.relationships, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
+    autosave_session(player_id)
+    return jsonify({
+        "success": True, "event": event,
+        "attributes": game_state.attributes, "relationships": game_state.relationships,
+        "rivalries": game_state.rivalries, "alliances": game_state.alliances,
+        "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions,
+        "demotion_message": event.get("demotion_message"),
+        "rank": game_state.rank.name, "display_rank": game_state.get_display_rank(),
+    })
 
 @app.route('/api/conflict/types', methods=['GET'])
 def get_conflict_types():
@@ -2368,7 +2677,9 @@ def child_interact():
     if child_index < 0 or child_index >= len(children):
         return jsonify({"error": "子嗣不存在"}), 404
     child = children[child_index]
+    ensure_child_fields(child)
     child_name = child.get("name", "未命名")
+    age = int(child.get("age", 0))
     narration = ""
     effects = {}
 
@@ -2381,13 +2692,51 @@ def child_interact():
         if not char:
             char = random.choice(CHILD_GIVEN_CHARS)
         child["given_name"] = char
+        child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + random.randint(3, 8))
         game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 3)
         effects = {"威望": 3}
-        narration = f"你为{child_name}赐字「{char}」，威望+3"
+        narration = f"你为{child_name}赐字「{char}」，威望+3，圣宠亦增"
+    elif action == "探望":
+        aff_gain = random.randint(4, 10)
+        health_gain = random.randint(1, 4)
+        child["affection"] = min(100, child.get("affection", 30) + aff_gain)
+        child["health"] = min(100, child.get("health", 70) + health_gain)
+        child["mood"] = "开心" if child.get("health", 70) < 60 else random.choice(["开心", "平静"])
+        effects = {"affection": aff_gain, "health": health_gain}
+        lines = [
+            f"你亲自探望{child_name}，母子情深，亲密度+{aff_gain}",
+            f"你陪{child_name}玩耍，孩童笑颜如花，亲密度+{aff_gain}",
+            f"你为{child_name}掖被盖毯，健康+{health_gain}，亲密度+{aff_gain}",
+        ]
+        narration = random.choice(lines)
+    elif action == "教导":
+        if age < 4:
+            return jsonify({"error": "年纪尚幼，还无法受教", "success": False}), 400
+        player_talent = game_state.attributes.get("才情", 50)
+        wit_gain = random.randint(3, 8) + player_talent // 25
+        talent_gain = random.randint(1, 4)
+        child["wit"] = min(100, child.get("wit", 40) + wit_gain)
+        child["talent"] = min(100, child.get("talent", 50) + talent_gain)
+        child["affection"] = min(100, child.get("affection", 30) + random.randint(2, 6))
+        child["mood"] = "闷闷不乐" if child.get("personality") == "倔强叛逆" and random.random() < 0.25 else "平静"
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 2)
+        effects = {"wit": wit_gain, "talent": talent_gain, "威望": 2}
+        narration = f"你亲自教导{child_name}，学识+{wit_gain}，天资+{talent_gain}，威望+2"
+    elif action == "请安":
+        if age < 3:
+            return jsonify({"error": "年纪太小，尚不能向皇帝请安", "success": False}), 400
+        favor_gain = random.randint(5, 14) + child.get("wit", 40) // 20
+        child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + favor_gain)
+        player_favor = random.randint(3, 8) + favor_gain // 5
+        game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + player_favor)
+        effects = {"emperor_favor": favor_gain, "宠爱": player_favor}
+        narration = f"你带{child_name}向皇帝请安，皇帝龙颜大悦，恩宠+{favor_gain}，你的宠爱+{player_favor}"
     elif action == "延师":
         if game_state.silver < 10:
             return jsonify({"error": "银两不足，延师需10两", "success": False}), 400
         child["tutor_level"] = child.get("tutor_level", 0) + 1
+        wit_gain = random.randint(4, 10)
+        child["wit"] = min(100, child.get("wit", 40) + wit_gain)
         if not child.get("education"):
             child["education"] = random.choice(EDUCATION_TRAITS)
             child["trait"] = f"📚 {child['education']}"
@@ -2398,22 +2747,112 @@ def child_interact():
                 child["trait"] = f"📚 {child['education']}"
         game_state.silver = max(0, game_state.silver - 10)
         game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 2)
-        effects = {"威望": 2, "silver": -10}
+        effects = {"wit": wit_gain, "威望": 2, "silver": -10}
         lvl = child.get("tutor_level", 1)
-        narration = f"你为{child_name}延请名师（第{lvl}次），耗费10银两，威望+2"
+        narration = f"你为{child_name}延请名师（第{lvl}次），学识+{wit_gain}，耗费10银两，威望+2"
     elif action == "赏赐":
         if game_state.silver < 5:
             return jsonify({"error": "银两不足，赏赐需5两", "success": False}), 400
         affection_gain = random.randint(5, 12)
-        child["affection"] = child.get("affection", 0) + affection_gain
+        talent_gain = random.randint(1, 3)
+        child["affection"] = min(100, child.get("affection", 0) + affection_gain)
+        child["talent"] = min(100, child.get("talent", 50) + talent_gain)
+        child["mood"] = "开心"
         game_state.silver = max(0, game_state.silver - 5)
         game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + 3)
-        effects = {"宠爱": 3, "silver": -5}
-        narration = f"你赏赐{child_name}珍宝，耗费5银两，宠爱+3，亲密度+{affection_gain}"
+        effects = {"宠爱": 3, "silver": -5, "talent": talent_gain}
+        narration = f"你赏赐{child_name}珍宝，耗费5银两，宠爱+3，亲密度+{affection_gain}，天资+{talent_gain}"
+    elif action == "讲故事":
+        if age < 2:
+            return jsonify({"error": "年纪尚幼，还听不懂故事", "success": False}), 400
+        theme = random.choice(STORY_THEMES)
+        aff_gain = random.randint(5, 10)
+        wit_gain = random.randint(1, 4) if age >= 4 else 0
+        child["affection"] = min(100, child.get("affection", 30) + aff_gain)
+        child["mood"] = "开心"
+        if wit_gain:
+            child["wit"] = min(100, child.get("wit", 40) + wit_gain)
+        personality = child.get("personality", "温顺可人")
+        lines = [
+            f"你讲「{theme}」给{child_name}听，{personality}的{child_name}听得入迷，亲密度+{aff_gain}",
+            f"{child_name}依偎在你膝头听「{theme}」，眼中闪着光，亲密度+{aff_gain}",
+            f"你轻声讲述「{theme}」，{child_name}咯咯笑着拍手，亲密度+{aff_gain}",
+        ]
+        narration = random.choice(lines)
+        if wit_gain:
+            narration += f"，学识+{wit_gain}"
+        effects = {"affection": aff_gain}
+        if wit_gain:
+            effects["wit"] = wit_gain
+    elif action == "玩耍":
+        if age < 1:
+            return jsonify({"error": "尚在襁褓，不宜嬉戏", "success": False}), 400
+        aff_gain = random.randint(6, 14)
+        health_gain = random.randint(0, 3)
+        child["affection"] = min(100, child.get("affection", 30) + aff_gain)
+        child["health"] = min(100, child.get("health", 70) + health_gain)
+        child["mood"] = random.choice(["开心", "兴奋"])
+        play_lines = [
+            f"你与{child_name}在院中捉迷藏，欢声笑语，亲密度+{aff_gain}",
+            f"你陪{child_name}放风筝，孩童笑颜如花，亲密度+{aff_gain}",
+            f"你与{child_name}堆雪人、掷雪球，其乐融融，亲密度+{aff_gain}",
+            f"你教{child_name}踢毽子，身手越发矫健，亲密度+{aff_gain}，健康+{health_gain}",
+        ]
+        narration = random.choice(play_lines)
+        effects = {"affection": aff_gain, "health": health_gain}
+    elif action == "祈福":
+        if game_state.silver < 8:
+            return jsonify({"error": "银两不足，祈福需8两", "success": False}), 400
+        health_gain = random.randint(8, 18)
+        child["health"] = min(100, child.get("health", 70) + health_gain)
+        child["mood"] = "平静"
+        game_state.silver = max(0, game_state.silver - 8)
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 2)
+        effects = {"health": health_gain, "silver": -8, "威望": 2}
+        blessing = random.choice(["平安符", "长命锁", "如意结", "辟邪玉"])
+        narration = f"你在佛前为{child_name}求得一{blessing}，祈福耗费8两，健康+{health_gain}，威望+2"
+    elif action == "习武":
+        if child.get("gender") != "皇子":
+            return jsonify({"error": "公主无需习武", "success": False}), 400
+        if age < 6:
+            return jsonify({"error": "年纪尚幼，不宜习武", "success": False}), 400
+        health_gain = random.randint(2, 6)
+        wit_gain = random.randint(2, 5)
+        talent_gain = random.randint(1, 3)
+        child["health"] = min(100, child.get("health", 70) + health_gain)
+        child["wit"] = min(100, child.get("wit", 40) + wit_gain)
+        child["talent"] = min(100, child.get("talent", 50) + talent_gain)
+        child["mood"] = "兴奋"
+        if random.random() < 0.3:
+            fav_gain = random.randint(3, 8)
+            child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + fav_gain)
+            narration = f"你督促{child_name}习武，皇帝听闻龙颜欣慰，圣宠+{fav_gain}，健康+{health_gain}，学识+{wit_gain}"
+            effects = {"health": health_gain, "wit": wit_gain, "emperor_favor": fav_gain}
+        else:
+            narration = f"你陪{child_name}练剑骑马，身手日渐矫健，健康+{health_gain}，学识+{wit_gain}，天资+{talent_gain}"
+            effects = {"health": health_gain, "wit": wit_gain, "talent": talent_gain}
+    elif action == "女红":
+        if child.get("gender") != "公主":
+            return jsonify({"error": "皇子无需女红", "success": False}), 400
+        if age < 5:
+            return jsonify({"error": "年纪尚幼，还拿不动针线", "success": False}), 400
+        talent_gain = random.randint(4, 9)
+        aff_gain = random.randint(3, 7)
+        child["talent"] = min(100, child.get("talent", 50) + talent_gain)
+        child["affection"] = min(100, child.get("affection", 30) + aff_gain)
+        child["mood"] = "开心"
+        craft = random.choice(["绣花手帕", "香囊", "团扇", "荷包"])
+        narration = f"你教{child_name}绣{craft}，针脚渐巧，天资+{talent_gain}，亲密度+{aff_gain}"
+        effects = {"talent": talent_gain, "affection": aff_gain}
     else:
         return jsonify({"error": "未知互动"}), 400
 
+    bonus = maybe_child_bonus_event(game_state, child, child_name)
+    if bonus:
+        narration += f"。{bonus}"
+    add_child_event(child, narration)
     game_state.add_memory(narration)
+    autosave_session(player_id)
     return jsonify({
         "success": True,
         "narration": narration,
