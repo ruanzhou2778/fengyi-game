@@ -508,9 +508,55 @@ function resolveGameBase(stored) {
     if (stored && String(stored).trim()) return String(stored).trim().replace(/\/$/, '');
     const cfg = window.GAME_CONFIG || {};
     if (cfg.apiBase && String(cfg.apiBase).trim()) return String(cfg.apiBase).trim().replace(/\/$/, '');
+    const detected = sessionStorage.getItem('gongdou_detected_base');
+    if (detected && String(detected).trim()) return String(detected).trim().replace(/\/$/, '');
     if (window.location.protocol.startsWith('http')) return window.location.origin;
     if (cfg.defaultApiBase && String(cfg.defaultApiBase).trim()) return String(cfg.defaultApiBase).trim().replace(/\/$/, '');
     return 'http://localhost:5000';
+}
+
+function getGameBaseCandidates() {
+    const candidates = [];
+    const push = (v) => {
+        if (!v) return;
+        const b = String(v).trim().replace(/\/$/, '');
+        if (b && !candidates.includes(b)) candidates.push(b);
+    };
+    push(localStorage.getItem('gongdou_game_base'));
+    push(sessionStorage.getItem('gongdou_detected_base'));
+    const cfg = window.GAME_CONFIG || {};
+    push(cfg.apiBase);
+    if (window.location.protocol.startsWith('http')) {
+        push(window.location.origin);
+        const { protocol, hostname, port } = window.location;
+        if (!port || port === '80' || port === '443') {
+            push(`${protocol}//${hostname}:5000`);
+        }
+    }
+    push(cfg.defaultApiBase);
+    push('http://localhost:5000');
+    return candidates;
+}
+
+async function detectGameBase() {
+    for (const base of getGameBaseCandidates()) {
+        try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 4000);
+            const r = await fetch(`${base}/api/health`, { signal: ctrl.signal, cache: 'no-store' });
+            clearTimeout(timer);
+            const text = await r.text();
+            if (!r.ok || !text) continue;
+            const data = JSON.parse(text);
+            if (data && data.status === 'ok') {
+                if (!localStorage.getItem('gongdou_game_base')) {
+                    sessionStorage.setItem('gongdou_detected_base', base);
+                }
+                return base;
+            }
+        } catch (e) { /* try next candidate */ }
+    }
+    return resolveGameBase(localStorage.getItem('gongdou_game_base'));
 }
 
 function getGameBase() {
@@ -554,28 +600,35 @@ async function myFetch(url, options = {}) {
     }
 }
 
-async function parseApiResponse(r) {
+async function parseApiResponse(r, opts = {}) {
+    const allowError = !!opts.allowError;
     const text = await r.text();
     if (!text) {
-        if (!r.ok) throw new Error(`请求失败 (${r.status})`);
-        return {};
+        if (!r.ok && !allowError) throw new Error(`请求失败 (${r.status})`);
+        return allowError ? { error: `请求失败 (${r.status})` } : {};
     }
     const ct = (r.headers.get('content-type') || '').toLowerCase();
     if (!ct.includes('json') && text.trim().startsWith('<')) {
-        if (r.status === 404 || r.status === 405) {
-            throw new Error('游戏后端未响应，请确认云端后端已启动，或在设置中填写正确的「游戏后端地址」');
-        }
-        throw new Error('服务器返回了网页而非数据，请检查「游戏后端地址」是否误填为 AI API 地址');
+        const htmlErr = (r.status === 404 || r.status === 405)
+            ? '游戏接口无响应，请尝试访问带 :5000 端口的地址，或稍后刷新重试'
+            : '服务器返回了网页而非数据，可能是网络中断或端口未正确代理，请刷新后重试';
+        if (allowError) return { error: htmlErr };
+        throw new Error(htmlErr);
     }
     let data;
     try {
         data = JSON.parse(text);
     } catch (e) {
-        throw new Error('响应解析失败，请确认游戏后端地址正确');
+        const parseErr = '响应解析失败，请检查网络后刷新重试';
+        if (allowError) return { error: parseErr };
+        throw new Error(parseErr);
     }
     if (!r.ok || data.error) {
         const msg = data.error || `请求失败 (${r.status})`;
-        if (msg.includes('会话无效')) throw new Error('会话已失效，请重新开局或读取存档');
+        if (allowError) return data;
+        if (msg.includes('会话无效') || msg.includes('会话不存在') || msg.includes('会话已过期')) {
+            throw new Error('会话已失效，请从存档列表读取进度');
+        }
         throw new Error(msg);
     }
     return data;
@@ -1903,7 +1956,58 @@ async function nextPeriod() {
 
 async function performAction(action){isProcessing=true;loading.style.display='block';showToast('⏳ 执行中...');try{const ar=await myFetch(`${API_BASE}/api/action`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,action:action})});const ad=await ar.json();if(!ad.success){showToast('❌ '+(ad.error||'行为失败'));loading.style.display='none';isProcessing=false;return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);const sd=await sr.json();if(ad.message)addLogEntry(ad.message);updateUI({...sd,...ad,display_rank:sd.display_rank||sd.rank||'秀女',day:sd.day||1,silver:sd.silver||0,attributes:sd.attributes||{},attr_max:sd.attr_max||{宠爱:999,威望:3000},calendar_str:sd.calendar_str||'建元元年一月上旬',remaining_actions:sd.remaining_actions!==undefined?sd.remaining_actions:7,max_actions:sd.max_actions||7,inventory:sd.inventory||[],player_id:playerId});showToast('✅ '+(ad.message||'完成'));}catch(e){showToast('❌ 操作失败：'+e.message);}loading.style.display='none';isProcessing=false;}
 
-async function saveGame(slot){if(!playerId)return;const slotName=slot||'default';try{const r=await myFetch(`${API_BASE}/api/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,slot_name:slotName})});const d=await r.json();if(d.success)localStorage.setItem('gongdou_save_slot',slotName);showToast(d.success?'💾 '+d.message:'❌ '+d.error);}catch(e){showToast('❌ 保存失败');}}
+async function saveGame(slot, opts = {}) {
+    const sid = playerId || localStorage.getItem('gongdou_playerId');
+    if (!sid) return false;
+    const slotName = slot || 'default';
+    const silent = !!opts.silent;
+    try {
+        const r = await myFetch(`${API_BASE}/api/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: sid, slot_name: slotName }),
+            skipLoading: silent
+        });
+        const d = await parseApiResponse(r, { allowError: true });
+        if (d.success) localStorage.setItem('gongdou_save_slot', slotName);
+        if (!silent) showToast(d.success ? '💾 ' + d.message : '❌ ' + (d.error || '保存失败'));
+        return !!d.success;
+    } catch (e) {
+        if (!silent) showToast('❌ 保存失败');
+        return false;
+    }
+}
+
+function flushSaveOnBackground() {
+    const sid = playerId || localStorage.getItem('gongdou_playerId');
+    if (!sid) return;
+    const slot = localStorage.getItem('gongdou_save_slot') || 'default';
+    const body = JSON.stringify({ player_id: sid, slot_name: slot });
+    const url = `${API_BASE}/api/save`;
+    try {
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }));
+        } else {
+            saveGame(slot, { silent: true });
+        }
+    } catch (e) { /* best effort */ }
+}
+
+async function resumeFromBackground() {
+    const sid = localStorage.getItem('gongdou_playerId');
+    if (!sid || isProcessing) return;
+    if (!playerId) {
+        await autoResume({ force: true, silent: true });
+        return;
+    }
+    try {
+        const r = await myFetch(`${API_BASE}/api/state/${playerId}`, { skipLoading: true });
+        const d = await parseApiResponse(r, { allowError: true });
+        if (d && !d.error) updateUI(d);
+    } catch (e) {
+        API_BASE = await detectGameBase();
+    }
+}
 
 async function applyRestoredGameState(pid,gs,fromSave){
 playerId=pid;localStorage.setItem('gongdou_playerId',pid);
@@ -1915,33 +2019,50 @@ document.getElementById('scenarioOverlayContainer').innerHTML='';
 showToast(fromSave?'📂 已从存档恢复进度':'✅ 已恢复进度');
 }
 
-async function autoResume(){
-const sid=localStorage.getItem('gongdou_playerId');
-if(!sid)return;
-const slot=localStorage.getItem('gongdou_save_slot')||'default';
-showLoading(true,{title:'恢复进度中…',sub:'正在载入宫廷档案',icon:'📜'});
-try{
-const r=await myFetch(`${API_BASE}/api/state/${sid}`,{skipLoading:true});
-if(r.ok){
-const d=await r.json();
-if(!d.error){
-await applyRestoredGameState(sid,d,d.restored_from_save);
-return;
-}
-}
-const lr=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:sid,slot_name:slot}),skipLoading:true});
-const ld=await lr.json();
-if(ld.success&&ld.game_state){
-localStorage.setItem('gongdou_save_slot',slot);
-await applyRestoredGameState(sid,ld.game_state,true);
-return;
-}
-localStorage.removeItem('gongdou_playerId');
-}catch(e){
-localStorage.removeItem('gongdou_playerId');
-}finally{
-showLoading(false);
-}
+async function autoResume(opts = {}) {
+    const sid = localStorage.getItem('gongdou_playerId');
+    if (!sid) return false;
+    if (playerId === sid && !opts.force) return true;
+    const slot = localStorage.getItem('gongdou_save_slot') || 'default';
+    if (!opts.silent) {
+        showLoading(true, { title: '恢复进度中…', sub: '正在载入宫廷档案', icon: '📜' });
+    }
+    try {
+        for (let i = 0; i < 3; i++) {
+            if (i > 0) {
+                API_BASE = await detectGameBase();
+                await new Promise(r => setTimeout(r, 600 * i));
+            }
+            try {
+                const r = await myFetch(`${API_BASE}/api/state/${sid}`, { skipLoading: true });
+                const d = await parseApiResponse(r, { allowError: true });
+                if (d && !d.error) {
+                    await applyRestoredGameState(sid, d, d.restored_from_save);
+                    return true;
+                }
+            } catch (e) { console.warn('autoResume state', i, e); }
+        }
+        try {
+            const lr = await myFetch(`${API_BASE}/api/load`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ player_id: sid, slot_name: slot }),
+                skipLoading: true
+            });
+            const ld = await parseApiResponse(lr, { allowError: true });
+            if (ld.success && ld.game_state) {
+                localStorage.setItem('gongdou_save_slot', slot);
+                await applyRestoredGameState(sid, ld.game_state, true);
+                return true;
+            }
+        } catch (e) { console.warn('autoResume load', e); }
+        if (!opts.silent) {
+            showToast('暂时无法恢复进度，请检查网络后刷新页面');
+        }
+        return false;
+    } finally {
+        if (!opts.silent) showLoading(false);
+    }
 }
 
 function confirmReset(){
@@ -2425,7 +2546,18 @@ nextPeriodBtn.addEventListener('click',nextPeriod);
 createScenarioOverlay();
 initConfigFromStorage();
 bindConfigAutoSave('main');
-setTimeout(autoResume,500);
+async function initApp() {
+    API_BASE = await detectGameBase();
+    GAME_BASE = API_BASE;
+    await autoResume();
+}
+setTimeout(initApp, 300);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSaveOnBackground();
+    else resumeFromBackground();
+});
+window.addEventListener('pagehide', () => flushSaveOnBackground());
+window.addEventListener('pageshow', (e) => { if (e.persisted) resumeFromBackground(); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'){closeModal();closeSaveListModal();}if(e.key==='s'||e.key==='S'){if(playerId)saveGame('default');}});
 console.log('🌸 凤仪天下 · 完整修复版');
 </script>
