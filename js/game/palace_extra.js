@@ -38,11 +38,16 @@
         '以理服人': { self: 'all', target: 'all', favor: -8, desc: '同时吸取心计、威望与倾向' },
     };
 
-    const RANK_ORDER_LOCAL = ['更衣', '官女子', '答应', '常在', '贵人', '才人', '美人', '婕妤', '嫔', '妃', '贵妃', '皇贵妃', '皇后'];
+    const RANK_ORDER_LOCAL = ['更衣', '官女子', '答应', '常在', '贵人', '才人', '美人', '婕妤', '嫔', '妃', '淑妃', '德妃', '贤妃', '宸妃', '贵妃', '皇贵妃', '皇后'];
+    const TITLED_CONSORT_POWER = 12;
+    const RANK_POWER = { '更衣':1,'官女子':2,'答应':4,'常在':5,'贵人':6,'才人':7,'美人':8,'婕妤':9,'嫔':10,'妃':11,'淑妃':13,'德妃':14,'贤妃':15,'宸妃':16,'贵妃':17,'皇贵妃':18,'皇后':19 };
+    function _rankPower(rankName, nobletitle) {
+        if (rankName === '妃' && nobletitle) return TITLED_CONSORT_POWER;
+        return RANK_POWER[rankName] !== undefined ? RANK_POWER[rankName] : 3;
+    }
 
-    function _rankLevel(rankName) {
-        const idx = RANK_ORDER_LOCAL.indexOf(rankName);
-        return idx === -1 ? 3 : idx;
+    function _rankLevel(rankName, nobletitle) {
+        return _rankPower(rankName, nobletitle);
     }
 
     function _familyScore(family, familyMeta) {
@@ -55,11 +60,12 @@
     }
 
     function _statValue(gameState, who, attrKey, isPlayer) {
-        let attrs, rank, family, familyMeta, people;
+        let attrs, rank, nobletitle, family, familyMeta, people;
 
         if (isPlayer) {
             attrs = gameState.attributes || {};
             rank = _getRankName(gameState.rank);
+            nobletitle = gameState.nobletitle;
             family = gameState.family_background;
             familyMeta = gameState.family_meta;
             people = (gameState.get_active_servants ? gameState.get_active_servants().length : 0) * 12;
@@ -67,6 +73,7 @@
             const npc = (gameState.npcs && gameState.npcs[who]) || {};
             attrs = npc.attributes || {};
             rank = npc.rank || '答应';
+            nobletitle = npc.nobletitle;
             family = npc.family_background || '未知';
             familyMeta = npc.family_meta;
             people = randomInt(8, 40);
@@ -79,7 +86,7 @@
             '才情': attrs['才情'] !== undefined ? attrs['才情'] : 40,
             '福运': attrs['福运'] !== undefined ? attrs['福运'] : 30,
             '家世': _familyScore(family, familyMeta) + (attrs['威望'] !== undefined ? attrs['威望'] : 20) * 0.25,
-            '位份': _rankLevel(rank) * 8 + 10,
+            '位份': _rankLevel(rank, nobletitle) * 8 + 10,
             '人手': people,
         };
 

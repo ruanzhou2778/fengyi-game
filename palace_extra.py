@@ -21,14 +21,13 @@ DRAIN_OPTIONS = {
     "以理服人": {"self": "all", "target": "all", "favor": -8, "desc": "同时吸取心计、威望与倾向"},
 }
 
-RANK_ORDER_LOCAL = ["更衣", "官女子", "答应", "常在", "贵人", "才人", "美人", "婕妤", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
+from models import get_rank_power
+
+RANK_ORDER_LOCAL = ["更衣", "官女子", "答应", "常在", "贵人", "才人", "美人", "婕妤", "嫔", "妃", "淑妃", "德妃", "贤妃", "宸妃", "贵妃", "皇贵妃", "皇后"]
 
 
-def _rank_level(rank_name):
-    try:
-        return RANK_ORDER_LOCAL.index(rank_name)
-    except ValueError:
-        return 3
+def _rank_level(rank_name, nobletitle=None):
+    return get_rank_power(rank_name, nobletitle)
 
 
 def _family_score(family, family_meta=None):
@@ -39,6 +38,7 @@ def _stat_value(game_state, who, attr_key, is_player):
     if is_player:
         attrs = game_state.attributes
         rank = game_state.rank.name if hasattr(game_state.rank, "name") else str(game_state.rank)
+        nobletitle = game_state.nobletitle
         family = game_state.family_background
         family_meta = getattr(game_state, "family_meta", None)
         people = len(game_state.get_active_servants()) * 12
@@ -46,6 +46,7 @@ def _stat_value(game_state, who, attr_key, is_player):
         npc = game_state.npcs.get(who, {})
         attrs = npc.get("attributes", {})
         rank = npc.get("rank", "答应")
+        nobletitle = npc.get("nobletitle")
         family = npc.get("family_background", "未知")
         family_meta = npc.get("family_meta")
         people = random.randint(8, 40)
@@ -56,7 +57,7 @@ def _stat_value(game_state, who, attr_key, is_player):
         "才情": attrs.get("才情", 40),
         "福运": attrs.get("福运", 30),
         "家世": _family_score(family, family_meta) + attrs.get("威望", 20) * 0.25,
-        "位份": _rank_level(rank) * 8 + 10,
+        "位份": _rank_level(rank, nobletitle) * 8 + 10,
         "人手": people,
     }
     return float(mapping.get(attr_key, 40))
@@ -190,6 +191,9 @@ def resolve_duel(game_state, drain_key=None):
             game_state.relationships[target]["好感"] = max(-100, game_state.relationships[target].get("好感", 0) + opt["favor"])
         game_state.rivalries[target] = game_state.rivalries.get(target, 0) + 8
         narration = f"你胜了{target}，择「{drain_key}」。{opt['desc']}。对方压力攀升。"
+        death_msg = try_duel_death(game_state, target, margin)
+        if death_msg:
+            narration += f" {death_msg}"
     elif winner == "npc":
         steal = max(4, steal // 2)
         for k in ("心计", "倾向"):
@@ -289,6 +293,9 @@ def pray_or_curse(game_state, mode, target=None):
             game_state.relationships[target]["好感"] = max(-100, game_state.relationships[target].get("好感", 0) - 6)
         game_state.rivalries[target] = game_state.rivalries.get(target, 0) + 5
         narration = f"你在奉天楼暗行掌祀，克向{target}。对方压力+{press}，福运-{luck_cut}。{backfire}"
+        death_msg = try_curse_death(game_state, target)
+        if death_msg:
+            narration += f" {death_msg}"
         effects = {"银两": -cost}
         game_state.add_memory(narration)
         return {"narration": narration, "effects": effects, "pressure": npc["压力"]}, None
@@ -315,9 +322,220 @@ def process_pressure(game_state):
             npc["压力"] = random.randint(35, 55)
             npc["personality"] = "心神不宁"
             events.append(f"💔 {name} 压力难承，竟至疯癫边缘，心计与斗志大损。")
+            if press >= 115 and random.random() < 0.18:
+                death_msg = kill_consort(game_state, name, "自尽")
+                if death_msg:
+                    events.append(death_msg)
         elif press >= 70 and random.random() < 0.35:
             events.append(f"😟 {name} 近日神思恍惚，宫人说她夜里常惊坐。")
     # 玩家倾向自然微变
     if game_state.attributes.get("倾向", 30) < 20 and random.random() < 0.2:
         events.append("你自觉气势不足，行走宫道都要让人三分。")
     return events
+
+
+# ============================================================
+#  妃子死亡系统
+# ============================================================
+DEATH_PROTECTED = {"太后"}
+DEATH_CAUSE_NARRATION = {
+    "病逝": "久病不愈，薨于寝宫",
+    "薨逝": "薨于宫中，六宫哀悼",
+    "小产而亡": "小产后血崩不止，香消玉殒",
+    "难产薨": "诞下皇嗣后力竭而亡",
+    "自尽": "不堪重压，悬梁自尽",
+    "赐死": "圣旨下达，赐白绫自尽",
+    "暴毙": "突然暴毙，死因不明",
+    "中毒": "中毒身亡，御医束手无策",
+    "杖毙": "受杖过重，当场毙命",
+}
+
+
+def npc_display_rank(npc):
+    rank = npc.get("rank", "妃嫔")
+    nobletitle = npc.get("nobletitle")
+    if nobletitle and rank == "妃":
+        return f"{nobletitle}妃"
+    if nobletitle:
+        return f"{nobletitle}{rank}"
+    return rank
+
+
+def is_death_protected(name, npc, player_name=None):
+    if name in DEATH_PROTECTED:
+        return True
+    if name == player_name:
+        return True
+    if npc.get("rank") == "皇后":
+        return True
+    return False
+
+
+def _emperor_death_reaction(game_state, npc, cause, killer=None):
+    favor = npc.get("attributes", {}).get("宠爱", 30)
+    rank = npc.get("rank", "答应")
+    emperor = game_state.emperor.get("name", "皇帝")
+    if killer == game_state.name:
+        scandal = random.randint(10, 22)
+        game_state.scandal_strikes = getattr(game_state, "scandal_strikes", 0) + 2
+        game_state.attributes["宠爱"] = max(0, game_state.attributes.get("宠爱", 0) - scandal)
+        game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - random.randint(8, 18))
+        if cause in ("中毒", "赐死", "杖毙"):
+            return f"{emperor}震怒，疑你下手，宠爱-{scandal}，朝野议论纷纷"
+        return f"宫人传言此事与你有关，{emperor}对你起了疑心，宠爱-{scandal}"
+    if favor >= 70 or rank in ("贵妃", "皇贵妃"):
+        cut = random.randint(5, 12)
+        game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - cut)
+        return f"{emperor}哀痛不已，六宫气氛肃杀，你威望-{cut}"
+    if favor >= 40:
+        return f"{emperor}叹惋数声，命以妃礼安葬"
+    return "宫中草草处置，无人多言"
+
+
+def kill_consort(game_state, name, cause, killer=None):
+    """令妃嫔死亡。返回事件文案，失败返回 None。"""
+    npc = game_state.npcs.get(name)
+    if not npc or not npc.get("alive", True):
+        return None
+    if is_death_protected(name, npc, game_state.name):
+        return None
+
+    npc["alive"] = False
+    npc["is_active"] = False
+    npc["is_pregnant"] = False
+    npc["pregnancy_month"] = 0
+    npc["death_cause"] = cause
+    npc["death_day"] = game_state.day
+    npc["death_month"] = game_state.month
+    npc["death_year"] = game_state.year
+    npc["death_period"] = period_key(game_state)
+    if killer:
+        npc["death_killer"] = killer
+
+    game_state.rivalries.pop(name, None)
+    game_state.alliances.pop(name, None)
+    if name in game_state.relationships:
+        game_state.relationships[name]["印象"] = "已故"
+
+    display = npc_display_rank(npc)
+    cause_text = DEATH_CAUSE_NARRATION.get(cause, cause)
+    emperor_note = _emperor_death_reaction(game_state, npc, cause, killer)
+    msg = f"🕯️ {display}{name} {cause_text}。{emperor_note}"
+    return msg
+
+
+def process_consort_deaths(game_state):
+    """每旬检测：久病、体虚等自然死亡风险。"""
+    events = []
+    for name, npc in game_state.npcs.items():
+        if not npc.get("alive", True):
+            continue
+        if is_death_protected(name, npc, game_state.name):
+            continue
+
+        attrs = npc.get("attributes", {})
+        health = attrs.get("健康", 60)
+
+        if health <= 8:
+            if random.random() < 0.40:
+                cause = random.choice(["病逝", "暴毙"])
+                msg = kill_consort(game_state, name, cause)
+                if msg:
+                    events.append(msg)
+                continue
+        elif health <= 18 and random.random() < 0.12:
+            msg = kill_consort(game_state, name, "病逝")
+            if msg:
+                events.append(msg)
+                continue
+        elif health <= 30 and random.random() < 0.06:
+            attrs["健康"] = max(5, health - random.randint(2, 5))
+            events.append(f"🏥 {name} 咳疾缠绵，太医称脉象虚弱，恐有性命之忧")
+    return events
+
+
+def try_childbirth_death(game_state, name, survived_child=True):
+    """生产时难产死亡检测。"""
+    npc = game_state.npcs.get(name)
+    if not npc or not npc.get("alive", True):
+        return None
+    if is_death_protected(name, npc, game_state.name):
+        return None
+    health = npc.get("attributes", {}).get("健康", 50)
+    risk = 0.04 + max(0, (40 - health) / 200)
+    if not survived_child:
+        risk += 0.15
+    if random.random() >= risk:
+        return None
+    cause = "难产薨" if survived_child else "小产而亡"
+    return kill_consort(game_state, name, cause)
+
+
+def try_conflict_death(game_state, target, initiator, conflict_type, initiator_win):
+    """宫斗致死：陷害/下毒等激烈冲突后小概率身亡。"""
+    if not initiator_win:
+        return None
+    if target == game_state.name:
+        return None
+    npc = game_state.npcs.get(target)
+    if not npc or not npc.get("alive", True):
+        return None
+    if is_death_protected(target, npc, game_state.name):
+        return None
+
+    base_chance = 0.0
+    if conflict_type in ("陷害", "下毒"):
+        base_chance = 0.06
+    elif conflict_type == "告发":
+        base_chance = 0.04
+    elif conflict_type == "争辩":
+        base_chance = 0.02
+
+    if initiator == game_state.name:
+        base_chance += 0.04
+    health = npc.get("attributes", {}).get("健康", 60)
+    if health < 35:
+        base_chance += 0.05
+
+    if random.random() >= base_chance:
+        return None
+
+    cause = random.choice(["中毒", "赐死"]) if conflict_type in ("陷害", "下毒") else "杖毙"
+    killer = initiator if initiator != game_state.name else game_state.name
+    return kill_consort(game_state, target, cause, killer=killer)
+
+
+def try_duel_death(game_state, target, margin):
+    """争锋大胜后对方压力过高，偶发身亡。"""
+    npc = game_state.npcs.get(target)
+    if not npc or not npc.get("alive", True):
+        return None
+    if is_death_protected(target, npc, game_state.name):
+        return None
+    if margin < 35:
+        return None
+    press = npc.get("压力", 0)
+    chance = 0.05 + (margin - 35) / 200
+    if press >= 80:
+        chance += 0.08
+    if random.random() >= chance:
+        return None
+    cause = "自尽" if press >= 90 else "暴毙"
+    return kill_consort(game_state, target, cause, killer=game_state.name)
+
+
+def try_curse_death(game_state, target):
+    """掌祀克杀：对方压力极高时小概率暴毙。"""
+    npc = game_state.npcs.get(target)
+    if not npc or not npc.get("alive", True):
+        return None
+    if is_death_protected(target, npc, game_state.name):
+        return None
+    press = npc.get("压力", 0)
+    if press < 85:
+        return None
+    chance = 0.06 + (press - 85) / 100
+    if random.random() >= chance:
+        return None
+    cause = random.choice(["中毒", "暴毙"])
+    return kill_consort(game_state, target, cause, killer=game_state.name)

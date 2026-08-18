@@ -141,7 +141,10 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, base
 def check_promotion_condition(game_state):
     if game_state._pending_promotion is not None:
         return False
-    rank_order = ["宫女", "秀女", "答应", "常在", "贵人", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
+    rank_order = [
+        "宫女", "更衣", "官女子", "秀女", "答应", "常在", "贵人", "才人", "美人", "婕妤",
+        "嫔", "妃", "淑妃", "德妃", "贤妃", "宸妃", "贵妃", "皇贵妃", "皇后",
+    ]
     current_rank_name = game_state.rank.name
     if current_rank_name == "皇后":
         return False
@@ -153,6 +156,10 @@ def check_promotion_condition(game_state):
         "贵人": {"宠爱": 100, "威望": 70, "才情": 60, "心计": 55, "健康": 60},
         "嫔": {"宠爱": 150, "威望": 85, "才情": 65, "心计": 60, "健康": 65},
         "妃": {"宠爱": 200, "威望": 100, "才情": 70, "心计": 65, "健康": 65},
+        "淑妃": {"宠爱": 260, "威望": 118, "才情": 74, "心计": 68, "健康": 68},
+        "德妃": {"宠爱": 220, "威望": 108, "才情": 72, "心计": 66, "健康": 66},
+        "贤妃": {"宠爱": 240, "威望": 115, "才情": 73, "心计": 67, "健康": 67},
+        "宸妃": {"宠爱": 260, "威望": 118, "才情": 74, "心计": 68, "健康": 68},
         "贵妃": {"宠爱": 300, "威望": 120, "才情": 75, "心计": 70, "健康": 70},
         "皇贵妃": {"宠爱": 400, "威望": 140, "才情": 80, "心计": 75, "健康": 75},
     }
@@ -168,7 +175,10 @@ def check_promotion_condition(game_state):
     return False
 
 def generate_promotion_event(game_state, api_key=None, base_url=None, model=None):
-    rank_order = ["宫女", "秀女", "答应", "常在", "贵人", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
+    rank_order = [
+        "宫女", "更衣", "官女子", "秀女", "答应", "常在", "贵人", "才人", "美人", "婕妤",
+        "嫔", "妃", "淑妃", "德妃", "贤妃", "宸妃", "贵妃", "皇贵妃", "皇后",
+    ]
     current_idx = rank_order.index(game_state.rank.name)
     if current_idx >= len(rank_order) - 1:
         return None
@@ -244,7 +254,9 @@ def get_flip_candidates(game_state):
     player_talent = game_state.attributes.get("才艺", 50)
     rank_score = {
         "更衣": 0, "官女子": 1, "答应": 2, "常在": 3, "贵人": 4,
-        "才人": 5, "美人": 6, "婕妤": 7, "嫔": 8, "妃": 9,
+        "才人": 5, "美人": 6, "婕妤": 7, "嫔": 8,
+        "嫔": 8, "妃": 9,
+        "淑妃": 10, "德妃": 10, "贤妃": 10, "宸妃": 10,
         "贵妃": 10, "皇贵妃": 11, "皇后": 12
     }.get(game_state.rank.name, 0)
     player_weight = player_favor * 3 + player_appearance * 2 + player_talent * 1 + rank_score * 5
@@ -266,7 +278,9 @@ def get_flip_candidates(game_state):
         talent = npc.get("attributes", {}).get("才艺", 50)
         rank_score = {
             "更衣": 0, "官女子": 1, "答应": 2, "常在": 3, "贵人": 4,
-            "才人": 5, "美人": 6, "婕妤": 7, "嫔": 8, "妃": 9,
+            "才人": 5, "美人": 6, "婕妤": 7, "嫔": 8,
+            "嫔": 8, "妃": 9,
+        "淑妃": 10, "德妃": 10, "贤妃": 10, "宸妃": 10,
             "贵妃": 10, "皇贵妃": 11, "皇后": 12
         }.get(npc.get("rank"), 0)
         weight = favor * 3 + appearance * 2 + talent * 1 + rank_score * 5
@@ -368,11 +382,11 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     
     effects = {}
     for attr, (min_val, max_val) in conflict_info["effects"].items():
-        if initiator_win:
-            delta = random.randint(min_val, max_val)
-        else:
-            delta = random.randint(-max_val, -min_val)
-        effects[attr] = delta
+        magnitude = random.randint(
+            max(1, min(abs(min_val), abs(max_val))),
+            max(abs(min_val), abs(max_val), 1),
+        )
+        effects[attr] = magnitude if initiator_win else -magnitude
     
     if initiator == game_state.name:
         for attr, delta in effects.items():

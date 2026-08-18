@@ -3,17 +3,51 @@ from enum import Enum
 import random
 from datetime import datetime
 
+FOUR_CONSORTS = ["淑妃", "德妃", "贤妃", "宸妃"]
+TITLED_CONSORT_POWER = 12  # 带封号的妃（位份仍为妃）
+
+RANK_POWER = {
+    "宫女": 0, "更衣": 1, "官女子": 2, "秀女": 3, "答应": 4, "常在": 5,
+    "贵人": 6, "才人": 7, "美人": 8, "婕妤": 9, "嫔": 10, "妃": 11,
+    "淑妃": 13, "德妃": 14, "贤妃": 15, "宸妃": 16,
+    "贵妃": 17, "皇贵妃": 18, "皇后": 19,
+}
+
+def normalize_rank_name(rank_name):
+    if rank_name in RANK_POWER or rank_name == "妃":
+        return rank_name
+    return rank_name
+
+def get_rank_power(rank_name, nobletitle=None):
+    """位份实力：妃 < 带封号的妃 < 四妃。"""
+    rank_name = normalize_rank_name(rank_name)
+    if rank_name == "妃" and nobletitle:
+        return TITLED_CONSORT_POWER
+    return RANK_POWER.get(rank_name, 0)
+
+def is_titled_consort(rank_name, nobletitle=None):
+    return rank_name == "妃" and nobletitle
+
 class Rank(Enum):
     宫女 = 0
-    秀女 = 1
-    答应 = 2
-    常在 = 3
-    贵人 = 4
-    嫔 = 5
-    妃 = 6
-    贵妃 = 7
-    皇贵妃 = 8
-    皇后 = 9
+    更衣 = 1
+    官女子 = 2
+    秀女 = 3
+    答应 = 4
+    常在 = 5
+    贵人 = 6
+    才人 = 7
+    美人 = 8
+    婕妤 = 9
+    嫔 = 10
+    妃 = 11
+    淑妃 = 12
+    德妃 = 13
+    贤妃 = 14
+    宸妃 = 15
+    贵妃 = 16
+    皇贵妃 = 17
+    皇后 = 18
 
 class EmperorPersonality(Enum):
     明君 = "明君"
@@ -139,6 +173,7 @@ class GameState:
         self._promotion_fail_count = 0
         self._promotion_done = False  # 本旬晋升标志
         self.scandal_strikes = 0  # 宫斗丑闻累积，满则更易降位
+        self.rank_periods = 0  # 现任位份已历旬数（资历）
         self.last_duel_period = None
         self._active_duel = None
 
@@ -198,9 +233,14 @@ class GameState:
     def grant_nobletitle(self):
         favor = self.attributes.get("宠爱", 0)
         prestige = self.attributes.get("威望", 0)
-        rank_order = ["宫女", "秀女", "答应", "常在", "贵人", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
-        current_idx = rank_order.index(self.rank.name)
-        if current_idx >= 4 and favor >= 65 and prestige >= 55:
+        rank_order = [
+            "宫女", "更衣", "官女子", "秀女", "答应", "常在", "贵人", "才人", "美人", "婕妤",
+            "嫔", "妃", "淑妃", "德妃", "贤妃", "宸妃", "贵妃", "皇贵妃", "皇后",
+        ]
+        current_idx = rank_order.index(self.rank.name) if self.rank.name in rank_order else 0
+        if current_idx >= rank_order.index("贵人") and favor >= 65 and prestige >= 55:
+            if self.rank.name != "妃":
+                return None
             if self.nobletitle:
                 if random.random() < 0.2:
                     new_title = random.choice(NOBLETITLES)
@@ -294,6 +334,7 @@ class GameState:
             "custom_prompt": self.custom_prompt,
             "last_duel_period": getattr(self, "last_duel_period", None),
             "scandal_strikes": getattr(self, "scandal_strikes", 0),
+            "rank_periods": getattr(self, "rank_periods", 0),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -305,7 +346,7 @@ class GameState:
     def from_save_data(cls, save_data):
         try:
             data = save_data.get("game_state", save_data)
-            rank_name = data.get("rank", "秀女")
+            rank_name = normalize_rank_name(data.get("rank", "秀女"))
             try:
                 rank = Rank[rank_name]
             except KeyError:
@@ -343,6 +384,9 @@ class GameState:
             game_state.attr_change_log = data.get("attr_change_log", [])
             game_state.emperor = data.get("emperor", {"name": "萧景琰", "personality": "明君", "age": 35, "stats": {"威严": 60, "仁德": 50, "勤政": 50, "好色": 40}, "favor_factors": {"明君": {"容貌": 0.2, "才情": 0.5, "心计": 0.3}, "昏君": {"容貌": 0.8, "才情": 0.1, "心计": 0.1}, "痴情": {"容貌": 0.3, "才情": 0.3, "心计": 0.4}, "多疑": {"容貌": 0.2, "才情": 0.2, "心计": 0.6}}})
             game_state.npcs = data.get("npcs", {})
+            for npc in game_state.npcs.values():
+                if "rank" in npc:
+                    npc["rank"] = normalize_rank_name(npc["rank"])
             servants_data = data.get("servants", [])
             game_state.servants = []
             for sd in servants_data:
@@ -367,6 +411,7 @@ class GameState:
             game_state._promotion_fail_count = data.get("_promotion_fail_count", 0)
             game_state._promotion_done = data.get("_promotion_done", False)
             game_state.scandal_strikes = data.get("scandal_strikes", 0)
+            game_state.rank_periods = data.get("rank_periods", 0)
             storyline_value = data.get("storyline", "主线")
             for sl in Storyline:
                 if sl.value == storyline_value:

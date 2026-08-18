@@ -432,7 +432,7 @@
                     <div style="display:flex;flex-direction:column;gap:3px;padding:4px 0;">
                         <div style="display:flex;gap:3px;flex-wrap:wrap;">
                             <select id="conflictTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择目标...</option></select>
-                            <select id="conflictType" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);">
+                            <select id="conflictType" onchange="updateConflictAssistHint()" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);">
                                 <option value="下毒">☠️ 下毒暗害</option>
                                 <option value="打胎">🩸 下药打胎</option>
                                 <option value="陷害">🎭 栽赃陷害</option>
@@ -441,6 +441,11 @@
                                 <option value="拉拢">🤝 威逼利诱</option>
                                 <option value="掌嘴">👋 当众责罚</option>
                             </select>
+                        </div>
+                        <div id="conflictAssistBox" style="padding:3px 0;border-top:1px dashed rgba(213,200,188,0.35);">
+                            <div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">👥 宫人协助（最多3人，提升胜率）</div>
+                            <div id="conflictAssistList" style="display:flex;flex-wrap:wrap;gap:2px 6px;"></div>
+                            <div id="conflictAssistHint" style="font-size:7px;color:var(--gold-dark);margin-top:2px;"></div>
                         </div>
                         <button onclick="initiateConflict()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;">⚔️ 发起宫斗</button>
                     </div>
@@ -832,7 +837,7 @@ function randomPlayerName(){return PLAYER_SURNAMES[Math.floor(Math.random()*PLAY
 function randomEmperorName(){return EMPEROR_SURNAMES[Math.floor(Math.random()*EMPEROR_SURNAMES.length)]+randomGivenName(EMPEROR_GIVEN);}
 const ATTR_KEYS=['容貌','才情','心计','宠爱','威望','健康','才艺','谋略','魅力','福运','倾向'];
 const TOTAL_POINTS=100;
-const RANK_ORDER=['宫女','秀女','答应','常在','贵人','嫔','妃','贵妃','皇贵妃','皇后'];
+const RANK_ORDER=['宫女','更衣','官女子','秀女','答应','常在','贵人','才人','美人','婕妤','嫔','妃','淑妃','德妃','贤妃','宸妃','贵妃','皇贵妃','皇后'];
 
 let playerId=null, isProcessing=false, selectedBackground=null, eventLogs=[], flipTriggeredThisRound=false;
 let currentCharData={
@@ -1092,7 +1097,17 @@ opts:[{txt:'亲手绣制百寿图，以孝心打动太后',eff:{威望:10,才艺
 opts:[{txt:'主动向皇后请缨，协助管理选秀事务',eff:{威望:8,心计:6},correct:true,msg:'你办事得力，皇后在皇帝面前夸奖你，皇帝晋封你为嫔。'},{txt:'拉拢几位秀女，培养自己的势力',eff:{心计:8,宠爱:-3},correct:false,msg:'你的小动作被皇帝察觉，认为你结党营私。'},{txt:'专注提升自身才艺，以实力说话',eff:{才情:6,才艺:6},correct:false,msg:'你只顾提升才艺，却忽略了后宫政治，错失良机。'}]},
 '嫔→妃':{title:'边疆捷报',desc:'边疆大捷，皇帝龙心大悦，决定大封后宫。各宫妃嫔都在争取这次机会，你该如何脱颖而出？',
 opts:[{txt:'向皇帝进献边疆地图，献上治国良策',eff:{威望:12,谋略:8},correct:true,msg:'你的见解令皇帝惊叹，认为你是难得的贤内助，晋封你为妃。'},{txt:'精心打扮，以美色邀宠',eff:{容貌:5,宠爱:5},correct:false,msg:'皇帝认为你以色侍人，不是长久之计。'},{txt:'联合几位妃嫔共同上书为皇帝庆贺',eff:{威望:3,宠爱:3},correct:false,msg:'你随波逐流，没有展现出独特价值，晋升机会被他人抢走。'}]},
-'妃→贵妃':{title:'宫廷政变',desc:'皇帝病重，太子之位悬而未决。后宫暗流涌动，各方势力都在布局。你的一举一动都可能影响大局。',
+'妃→封妃':{title:'赐号之仪',desc:'你晋封妃位后圣宠渐隆，皇帝有意赐你封号，以彰恩宠。能否得号，关乎你在六宫中的体面。',
+opts:[{txt:'呈上亲手所绣吉字，以谦德请号',eff:{威望:8,才情:5},correct:true,msg:'皇帝嘉许你的谦德，亲赐封号，册为带号之妃。'},{txt:'暗示娘家出资修缮宫殿以邀封号',eff:{心计:6,威望:-8},correct:false,msg:'皇帝厌恶后宫与朝臣勾连，未赐封号。'},{txt:'当众哭诉位份低微，求皇帝垂怜',eff:{宠爱:3,威望:-6},correct:false,msg:'哭闹失仪，皇帝觉得你难当表率。'}]},
+'封妃→淑妃':{title:'册立四妃',desc:'你已位尊带号之妃，四妃之位悬空。皇帝欲从妃位中择贤册立，你须证明自己堪列四妃。',
+opts:[{txt:'协理六宫琐事，以贤德服众',eff:{威望:12,宠爱:8},correct:true,msg:'你的贤德传遍六宫，皇帝下旨晋封淑妃，位列四妃。'},{txt:'借子嗣之功在宴上争宠',eff:{宠爱:6,威望:-5},correct:false,msg:'你的张扬惹来非议，册立之事被搁置。'},{txt:'托人向外臣传扬你的美名',eff:{心计:8,威望:-10},correct:false,msg:'后宫干政之嫌惹怒皇帝。'}]},
+'淑妃→德妃':{title:'六宫表率',desc:'你入主淑妃宫后行事有度，太后与皇后皆有所闻。皇帝欲以晋封德妃嘉奖你的贤德，但后宫暗流未平。',
+opts:[{txt:'整顿内务、抚恤宫女，以德行服众',eff:{威望:10,宠爱:6},correct:true,msg:'你的贤德传遍六宫，皇帝下旨晋封德妃。'},{txt:'借机打压曾与你不和的嫔位',eff:{心计:8,威望:-6},correct:false,msg:'皇帝不喜你恃宠弄权，晋封之事被搁置。'},{txt:'只向皇帝撒娇讨赏，不问宫中事',eff:{宠爱:4,威望:-4},correct:false,msg:'皇帝认为你难当表率，未予晋封。'}]},
+'德妃→贤妃':{title:'慈晖殿前',desc:'宫中设宴庆贺皇子周岁，你需在众多妃嫔面前展现母仪之姿。皇帝暗中观察，看谁堪晋贤妃之位。',
+opts:[{txt:'悉心照料皇子，礼数周全不失威仪',eff:{威望:11,宠爱:7},correct:true,msg:'你的端庄贤淑令皇帝满意，晋封贤妃。'},{txt:'在宴上炫耀皇子聪慧，压过他人',eff:{宠爱:5,威望:-5},correct:false,msg:'你的张扬惹来非议，皇帝觉得你不够谦逊。'},{txt:'推说身体不适缺席宴饮',eff:{健康:3,威望:-6},correct:false,msg:'你错失在御前露脸之机，晋封落空。'}]},
+'贤妃→宸妃':{title:'凤阁论政',desc:'皇帝近日常召你至凤阁议事，后宫议论纷纷。能否晋封宸妃，取决于你能否在干政之嫌与贤内助之间拿捏分寸。',
+opts:[{txt:'只献良策不涉权柄，以才智佐君',eff:{威望:12,谋略:8},correct:true,msg:'你的分寸令皇帝放心，下旨晋封宸妃。'},{txt:'趁机为娘家族人请官',eff:{心计:6,威望:-10},correct:false,msg:'皇帝察觉你私心太重，大怒。'},{txt:'刻意避谈政事，只谈风月',eff:{宠爱:4,威望:-3},correct:false,msg:'皇帝觉得你难当大任，未予晋封。'}]},
+'宸妃→贵妃':{title:'宫廷政变',desc:'皇帝病重，太子之位悬而未决。后宫暗流涌动，各方势力都在布局。你的一举一动都可能影响大局。',
 opts:[{txt:'坚守中立，以皇帝病情为重，尽心侍疾',eff:{威望:15,宠爱:10,健康:-5},correct:true,msg:'你的忠诚和体贴感动了皇帝，病愈后晋封你为贵妃。'},{txt:'暗中支持某位皇子，提前布局',eff:{心计:10,威望:-8},correct:false,msg:'皇帝病愈后得知你结党营私，大怒。'},{txt:'联合皇后，共同把持后宫',eff:{威望:5,心计:5},correct:false,msg:'你的野心太过明显，皇帝对你不满。'}]},
 '贵妃→皇贵妃':{title:'皇后之争',desc:'皇后因病退位，后位悬空。你是贵妃，是继后的热门人选。但此事关乎国本，必须慎之又慎。',
 opts:[{txt:'向皇帝进言，以国家社稷为重，推荐合适人选',eff:{威望:20,谋略:10},correct:true,msg:'你的大公无私让皇帝感动，最终决定晋封你为皇贵妃，统摄六宫。'},{txt:'私下拉拢大臣，为自己造势',eff:{心计:10,威望:-15},correct:false,msg:'皇帝最忌讳后宫干政，你的行为触怒了皇帝。'},{txt:'以退为进，主动推辞后位，以示谦逊',eff:{威望:5,宠爱:5},correct:false,msg:'你的推辞被皇帝认为是虚伪，反而失去了机会。'}]},
@@ -1100,7 +1115,9 @@ opts:[{txt:'向皇帝进言，以国家社稷为重，推荐合适人选',eff:{�
 opts:[{txt:'以最隆重的礼仪准备立后大典，展现国母风范',eff:{威望:25,宠爱:15,银两:-50},correct:true,msg:'你的端庄大气让满朝文武折服，皇帝亲自为你戴上凤冠，晋封你为皇后！'},{txt:'低调行事，一切从简',eff:{威望:5,宠爱:5},correct:false,msg:'你太过谦逊，反而让皇帝觉得你不够重视后位。'},{txt:'借机打压政敌，清除异己',eff:{心计:15,威望:-20},correct:false,msg:'你的狠辣手段让皇帝寒心，立后之事被推迟。'}]}
 };
 
-function getPromotionStory(rank){
+function getPromotionStory(rank,nobletitle){
+if(rank.name==='妃'&&!nobletitle)return PROMOTION_STORIES['妃→封妃'];
+if(rank.name==='妃'&&nobletitle)return PROMOTION_STORIES['封妃→淑妃'];
 const key=`${rank.name}→${RANK_ORDER[RANK_ORDER.indexOf(rank.name)+1]}`;
 return PROMOTION_STORIES[key]||null;
 }
@@ -1157,15 +1174,17 @@ function updateHaremPage(data){
         if (npcs[n]?.rank === '皇后') queen = n;
         else others.push(n);
     });
-    const rankOrder = {'皇贵妃':0,'贵妃':1,'妃':2,'嫔':3,'婕妤':4,'美人':5,'才人':6,'贵人':7,'常在':8,'答应':9,'官女子':10,'更衣':11};
+    const rankOrder = {'皇贵妃':0,'贵妃':1,'宸妃':2,'贤妃':3,'德妃':4,'淑妃':5,'妃':6,'嫔':7,'婕妤':8,'美人':9,'才人':10,'贵人':11,'常在':12,'答应':13,'官女子':14,'更衣':15};
     others.sort((a,b) => (rankOrder[npcs[a]?.rank] ?? 99) - (rankOrder[npcs[b]?.rank] ?? 99));
     const sorted = queen ? [queen, ...others] : others;
-    if (sorted.length === 0) {
+    const deadList = sorted.filter(n => npcs[n]?.alive === false);
+    const livingList = sorted.filter(n => npcs[n]?.alive !== false);
+    if (livingList.length === 0 && deadList.length === 0) {
         grid.innerHTML = '<div style="color:var(--text-light);text-align:center;padding:8px;font-size:9px;grid-column:1/3;">暂无妃嫔</div>';
         return;
     }
     grid.innerHTML = '';
-    sorted.forEach(name => {
+    livingList.forEach(name => {
         const npc = npcs[name];
         const rel = data.relationships ? data.relationships[name] : null;
         const isQueen = npc.rank === '皇后';
@@ -1226,11 +1245,30 @@ function updateHaremPage(data){
         }
         grid.appendChild(card);
     });
+    if (deadList.length > 0) {
+        const memorial = document.createElement('div');
+        memorial.style.cssText = 'grid-column:1/3;font-size:8px;color:var(--text-light);border-top:1px dashed var(--border-light);padding-top:4px;margin-top:2px;';
+        memorial.innerHTML = `<div style="font-weight:600;color:#6a5a5a;margin-bottom:3px;">🕯️ 已故妃嫔</div>`;
+        deadList.forEach(name => {
+            const npc = npcs[name];
+            const displayRank = npc.nobletitle && npc.rank === '妃' ? `${npc.nobletitle}妃` : (npc.rank || '妃嫔');
+            const cause = npc.death_cause || '薨逝';
+            const row = document.createElement('div');
+            row.style.cssText = 'font-size:7px;color:#8a7a7a;padding:2px 0;opacity:0.85;';
+            row.textContent = `${npc.icon || '🌸'} ${displayRank}${name} — ${cause}`;
+            memorial.appendChild(row);
+        });
+        grid.appendChild(memorial);
+    }
 }
 
 function updateStatusPage(data){
 const attrs=data.attributes||{};const attrMax=data.attr_max||{宠爱:999,威望:3000};
-sName.textContent=data.player_name||data.name||'未命名';sFamily.textContent=data.family_background||'未知';sRank.textContent=data.display_rank||data.rank||'-';
+sName.textContent=data.player_name||data.name||'未命名';sFamily.textContent=data.family_background||'未知';
+let rankText=data.display_rank||data.rank||'-';
+if(data.rank_tenure_required>0)rankText+=` · 资历${data.rank_periods||0}/${data.rank_tenure_required}旬`;
+if(data.special_favor)rankText+=' · 专宠';
+sRank.textContent=rankText;
 sSilver.textContent=`🪙 ${data.silver||0}`;
 sCalendar.textContent=data.calendar_str||data.calendar||'建元元年一月上旬';
 sAppearance.textContent=data.appearance||'-';sTalent.textContent=data.talent||'-';sPersonality.textContent=data.personality||'-';sTraits.textContent=(data.traits||[]).length?data.traits.join('、'):'-';
@@ -1249,6 +1287,62 @@ function updateServantList(data){
 const servants=data.servants||[];const container=document.getElementById('servantList');const countEl=document.getElementById('servantCount');
 if(servants.length===0){container.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无宫女太监</span>';countEl.textContent='0人';return;}
 container.innerHTML='';servants.forEach(s=>{const card=document.createElement('span');card.className='servant-card';card.innerHTML=`${s.type==='宫女'?'👩':'🧑'} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">忠${s.loyalty}</span><span class="s-skill">技${s.skill}</span>`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});countEl.textContent=`${servants.length}人`;
+renderConflictAssist(servants);
+}
+
+function estimateAssistBonus(servants, conflictType) {
+    if (!servants || !servants.length) return 0;
+    let bonus = 0;
+    servants.forEach(s => {
+        let typeBonus = s.type === '太监' ? 5 : 4;
+        if (['陷害', '告发', '下毒'].includes(conflictType) && s.type === '太监') typeBonus += 2;
+        if (['谣言', '争宠', '造谣'].includes(conflictType) && s.type === '宫女') typeBonus += 2;
+        bonus += typeBonus + (s.skill || 0) * 0.12 + (s.loyalty || 0) * 0.08;
+    });
+    return Math.round(bonus * 10) / 10;
+}
+
+function renderConflictAssist(servants) {
+    const list = document.getElementById('conflictAssistList');
+    if (!list) return;
+    const selected = new Set(getSelectedAssistServants());
+    if (!servants || !servants.length) {
+        list.innerHTML = '<span style="font-size:7px;color:var(--text-light);">暂无宫人，可在状态页招募</span>';
+        updateConflictAssistHint();
+        return;
+    }
+    list.innerHTML = servants.map(s => `
+        <label style="font-size:8px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;">
+            <input type="checkbox" name="conflictAssist" value="${s.name}" ${selected.has(s.name) ? 'checked' : ''} onchange="updateConflictAssistHint()">
+            ${s.type === '宫女' ? '👩' : '🧑'}${s.name}
+            <span style="color:var(--text-light);font-size:7px;">忠${s.loyalty} 技${s.skill}</span>
+        </label>
+    `).join('');
+    updateConflictAssistHint();
+}
+
+function getSelectedAssistServants() {
+    return [...document.querySelectorAll('input[name="conflictAssist"]:checked')].map(el => el.value);
+}
+
+function updateConflictAssistHint() {
+    const boxes = [...document.querySelectorAll('input[name="conflictAssist"]:checked')];
+    if (boxes.length > 3) {
+        boxes[boxes.length - 1].checked = false;
+        showToast('最多选3名宫人协助');
+    }
+    const hint = document.getElementById('conflictAssistHint');
+    if (!hint) return;
+    const selectedNames = getSelectedAssistServants();
+    if (!selectedNames.length) {
+        hint.textContent = '未选宫人协助，胜率按自身属性计算';
+        return;
+    }
+    const servants = (window._lastGameData?.servants || []).filter(s => selectedNames.includes(s.name));
+    const type = document.getElementById('conflictType')?.value || '争宠';
+    const bonus = estimateAssistBonus(servants, type);
+    const flipReduce = Math.min(22, Math.round(bonus / 60 * 100));
+    hint.textContent = `已选 ${selectedNames.length} 人，预计助力 +${bonus}，意外翻盘概率降低约 ${flipReduce}%`;
 }
 
 function updateChildrenUI(data) {
@@ -1315,6 +1409,16 @@ if(data.demotion_message){
     addLogEntry(`📉 ${data.demotion_message}`, 'demotion');
     showToast(`📉 位份下降！`, 'error');
 }
+if(data.depose_queen_message){
+    showEdictModal('📜 废后诏书', data.depose_queen_message);
+    addLogEntry(`📜 ${data.depose_queen_message}`, 'promotion');
+    showToast('📜 皇后被废！');
+}
+if(data.death_message){
+    showEdictModal('🕯️ 宫闱噩耗', data.death_message);
+    addLogEntry(`🕯️ ${data.death_message}`, 'demotion');
+    showToast('🕯️ 妃嫔薨逝！', 'error');
+}
 
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
 updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);
@@ -1346,6 +1450,7 @@ if(data.other_pregnancy_msgs && data.other_pregnancy_msgs.length>0){data.other_p
 if(data.other_birth_msgs && data.other_birth_msgs.length>0){data.other_birth_msgs.forEach(msg=>{addLogEntry(formatEventMsg(msg,'👶'),'birth');showToast(formatEventMsg(msg,'👶'));});}
 if(data.prince_events && data.prince_events.length>0){data.prince_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'👑'),'prince');showToast(formatEventMsg(msg,'👑'));});}
 if(data.growth_events && data.growth_events.length>0){data.growth_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'🌱'),'prince');showToast(formatEventMsg(msg,'🌱'));});}
+if(data.death_events && data.death_events.length>0){data.death_events.forEach(msg=>{addLogEntry(`🕯️ ${msg}`,'demotion');showToast('🕯️ 宫闱噩耗','error');});}
 }
 window._lastGameData=data;
 if(!data._skipFlip) triggerFlip(data);
@@ -2432,6 +2537,35 @@ async function doPray(mode) {
     } catch(e) { showToast('❌ 奉天楼失败'); }
 }
 
+function formatConflictEffects(effects) {
+    if (!effects) return '';
+    const entries = Object.entries(effects).filter(([, v]) => v !== 0);
+    if (!entries.length) return '无明显属性变化';
+    return entries.map(([k, v]) => `${k}${v > 0 ? '+' : ''}${v}`).join(' ');
+}
+
+function buildConflictExtraHtml(d) {
+    let html = '';
+    if (d.event?.assist_servants?.length) {
+        const names = d.event.assist_servants.map(s => `${s.type === '宫女' ? '👩' : '🧑'}${s.name}`).join('、');
+        const bonus = d.event.assist_bonus ? `（助力+${d.event.assist_bonus}）` : '';
+        html += `<div style="background:#eef5ee;border:1px solid #a8c8a8;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#2a5a3a;font-weight:600;">👥 ${names} 暗中协助${bonus}</div>`;
+    }
+    if (d.demotion_message) {
+        html += `<div style="background:#f0d5d0;border:1px solid #d48c7a;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#8a3a2a;font-weight:600;">📉 ${d.demotion_message}</div>`;
+    }
+    if (d.npc_demotion_message) {
+        html += `<div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#5a4a1a;font-weight:600;">📉 ${d.npc_demotion_message}</div>`;
+    }
+    if (d.depose_queen_message) {
+        html += `<div style="background:linear-gradient(90deg,#fff8e1,#ffecb3);border:1px solid #b8945a;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#5a3a1a;font-weight:700;">📜 ${d.depose_queen_message}</div>`;
+    }
+    if (d.death_message) {
+        html += `<div style="background:#e8e4e4;border:1px solid #9a8a8a;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#4a3a3a;font-weight:700;">🕯️ ${d.death_message}</div>`;
+    }
+    return html;
+}
+
 async function initiateConflict() {
     if (!playerId || isProcessing) return;
     const target = document.getElementById('conflictTarget').value;
@@ -2481,13 +2615,17 @@ async function initiateConflict() {
         const r = await myFetch(`${API_BASE}/api/conflict/initiate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ player_id: playerId, target: target, type: type })
+            body: JSON.stringify({ player_id: playerId, target: target, type: type, assist_servants: getSelectedAssistServants() })
         });
         const d = await r.json();
         if (d.error) { showToast('❌ ' + d.error, 'error'); isProcessing = false; loading.style.display = 'none'; return; }
         if (d.event) {
             const e = d.event;
-            const playerWin = e.initiator === (window._lastGameData?.player_name || window._lastGameData?.name) && e.initiator_win;
+            const playerName = window._lastGameData?.player_name || window._lastGameData?.name;
+            const playerWin = e.player_win !== undefined && e.player_win !== null
+                ? e.player_win
+                : (e.initiator === playerName && e.initiator_win);
+            const playerEffects = e.player_effects || e.effects;
             const result = playerWin ? '✅ 胜利！' : '❌ 失利...';
             addConflictLog(`【${e.type}】我 → ${target}：${result}  ${e.narration}`);
             showToast(playerWin ? `⚔️ ${type} 得胜` : `💔 ${type} 失利`, playerWin ? undefined : 'error');
@@ -2495,18 +2633,27 @@ async function initiateConflict() {
                 addLogEntry(`📉 ${d.demotion_message}`, 'demotion');
                 showToast('📉 遭降位！', 'error');
             }
-            const demotionHtml = d.demotion_message
-                ? `<div style="background:#f0d5d0;border:1px solid #d48c7a;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#8a3a2a;font-weight:600;">📉 ${d.demotion_message}</div>`
-                : '';
+            if (d.npc_demotion_message) {
+                addLogEntry(`📉 ${d.npc_demotion_message}`, 'demotion');
+                showToast('📉 对手遭贬！');
+            }
+            if (d.depose_queen_message) {
+                addLogEntry(`📜 ${d.depose_queen_message}`, 'promotion');
+                showToast('📜 废后成功！');
+            }
+            if (d.death_message) {
+                addLogEntry(`🕯️ ${d.death_message}`, 'demotion');
+                showToast('🕯️ 对手身亡！', 'error');
+            }
             const eventHtml = `
                 <div style="display:flex;flex-direction:column;gap:4px;font-size:9px;color:var(--text-mid);max-width:100%;">
                     <div style="font-size:12px;font-weight:600;color:var(--text-dark);text-align:center;border-bottom:1px solid var(--border-light);padding-bottom:4px;">⚔️ ${type}</div>
                     <div style="padding:4px 0;line-height:1.6;font-size:10px;color:var(--text-body);">${e.narration}</div>
                     <div style="border-top:1px solid var(--border-light);padding-top:4px;font-size:8px;color:var(--text-mid);">
                         ${playerWin ? '✅ 你占了上风' : '❌ 你吃了亏'}
-                        ${e.effects ? ` | 属性变化：${Object.entries(e.effects).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join(' ')}` : ''}
+                        ${playerEffects ? ` | 属性变化：${formatConflictEffects(playerEffects)}` : ''}
                     </div>
-                    ${demotionHtml}
+                    ${buildConflictExtraHtml(d)}
                 </div>
             `;
             openModal('⚔️ 宫斗结果', eventHtml, '关闭', null, true);
@@ -2533,8 +2680,12 @@ async function triggerRandomConflict() {
         if (d.error) { showToast('❌ ' + d.error); isProcessing = false; loading.style.display = 'none'; return; }
         if (d.event) {
             const e = d.event;
-            const isPlayerInvolved = e.initiator === (window._lastGameData?.player_name || window._lastGameData?.name) || e.target === (window._lastGameData?.player_name || window._lastGameData?.name);
-            const playerWin = (e.initiator === (window._lastGameData?.player_name || window._lastGameData?.name) && e.initiator_win) || (e.target === (window._lastGameData?.player_name || window._lastGameData?.name) && !e.initiator_win);
+            const playerName = window._lastGameData?.player_name || window._lastGameData?.name;
+            const isPlayerInvolved = e.initiator === playerName || e.target === playerName;
+            const playerWin = e.player_win !== undefined && e.player_win !== null
+                ? e.player_win
+                : ((e.initiator === playerName && e.initiator_win) || (e.target === playerName && !e.initiator_win));
+            const playerEffects = isPlayerInvolved ? (e.player_effects || e.effects) : e.effects;
             const result = e.initiator_win ? '✅ 发起者胜' : '❌ 发起者败';
             addConflictLog(`【${e.type}】${e.initiator} → ${e.target}：${result}  ${e.narration}`);
             showToast(`⚔️ 随机事件：${e.type}`);
@@ -2542,9 +2693,17 @@ async function triggerRandomConflict() {
                 addLogEntry(`📉 ${d.demotion_message}`, 'demotion');
                 showToast('📉 遭降位！', 'error');
             }
-            const demotionHtml = d.demotion_message
-                ? `<div style="background:#f0d5d0;border:1px solid #d48c7a;border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#8a3a2a;font-weight:600;">📉 ${d.demotion_message}</div>`
-                : '';
+            if (d.npc_demotion_message) {
+                addLogEntry(`📉 ${d.npc_demotion_message}`, 'demotion');
+            }
+            if (d.depose_queen_message) {
+                addLogEntry(`📜 ${d.depose_queen_message}`, 'promotion');
+                showToast('📜 废后！');
+            }
+            if (d.death_message) {
+                addLogEntry(`🕯️ ${d.death_message}`, 'demotion');
+                showToast('🕯️ 妃嫔身亡！', 'error');
+            }
             const eventHtml = `
                 <div style="display:flex;flex-direction:column;gap:4px;font-size:9px;color:var(--text-mid);max-width:100%;">
                     <div style="font-size:12px;font-weight:600;color:var(--text-dark);text-align:center;border-bottom:1px solid var(--border-light);padding-bottom:4px;">⚔️ ${e.type}</div>
@@ -2552,9 +2711,9 @@ async function triggerRandomConflict() {
                     <div style="border-top:1px solid var(--border-light);padding-top:4px;font-size:8px;color:var(--text-mid);">
                         ${e.initiator_win ? '✅ 发起者胜利' : '❌ 发起者失败'}
                         ${isPlayerInvolved ? (playerWin ? ' · 你占了上风' : ' · 你吃了亏') : ''}
-                        ${e.effects ? ` | 属性变化：${Object.entries(e.effects).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join(' ')}` : ''}
+                        ${playerEffects ? ` | 属性变化：${formatConflictEffects(playerEffects)}` : ''}
                     </div>
-                    ${demotionHtml}
+                    ${buildConflictExtraHtml(d)}
                 </div>
             `;
             openModal('⚔️ 宫斗事件', eventHtml, '关闭', null, true);
