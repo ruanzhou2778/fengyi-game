@@ -2,6 +2,7 @@
 from enum import Enum
 import random
 from datetime import datetime
+import uuid
 
 FOUR_CONSORTS = ["淑妃", "德妃", "贤妃", "宸妃"]
 TITLED_CONSORT_POWER = 12  # 带封号的妃（位份仍为妃）
@@ -389,6 +390,11 @@ class GameState:
             for npc in game_state.npcs.values():
                 if "rank" in npc:
                     npc["rank"] = normalize_rank_name(npc["rank"])
+                # Ensure each child has a stable child_id for migrations and future references
+                if "children" in npc and isinstance(npc["children"], list):
+                    for child in npc["children"]:
+                        if "child_id" not in child:
+                            child["child_id"] = uuid.uuid4().hex
             servants_data = data.get("servants", [])
             game_state.servants = []
             for sd in servants_data:
@@ -401,6 +407,11 @@ class GameState:
             game_state.pregnancy_month = data.get("pregnancy_month", 0)
             game_state.monthly_intimacy = data.get("monthly_intimacy", 0)
             game_state.children = data.get("children", [])
+            # Ensure migrated top-level children entries have child_id for backward compatibility
+            if isinstance(game_state.children, list):
+                for child in game_state.children:
+                    if isinstance(child, dict) and "child_id" not in child:
+                        child["child_id"] = uuid.uuid4().hex
             game_state.has_children = data.get("has_children", False)
             game_state.rivalries = data.get("rivalries", {})
             game_state.alliances = data.get("alliances", {})
