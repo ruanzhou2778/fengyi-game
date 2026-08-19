@@ -18,6 +18,12 @@
         .app-header .status-mini .rank-display { color: #a03020; font-weight: 600; }
         .app-header .status-mini .silver-display { color: var(--gold-dark); font-weight: 600; }
         .app-header .status-mini .calendar-display { color: #2a4a5a; font-weight: 500; }
+        /* 皇后态样式：当玩家成为皇后时，整体视觉做出区分 */
+        .phone-frame.empress .app-header { background: linear-gradient(180deg,#fff4eb,#fff7f2); border-bottom-color: #f2d6c8; }
+        .phone-frame.empress .app-header .title-area .title { color: #a03020; }
+        .phone-frame.empress .app-header .status-mini .rank-display { color: #a03020; font-weight: 800; }
+        .phone-frame.empress .app-header .status-mini .silver-display { color: #a07840; font-weight: 700; }
+        .phone-frame.empress .title-seal { display:inline-block; margin-right:6px; color:#a03020; }
         .app-header .status-mini .actions-display { color: #2a5a4a; font-weight: 600; }
         .app-header .save-btns { display: flex; gap: 2px; }
         .app-header .save-btns button { padding: 1px 6px; border: 1px solid var(--border-light); border-radius: 12px; background: var(--bg-card); font-size: 8px; cursor: pointer; font-family: inherit; transition: all 0.2s; }
@@ -1533,8 +1539,32 @@ if(data.death_message){
     addLogEntry(`🕯️ ${data.death_message}`, 'demotion');
     showToast('🕯️ 妃嫔薨逝！', 'error');
 }
-
+    
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
+
+// ===== 皇后态：若玩家为皇后，则切换整体 UI 状态（视觉 / 标题 / 小栏提示）
+try{
+    const appEl = document.getElementById('app');
+    const titleEl = document.querySelector('.app-header .title-area .title');
+    const isEmpress = (data.rank === '皇后' || data.display_rank === '皇后');
+    if(isEmpress){
+        appEl.classList.add('empress');
+        if(titleEl) titleEl.innerHTML = `<span class="title-seal">👑</span> 皇后${data.player_name?('·'+data.player_name):''}`;
+        miniRank.style.color = '#a03020';
+        // 额外提示一次性通知（不会重复太频繁，因为 addLogEntry 会把重复消息压缩）
+        if(!window._empressAnnounced){
+            showToast('👑 你已册封为皇后，成为六宫之主！');
+            addLogEntry('👑 你被册封为皇后，位极人臣。', 'promotion');
+            window._empressAnnounced = true;
+        }
+    }else{
+        appEl.classList.remove('empress');
+        if(titleEl) titleEl.innerHTML = `凤<span class="gold">仪</span>天下`;
+        miniRank.style.color = '';
+        window._empressAnnounced = false;
+    }
+}catch(e){console.warn('empress UI apply failed', e)}
+
 updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);
 const disabled=rem<=0;
 document.querySelectorAll('.action-btn, .interact-btn, #sendBtn, [onclick*="hireServant"], [onclick*="trainServant"], [onclick*="dowagerInteract"], [onclick*="emperorInteract"], [onclick*="interactAction"]').forEach(btn=>{btn.disabled=disabled;btn.style.opacity=disabled?'0.4':'1';btn.style.cursor=disabled?'not-allowed':'pointer';});

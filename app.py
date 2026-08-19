@@ -1142,16 +1142,31 @@ def count_living_children(children):
 
 
 def resolve_living_child(children, index):
-    """按“在世子嗣”序号解析子嗣对象。
+    """按“在世子嗣”序号或 child_id 解析子嗣对象。
+    参数 index 可以是整数索引（基于在世列表）或字符串 child_id。
     前端展示时已过滤夭折子嗣，后端须同样基于在世列表解析，避免序号错位。
     返回 (child, 在原列表中的位置)；找不到返回 (None, -1)。
     """
     living = [c for c in (children or []) if c.get("alive", True)]
-    if not (0 <= index < len(living)):
+    # 尝试按整数索引解析（在世列表序号）
+    try:
+        idx = int(index)
+        if not (0 <= idx < len(living)):
+            return None, -1
+        child = living[idx]
+        pos = next((i for i, c in enumerate(children) if c is child), -1)
+        return child, pos
+    except (TypeError, ValueError):
+        # 非整数时按 child_id 解析
+        cid = index
+        if not cid:
+            return None, -1
+        for i, c in enumerate(children or []):
+            if c.get("child_id") == cid:
+                if not c.get("alive", True):
+                    return None, -1
+                return c, i
         return None, -1
-    child = living[index]
-    pos = next((i for i, c in enumerate(children) if c is child), -1)
-    return child, pos
 
 
 def receiver_keep_willingness(game_state, npc, child, rel_favor):
@@ -3716,7 +3731,8 @@ def child_interact():
     data = request.get_json()
     player_id = data.get('player_id')
     action = data.get('action')
-    child_index = data.get('child_index', 0)
+    # child_index 可为在世子嗣序号或 child_id（字符串）
+    child_ref = data.get('child_id') if data.get('child_id') is not None else data.get('child_index', 0)
     mother_name = data.get('mother_name')
     game_state, err = session_or_404(player_id)
     if err:
@@ -3732,9 +3748,9 @@ def child_interact():
     else:
         children = game_state.children
 
-    if child_index < 0 or child_index >= len(children):
+    child, pos = resolve_living_child(children, child_ref)
+    if child is None:
         return jsonify({"error": "子嗣不存在"}), 404
-    child = children[child_index]
     ensure_child_fields(child)
     child_name = child.get("name", "未命名")
     age = int(child.get("age", 0))
@@ -3940,10 +3956,8 @@ def child_adopt():
     player_id = data.get('player_id')
     direction = data.get('direction')
     mother_name = (data.get('mother_name') or '').strip()
-    try:
-        child_index = int(data.get('child_index', -1))
-    except (TypeError, ValueError):
-        return jsonify({"error": "子嗣序号无效", "success": False}), 400
+    # 支持传入 child_id（优先）或 child_index（在世序号）
+    child_ref = data.get('child_id') if data.get('child_id') is not None else data.get('child_index', -1)
     game_state, err = session_or_404(player_id)
     if err:
         return err
@@ -3962,7 +3976,7 @@ def child_adopt():
         if not mother_name or mother_name not in game_state.npcs:
             return jsonify({"error": "目标妃嫔不存在", "success": False}), 404
         npc = game_state.npcs[mother_name]
-        child, pos = resolve_living_child(npc.get("children", []), child_index)
+        child, pos = resolve_living_child(npc.get("children", []), child_ref)
         if child is None:
             return jsonify({"error": "子嗣不存在", "success": False}), 404
         ensure_child_fields(child)
@@ -4056,7 +4070,7 @@ def child_adopt():
         target = game_state.npcs[mother_name]
         if not target.get("alive", True):
             return jsonify({"error": "对方已不在人世", "success": False}), 400
-        child, pos = resolve_living_child(game_state.children, child_index)
+        child, pos = resolve_living_child(game_state.children, child_ref)
         if child is None:
             return jsonify({"error": "子嗣不存在", "success": False}), 404
         ensure_child_fields(child)
@@ -4126,7 +4140,7 @@ def child_adopt():
 
     elif direction == "return":
         # ---------- 归宗：将自己收养的子嗣送还生母 ----------
-        child, pos = resolve_living_child(game_state.children, child_index)
+        child, pos = resolve_living_child(game_state.children, child_ref)
         if child is None:
             return jsonify({"error": "子嗣不存在", "success": False}), 404
         ensure_child_fields(child)
@@ -4175,7 +4189,7 @@ def child_adopt():
         if not mother_name or mother_name not in game_state.npcs:
             return jsonify({"error": "目标妃嫔不存在", "success": False}), 404
         npc = game_state.npcs[mother_name]
-        child, pos = resolve_living_child(npc.get("children", []), child_index)
+        child, pos = resolve_living_child(npc.get("children", []), child_ref)
         if child is None:
             return jsonify({"error": "子嗣不存在", "success": False}), 404
         ensure_child_fields(child)
