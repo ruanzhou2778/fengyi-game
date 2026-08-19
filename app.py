@@ -1099,7 +1099,7 @@ def generate_all_npcs(count=10):
                 age = round(random.randint(0, 36) / 12, 1)
                 if "children" not in npc:
                     npc["children"] = []
-                npc["children"].append({"name": child_name, "gender": gender, "age": age, "birth_day": random.randint(1,30), "birth_month": random.randint(1,12), "birth_year": 1, "trait": "🎀 襁褓" if age < 0.5 else ("🎂 周岁" if age < 1.5 else ("👶 幼童" if age < 3 else "🎓 启蒙")), "alive": True, "adopted_count": 0, "adopted": False, "birth_mother": name, "adoptive_mother": ""})
+                npc["children"].append({"name": child_name, "gender": gender, "age": age, "birth_day": random.randint(1,30), "birth_month": random.randint(1,12), "birth_year": 1, "trait": "🎀 襁褓" if age < 0.5 else ("🎂 周岁" if age < 1.5 else ("👶 幼童" if age < 3 else "🎓 启蒙")), "alive": True, "adopted_count": 0, "adopted": False, "birth_mother": npc["name"], "adoptive_mother": ""})
     npc_names = list(npcs.keys())
     for i, name in enumerate(npc_names):
         if i < len(npc_names) - 1:
