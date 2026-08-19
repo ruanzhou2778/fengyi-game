@@ -1555,12 +1555,21 @@ def serialize_npcs_for_client(game_state):
     for name, npc in game_state.npcs.items():
         if name == "太后":
             continue
+        # Ensure any child entries have required fields (including child_id)
+        children = []
+        for child in npc.get("children", []):
+            try:
+                ensure_child_fields(child)
+            except Exception:
+                # be defensive: if ensure_child_fields fails, still include the raw child
+                pass
+            children.append(child)
         result[name] = {
             "name": name,
             "rank": npc.get("rank", "妃嫔"),
             "personality": npc.get("personality", "未知"),
             "icon": npc.get("icon", "🌸"),
-            "children": npc.get("children", []),
+            "children": children,
             "is_pregnant": npc.get("is_pregnant", False),
             "pregnancy_month": npc.get("pregnancy_month", 0),
             "attributes": npc.get("attributes", {}),
