@@ -421,6 +421,17 @@ def kill_consort(game_state, name, cause, killer=None):
     cause_text = DEATH_CAUSE_NARRATION.get(cause, cause)
     emperor_note = _emperor_death_reaction(game_state, npc, cause, killer)
     msg = f"🕯️ {display}{name} {cause_text}。{emperor_note}"
+
+    # 遗孤处理：生母亡故后，其子嗣成为遗孤，可被他人收养
+    for child in npc.get("children", []):
+        if child.get("alive", True):
+            child["alive"] = True
+            if child.get("adoptive_mother") == name:
+                child["adoptive_mother"] = ""
+            child["mood"] = "思念"
+            child.setdefault("recent_events", [])
+            child["recent_events"].insert(0, f"🕯️ 生母{name}亡故，沦为遗孤")
+            child["recent_events"] = child["recent_events"][:5]
     return msg
 
 

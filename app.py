@@ -1099,7 +1099,7 @@ def generate_all_npcs(count=10):
                 age = round(random.randint(0, 36) / 12, 1)
                 if "children" not in npc:
                     npc["children"] = []
-                npc["children"].append({"name": child_name, "gender": gender, "age": age, "birth_day": random.randint(1,30), "birth_month": random.randint(1,12), "birth_year": random.randint(1,3), "trait": "🎀 襁褓" if age < 0.5 else ("🎂 周岁" if age < 1.5 else ("👶 幼童" if age < 3 else "🎓 启蒙"))})
+                npc["children"].append({"name": child_name, "gender": gender, "age": age, "birth_day": random.randint(1,30), "birth_month": random.randint(1,12), "birth_year": 1, "trait": "🎀 襁褓" if age < 0.5 else ("🎂 周岁" if age < 1.5 else ("👶 幼童" if age < 3 else "🎓 启蒙")), "alive": True, "adopted_count": 0, "adopted": False, "birth_mother": name, "adoptive_mother": ""})
     npc_names = list(npcs.keys())
     for i, name in enumerate(npc_names):
         if i < len(npc_names) - 1:
@@ -1118,17 +1118,149 @@ CHILD_PERSONALITIES = ["活泼好动", "安静乖巧", "聪慧机敏", "倔强�
 CHILD_MOODS = ["开心", "平静", "思念", "兴奋", "闷闷不乐"]
 CHILD_MOOD_EMOJI = {"开心": "😊", "平静": "😌", "思念": "🥺", "兴奋": "🤩", "闷闷不乐": "😔", "生病": "🤒"}
 STORY_THEMES = ["嫦娥奔月", "武松打虎", "孔融让梨", "司马光砸缸", "精卫填海", "牛郎织女"]
+GRAB_ITEMS = ["书卷", "金印", "弓箭", "凤钗", "算盘", "绣球"]
+
+# —— 子嗣过继配置 ——
+ADOPT_MIN_RANK = "贵人"              # 收养他人子嗣所需最低位份
+ADOPT_TARGET_MIN_RANK = "嫔"         # 接受送养（被托付）所需最低位份
+ADOPT_MAX_AGE = 10                   # 可过继的最大年龄
+ADOPT_MAX_CHILDREN = 3               # 每位妃嫔最多养育子嗣数
+ADOPT_IN_COST = 40                   # 收养公主仪式银两
+ADOPT_IN_COST_PRINCE = 60            # 收养皇子仪式银两
+ADOPT_OUT_COST = 30                  # 送养公主仪式银两
+ADOPT_OUT_COST_PRINCE = 50           # 送养皇子仪式银两
+ADOPT_RETURN_COST = 20               # 归宗（送还生母）仪式银两
+ADOPT_BACK_COST = 40                 # 接回亲生子嗣仪式银两
+ADOPT_PRINCE_MIN_RANK = "嫔"         # 收养皇子所需最低位份
+ADOPT_MAX_TRANSFERS = 3              # 同一子嗣一生最多被过继次数（防止无限倒手）
+ADOPT_PRINCE_EMPEROR_FAVOR = 40      # 收养在册皇子需皇帝宠爱门槛（低于则有几率被驳回）
+ADOPT_WANT_HINT_DAYS = 30            # 「有妃嫔想收养你的子嗣」提示的有效旬数
+
+
+def count_living_children(children):
+    return len([c for c in children if c.get("alive", True)])
+
+
+def resolve_living_child(children, index):
+    """按“在世子嗣”序号解析子嗣对象。
+    前端展示时已过滤夭折子嗣，后端须同样基于在世列表解析，避免序号错位。
+    返回 (child, 在原列表中的位置)；找不到返回 (None, -1)。
+    """
+    living = [c for c in (children or []) if c.get("alive", True)]
+    if not (0 <= index < len(living)):
+        return None, -1
+    child = living[index]
+    pos = next((i for i, c in enumerate(children) if c is child), -1)
+    return child, pos
+
+
+def receiver_keep_willingness(game_state, npc, child, rel_favor):
+    """养母是否愿意放手让亲生子嗣被接回：返回 0~100 意愿度。"""
+    rank = RANK_LEVELS.get(npc.get("rank", "答应"), 0)
+    my_rank = RANK_LEVELS.get(game_state.rank.name, 0)
+    base = 30 + rel_favor * 0.45 + (my_rank - rank) * 4
+    n_children = count_living_children(npc.get("children", []))
+    if child.get("gender") == "皇子":
+        base -= 15
+    if n_children >= 2:
+        base += 12   # 子嗣充裕，易放手
+    return max(5, min(100, base))
+
+
+def adoption_willingness(game_state, npc, child):
+    """生母/养母是否甘愿让出子嗣：返回 0~100 意愿度。"""
+    if not npc.get("alive", True):
+        return 100
+    rel = game_state.relationships.get(npc.get("name", ""), {"好感": 0})
+    favor = rel.get("好感", 0)
+    mother_rank = RANK_LEVELS.get(npc.get("rank", "答应"), 0)
+    my_rank = RANK_LEVELS.get(game_state.rank.name, 0)
+    n_children = count_living_children(npc.get("children", []))
+    w = 38 + favor * 0.55 - mother_rank * 0.3 + my_rank * 0.45 + n_children * 12
+    if child.get("gender") == "皇子":
+        w -= 22
+    if npc.get("压力", 0) >= 70:
+        w += 10   # 压力大，自顾不暇，更愿托付
+    return max(0, min(100, w))
+
+
+def receiver_willingness(game_state, npc, child):
+    """高位妃嫔接受托付（收养玩家子嗣）的意愿 0~100。"""
+    if not npc.get("alive", True):
+        return 0
+    rel = game_state.relationships.get(npc.get("name", ""), {"好感": 0})
+    favor = rel.get("好感", 0)
+    rank = RANK_LEVELS.get(npc.get("rank", "答应"), 0)
+    base = 45 + favor * 0.35 + rank * 0.5
+    n_children = count_living_children(npc.get("children", []))
+    if n_children == 0:
+        base += 20   # 膝下无子，求子心切
+    elif n_children >= ADOPT_MAX_CHILDREN:
+        base -= 30
+    if npc.get("压力", 0) >= 75:
+        base -= 18
+    if child.get("gender") == "皇子":
+        base += 10   # 皇子尊贵，更愿收养
+    return max(5, min(100, base))
+
+
+def count_living_children(children):
+    return len([c for c in children if c.get("alive", True)])
+
 
 def newborn_trait(gender):
     return "🍼 襁褓" if gender == "皇子" else "🎀 襁褓"
 
+
 def child_mood_emoji(mood):
     return CHILD_MOOD_EMOJI.get(mood, "😌")
+
 
 def add_child_event(child, text):
     events = child.setdefault("recent_events", [])
     events.insert(0, text)
     child["recent_events"] = events[:5]
+
+
+def add_adoption_history(child, action, from_name=None, to_name=None, note=None, day=None):
+    history = child.setdefault("adoption_history", [])
+    entry = {
+        "action": action,
+        "from": from_name or "",
+        "to": to_name or "",
+        "note": note or "",
+        "day": day,
+    }
+    history.insert(0, entry)
+    child["adoption_history"] = history[:8]
+
+
+def should_use_emperor_approval(game_state, child, direction):
+    """皇子归属更敏感：需要更高宠爱/威望或随机得旨。"""
+    if child.get("gender") != "皇子":
+        return True, ""
+    favor = game_state.attributes.get("宠爱", 0)
+    prestige = game_state.attributes.get("威望", 0)
+    score = favor * 0.55 + prestige * 0.25 + random.randint(0, 35)
+    if direction == "in":
+        if score >= 55:
+            return True, "皇帝允准"
+        if score >= 42 and random.random() < 0.55:
+            return True, "皇帝略有迟疑，仍准你收养"
+        return False, "皇帝顾虑皇子去向，暂不允准"
+    if score >= 48:
+        return True, "皇帝首肯"
+    if score >= 35 and random.random() < 0.45:
+        return True, "皇帝念其前程，勉强首肯"
+    return False, "皇帝不许皇子轻易归宗"
+
+
+def child_adoption_pressure(child, base=0):
+    age = int(child.get("age", 0) or 0)
+    health = int(child.get("health", 70) or 0)
+    affection = int(child.get("affection", 35) or 0)
+    return base + max(0, age - 2) * 2 + max(0, 55 - health) // 4 - max(0, affection - 35) // 8
+
 
 def ensure_child_fields(child):
     """补全子嗣字段（兼容旧存档）。"""
@@ -1141,6 +1273,14 @@ def ensure_child_fields(child):
     child.setdefault("personality", random.choice(CHILD_PERSONALITIES))
     child.setdefault("mood", random.choice(["平静", "开心"]))
     child.setdefault("recent_events", [])
+    child.setdefault("alive", True)              # 是否在世
+    child.setdefault("adopted_count", 0)          # 被过继次数
+    child.setdefault("adopted", False)            # 是否为过继子嗣
+    child.setdefault("birth_mother", "")          # 生母
+    child.setdefault("adoptive_mother", "")       # 养母
+    child.setdefault("adoption_history", [])
+    child.setdefault("needs_doctor", child.get("health", 70) < 45)
+    child.setdefault("want_return_home", False)
     return child
 
 def child_talent_label(talent):
@@ -1155,7 +1295,7 @@ def child_talent_label(talent):
         return CHILD_TALENT_LABELS[1]
     return CHILD_TALENT_LABELS[0]
 
-def create_newborn_child(gender, name, game_state):
+def create_newborn_child(gender, name, game_state, mother_name=None):
     child = {
         "name": name,
         "gender": gender,
@@ -1173,6 +1313,11 @@ def create_newborn_child(gender, name, game_state):
         "personality": random.choice(CHILD_PERSONALITIES),
         "mood": random.choice(["平静", "开心"]),
         "recent_events": [],
+        "alive": True,
+        "adopted_count": 0,
+        "adopted": False,
+        "birth_mother": mother_name or game_state.name,
+        "adoptive_mother": "",
     }
     return child
 
@@ -1182,10 +1327,29 @@ def process_child_milestones(child, prefix, game_state=None):
     age_years = int(child.get("age", 0))
     child_name = child.get("name", "未命名")
     gender = child.get("gender", "")
-    if age_years == 1 and not child.get("first_birthday", False):
+    if age_years == 0 and child.get("age", 0) >= 0.25 and not child.get("full_month", False):
+        child["full_month"] = True
+        events.append(f"🎊 {prefix}{gender} {child_name} 满月，御赐金锁银项圈，宫中设宴庆贺！")
+        child["health"] = min(100, child.get("health", 70) + 2)
+        if game_state:
+            game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + 2)
+    elif age_years == 1 and not child.get("first_birthday", False):
         child["first_birthday"] = True
         child["trait"] = "🎂 周岁"
-        events.append(f"🎂 {prefix}{gender} {child_name} 满周岁！")
+        grab = random.choice(GRAB_ITEMS)
+        child["grab_item"] = grab
+        grab_hints = {
+            "书卷": "将来定是饱学之士",
+            "金印": "将来贵不可言，或掌权柄",
+            "弓箭": "将来将成沙场猛将",
+            "凤钗": "将来姻缘尊贵，荣华加身",
+            "算盘": "将来精于理财，家宅兴旺",
+            "绣球": "将来姻缘美满，蕙质兰心",
+        }
+        hint = grab_hints.get(grab, "前途不可限量")
+        events.append(f"🎂 {prefix}{gender} {child_name} 满周岁，抓周宴上竟一把抓住「{grab}」，众人皆道：{hint}！")
+        if game_state:
+            game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 3)
     elif age_years == 3 and not child.get("three_years", False):
         child["three_years"] = True
         if gender == "皇子":
@@ -1243,6 +1407,22 @@ def process_player_child_events(game_state):
         age = int(child.get("age", 0))
         name = child.get("name", "皇嗣")
         gender = child.get("gender", "")
+
+        # 病危夭折：健康极低且年幼时小概率夭折
+        if age <= 6 and not child.get("alive", True) is False:
+            hp = child.get("health", 70)
+            if hp < 25 and random.random() < 0.10:
+                child["alive"] = False
+                child["trait"] = "🕯️ 夭折"
+                child["mood"] = "平静"
+                msg = f"🕯️ {name} 病势沉重，太医回天乏术，竟夭折了……"
+                events.append(msg)
+                add_child_event(child, msg)
+                game_state.attributes["健康"] = max(0, game_state.attributes.get("健康", 80) - 10)
+                game_state.attributes["宠爱"] = max(0, game_state.attributes.get("宠爱", 30) - 5)
+                game_state.add_memory(msg)
+                continue
+
         # 心情自然变化
         if random.random() < 0.15:
             if child.get("health", 70) < 50:
@@ -1254,7 +1434,23 @@ def process_player_child_events(game_state):
         if age < 1 or random.random() > 0.28:
             continue
         roll = random.random()
-        if roll < 0.22:
+        is_adopted = child.get("adopted", False)
+        if is_adopted and (roll < 0.15 or (child.get("adoptive_mother") == game_state.name and random.random() < 0.6)):
+            # 过继子嗣特殊事件
+            birth_mother = child.get("birth_mother") or "生母"
+            if random.random() < 0.5:
+                gain = random.randint(3, 8)
+                child["affection"] = min(100, child.get("affection", 30) + gain)
+                child["mood"] = "开心"
+                msg = f"💕 {name} 依偎在你膝下，怯生生唤了声「母妃」，惹人怜爱，亲密度+{gain}"
+            else:
+                loss = random.randint(1, 4)
+                child["affection"] = max(10, child.get("affection", 30) - loss)
+                child["mood"] = "思念"
+                msg = f"🥺 {name} 望着远处出神，低声呢喃着{birth_mother}，亲密度-{loss}"
+            events.append(msg)
+            add_child_event(child, msg)
+        elif roll < 0.22:
             gain = random.randint(3, 8)
             child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + gain)
             child["mood"] = "兴奋"
@@ -1483,7 +1679,7 @@ def process_npc_pregnancy(game_state):
                     gender = random.choice(["皇子", "公主"])
                     child_name = generate_child_name(gender)
                     if "children" not in npc: npc["children"] = []
-                    npc["children"].append(create_newborn_child(gender, child_name, game_state))
+                    npc["children"].append(create_newborn_child(gender, child_name, game_state, mother_name=name))
                     birth_events.append(f"👶 {name} 诞下{gender}，取名{child_name}！")
                     death_msg = try_childbirth_death(game_state, name, survived_child=True)
                     if death_msg:
@@ -1504,7 +1700,8 @@ def update_npc_children_growth(game_state):
             continue
         for child in npc["children"]:
             child["age"] = child.get("age", 0) + CHILD_AGE_STEP
-            growth_events.extend(process_child_milestones(child, f"{name}的"))
+            mother_label = child.get("adoptive_mother") or name
+            growth_events.extend(process_child_milestones(child, f"{mother_label}的", game_state))
     return growth_events
 
 def check_and_consume_action(game_state):
@@ -2471,6 +2668,52 @@ def next_period():
     if prince_events:
         for evt in prince_events:
             game_state.add_memory(evt)
+
+    # ---- 子嗣过继相关随机动态 ----
+    adoption_hints = []
+    # 清理过期的“想收养”标记
+    for n, npc in game_state.npcs.items():
+        want_day = npc.get("wants_adopt_player_child")
+        if want_day is not None:
+            if game_state.day - int(want_day) > ADOPT_WANT_HINT_DAYS:
+                npc.pop("wants_adopt_player_child", None)
+    # 高位无子妃嫔有意收养玩家子嗣
+    if random.random() < 0.12 and game_state.children:
+        candidates = []
+        for n, npc in game_state.npcs.items():
+            if n in ("太后", "皇后") or n == game_state.name:
+                continue
+            if not npc.get("alive", True):
+                continue
+            if RANK_LEVELS.get(normalize_rank_name(npc.get("rank", "答应")), 0) < RANK_LEVELS.get("嫔", 0):
+                continue
+            if count_living_children(npc.get("children", [])) > 0:
+                continue
+            rel = game_state.relationships.get(n, {"好感": 0})
+            if rel.get("好感", 0) >= 30:
+                candidates.append(n)
+        if candidates:
+            npc_name = random.choice(candidates)
+            child = random.choice([c for c in game_state.children if c.get("alive", True)])
+            child_name = child.get("name", "皇嗣")
+            game_state.npcs[npc_name]["wants_adopt_player_child"] = game_state.day
+            adoption_hints.append(f"📜 {npc_name}膝下空虚，有意收养你的{child_name}，可去她的宫中提及过继之事")
+    # 遗孤消息
+    if random.random() < 0.08:
+        orphans = []
+        for n, npc in game_state.npcs.items():
+            if npc.get("alive", True):
+                continue
+            for c in npc.get("children", []):
+                if c.get("alive", True) and not c.get("adoptive_mother"):
+                    orphans.append((n, c))
+        if orphans:
+            oname, ochild = random.choice(orphans)
+            adoption_hints.append(f"🕯️ 故人{oname}的遗孤{ochild.get('name', '子嗣')}孤苦无依，你若去其旧居，或可收养此子")
+    if adoption_hints:
+        for hint in adoption_hints:
+            intelligence.append(hint)
+            game_state.add_memory(hint)
 
     # ===== 晋升触发（转旬时检测） =====
     promotion_message = None
@@ -3675,6 +3918,324 @@ def child_interact():
         "child": child,
         "children": game_state.children,
         "attributes": game_state.attributes,
+        "silver": game_state.silver,
+        "remaining_actions": game_state.remaining_actions,
+        "max_actions": game_state.max_actions,
+    })
+
+# ============================================================
+#  子嗣过继系统
+# ============================================================
+
+@app.route('/api/child/adopt', methods=['POST'])
+def child_adopt():
+    """子嗣过继：收养他人之子 / 将己子送养他人抚养 / 归宗 / 接回。
+
+    direction = 'in'     收养 mother_name 的子嗣（child_index）
+    direction = 'out'    将自己的子嗣（child_index）送养给 mother_name（须位份高于你）
+    direction = 'return' 将自己收养的子嗣归宗，送还生母（child_index 为你的子嗣）
+    direction = 'recall' 从养母处接回自己亲生子嗣（child_index 为对方膝下的子嗣）
+    """
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    direction = data.get('direction')
+    mother_name = (data.get('mother_name') or '').strip()
+    try:
+        child_index = int(data.get('child_index', -1))
+    except (TypeError, ValueError):
+        return jsonify({"error": "子嗣序号无效", "success": False}), 400
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if direction not in ("in", "out", "return", "recall"):
+        return jsonify({"error": "方向参数错误", "success": False}), 400
+
+    can_act, remaining = check_and_consume_action(game_state)
+    if not can_act:
+        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+
+    my_rank_idx = RANK_LEVELS.get(game_state.rank.name, 0)
+    period_label = f"建元{game_state.year}年{game_state.month}月"
+
+    if direction == "in":
+        # ---------- 收养他人之子 ----------
+        if not mother_name or mother_name not in game_state.npcs:
+            return jsonify({"error": "目标妃嫔不存在", "success": False}), 404
+        npc = game_state.npcs[mother_name]
+        child, pos = resolve_living_child(npc.get("children", []), child_index)
+        if child is None:
+            return jsonify({"error": "子嗣不存在", "success": False}), 404
+        ensure_child_fields(child)
+        child_name = child.get("name", "未命名")
+        gender = child.get("gender", "皇子")
+        age = int(child.get("age", 0) or 0)
+        is_orphan = not npc.get("alive", True)
+        # 校验
+        if age > ADOPT_MAX_AGE:
+            return jsonify({"error": f"子嗣已{age}岁，年长不宜再过继", "success": False}), 400
+        if my_rank_idx < RANK_LEVELS.get(ADOPT_MIN_RANK, 0):
+            return jsonify({"error": f"须{ADOPT_MIN_RANK}及以上位份方可收养子嗣", "success": False}), 400
+        if count_living_children(game_state.children) >= ADOPT_MAX_CHILDREN:
+            return jsonify({"error": f"后宫子嗣已满（上限{ADOPT_MAX_CHILDREN}人），不宜再收养", "success": False}), 400
+        if child.get("adopted_count", 0) >= ADOPT_MAX_TRANSFERS:
+            return jsonify({"error": "此子已被过继多次，宗人府不许再行转继", "success": False}), 400
+        already_adopted_to_living = False
+        if child.get("adoptive_mother") and child["adoptive_mother"] in game_state.npcs:
+            if game_state.npcs[child["adoptive_mother"]].get("alive", True) and child["adoptive_mother"] != game_state.name:
+                already_adopted_to_living = True
+        if already_adopted_to_living:
+            return jsonify({"error": "该子嗣已有养母抚养，不便夺爱", "success": False}), 400
+        # 生母/养母在世时需其同意
+        willingness = adoption_willingness(game_state, npc, child)
+        if not is_orphan and willingness < 40:
+            rel = game_state.relationships.get(mother_name, {"好感": 0})
+            if rel.get("好感", 0) < 40 and my_rank_idx <= RANK_LEVELS.get(npc.get("rank", "答应"), 0):
+                return jsonify({"error": f"{mother_name}割舍不下亲子{child_name}，过继未成", "success": False}), 400
+        # 皇子（皇嗣）专属：需更高位份 + 皇帝圣宠门槛 + 皇帝恩准
+        if gender == "皇子":
+            required_rank = ADOPT_PRINCE_MIN_RANK
+            if my_rank_idx < RANK_LEVELS.get(required_rank, 0):
+                return jsonify({"error": f"皇嗣尊贵，须{required_rank}及以上位份方可收养", "success": False}), 400
+            favor = game_state.attributes.get("宠爱", 0)
+            if favor < ADOPT_PRINCE_EMPEROR_FAVOR:
+                return jsonify({"error": f"圣宠不足（需宠爱≥{ADOPT_PRINCE_EMPEROR_FAVOR}），皇帝不忍皇嗣旁落，暂不允许收养", "success": False}), 400
+            approved, emperor_note = should_use_emperor_approval(game_state, child, "in")
+            if not approved:
+                return jsonify({"error": f"奏请过继皇嗣{child_name}，{emperor_note}，只得作罢", "success": False}), 400
+        else:
+            approved, emperor_note = should_use_emperor_approval(game_state, child, "in")
+            if not approved:
+                return jsonify({"error": f"奏请过继{child_name}，{emperor_note}，只得作罢", "success": False}), 400
+        # 费用（遗孤减半）
+        base_cost = ADOPT_IN_COST_PRINCE if gender == "皇子" else ADOPT_IN_COST
+        cost = max(10, base_cost // 2) if is_orphan else base_cost
+        if game_state.silver < cost:
+            return jsonify({"error": f"银两不足，过继仪式需{cost}两", "success": False}), 400
+
+        # 执行过继
+        game_state.silver -= cost
+        if pos >= 0:
+            npc.get("children", []).pop(pos)
+        game_state.children.append(child)
+        game_state.has_children = True
+        child["adopted"] = True
+        child["adopted_count"] = child.get("adopted_count", 0) + 1
+        child["birth_mother"] = child.get("birth_mother") or mother_name
+        child["adoptive_mother"] = game_state.name
+        child["adopted_age"] = age
+        child["adopted_at"] = period_label
+        child["affection"] = max(10, child.get("affection", 30) - 15) if age >= 1 else random.randint(30, 50)
+        child["mood"] = "平静"
+        add_adoption_history(child, "收养", mother_name if not is_orphan else f"遗孤·{mother_name}", game_state.name, f"过继仪式{cost}两", game_state.day)
+
+        if is_orphan:
+            wei_gain = 10 + (8 if gender == "皇子" else 4)
+            fav_gain = 6
+            message = f"🕯️ {mother_name}已逝，其子{child_name}孤苦无依。你向皇帝恳请收养遗孤，皇帝赞你仁厚，准其归你抚养。威望+{wei_gain}，宠爱+{fav_gain}"
+            if "太后" in game_state.relationships:
+                game_state.relationships["太后"]["好感"] = min(100, game_state.relationships["太后"].get("好感", 25) + 5)
+        else:
+            wei_gain = 10 + (6 if gender == "皇子" else 2)
+            fav_gain = 4
+            message = f"📜 经皇帝恩准，{mother_name}所出{gender}{child_name}过继至你膝下抚养，威望+{wei_gain}，宠爱+{fav_gain}"
+            if mother_name in game_state.relationships:
+                game_state.relationships[mother_name]["好感"] = max(-100, game_state.relationships[mother_name].get("好感", 0) - random.randint(15, 25))
+                game_state.relationships[mother_name]["印象"] = "怨恨"
+            npc["压力"] = min(100, npc.get("压力", 0) + random.randint(8, 15))
+            message += f"。{mother_name}虽万般不舍，亦无可奈何"
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + wei_gain)
+        game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + fav_gain)
+        add_child_event(child, message)
+        game_state.add_memory(message)
+        narration = message
+
+    elif direction == "out":
+        # ---------- 送养己子 ----------
+        if not mother_name or mother_name not in game_state.npcs:
+            return jsonify({"error": "目标妃嫔不存在", "success": False}), 404
+        target = game_state.npcs[mother_name]
+        if not target.get("alive", True):
+            return jsonify({"error": "对方已不在人世", "success": False}), 400
+        child, pos = resolve_living_child(game_state.children, child_index)
+        if child is None:
+            return jsonify({"error": "子嗣不存在", "success": False}), 404
+        ensure_child_fields(child)
+        child_name = child.get("name", "未命名")
+        gender = child.get("gender", "皇子")
+        age = int(child.get("age", 0) or 0)
+        if age > ADOPT_MAX_AGE:
+            return jsonify({"error": f"子嗣已{age}岁，年长不宜再过继", "success": False}), 400
+        if child.get("adopted_count", 0) >= ADOPT_MAX_TRANSFERS:
+            return jsonify({"error": "此子已被过继多次，宗人府不许再行转继", "success": False}), 400
+        target_rank_idx = RANK_LEVELS.get(target.get("rank", "答应"), 0)
+        if target_rank_idx < RANK_LEVELS.get(ADOPT_TARGET_MIN_RANK, 0):
+            return jsonify({"error": f"对方位份不足，须{ADOPT_TARGET_MIN_RANK}及以上方可抚养皇嗣", "success": False}), 400
+        if target_rank_idx <= my_rank_idx and target.get("rank") != "皇后":
+            return jsonify({"error": "对方位份未高于你，按宫规不可将皇嗣托付给她抚养", "success": False}), 400
+        if game_state.rank.name == "皇后":
+            return jsonify({"error": "你贵为皇后，所出皆为嫡出，不可送养", "success": False}), 400
+        if count_living_children(target.get("children", [])) >= ADOPT_MAX_CHILDREN:
+            return jsonify({"error": "对方子嗣已满", "success": False}), 400
+        # 对方是否愿意收养
+        want_flag = target.get("wants_adopt_player_child")
+        willing_recv = receiver_willingness(game_state, target, child)
+        if want_flag is not None:
+            willing_recv = max(willing_recv, 80)   # 对方正有此意，乐见其成
+        rel = game_state.relationships.get(mother_name, {"好感": 0})
+        if willing_recv < 35 and rel.get("好感", 0) < 30:
+            return jsonify({"error": f"{mother_name}以膝下已可照拂婉拒了你的托付", "success": False}), 400
+        cost = ADOPT_OUT_COST_PRINCE if gender == "皇子" else ADOPT_OUT_COST
+        if want_flag is not None:
+            cost = max(10, cost - 10)   # 对方主动求子，礼金减免
+        if game_state.silver < cost:
+            return jsonify({"error": f"银两不足，过继仪式需{cost}两", "success": False}), 400
+
+        game_state.silver -= cost
+        if pos >= 0:
+            game_state.children.pop(pos)
+        target.setdefault("children", []).append(child)
+        if want_flag is not None:
+            target.pop("wants_adopt_player_child", None)
+        if not game_state.children:
+            game_state.has_children = False
+        child["adopted"] = True
+        child["adopted_count"] = child.get("adopted_count", 0) + 1
+        child["birth_mother"] = child.get("birth_mother") or game_state.name
+        child["adoptive_mother"] = mother_name
+        child["adopted_age"] = age
+        child["adopted_at"] = period_label
+        child["affection"] = max(10, random.randint(25, 45))
+        child["mood"] = "思念"
+        add_adoption_history(child, "送养", game_state.name, mother_name, f"仪式{cost}两", game_state.day)
+
+        wei_gain = 3
+        fav_gain = 8
+        if mother_name in game_state.relationships:
+            game_state.relationships[mother_name]["好感"] = min(100, game_state.relationships[mother_name].get("好感", 0) + 18)
+            game_state.relationships[mother_name]["印象"] = "感激"
+        target["压力"] = max(0, target.get("压力", 0) - random.randint(5, 10))
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + wei_gain)
+        game_state.attributes["宠爱"] = max(0, game_state.attributes.get("宠爱", 0) - fav_gain)
+        if gender == "皇子":
+            game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - 3)
+        message = f"📜 你奏请将{gender}{child_name}过继给{mother_name}抚养。对方感激涕零，好感+18，你的贡献威望+{wei_gain}，宠爱-{fav_gain}"
+        message += f"。纵然不舍，为孩子的将来，你忍痛割爱"
+        add_child_event(child, message)
+        game_state.add_memory(message)
+        narration = message
+
+    elif direction == "return":
+        # ---------- 归宗：将自己收养的子嗣送还生母 ----------
+        child, pos = resolve_living_child(game_state.children, child_index)
+        if child is None:
+            return jsonify({"error": "子嗣不存在", "success": False}), 404
+        ensure_child_fields(child)
+        if not child.get("adopted", False) or child.get("adoptive_mother") != game_state.name:
+            return jsonify({"error": "此子并非过继在你膝下，无需归宗", "success": False}), 400
+        birth_mother = child.get("birth_mother")
+        if not birth_mother or birth_mother == game_state.name or birth_mother not in game_state.npcs:
+            return jsonify({"error": "生母不在宫中，无法归宗", "success": False}), 400
+        bm_npc = game_state.npcs[birth_mother]
+        if not bm_npc.get("alive", True):
+            return jsonify({"error": "生母已然仙逝，此子只能由你养育到底", "success": False}), 400
+        if count_living_children(bm_npc.get("children", [])) >= ADOPT_MAX_CHILDREN:
+            return jsonify({"error": "生母膝下子嗣已满，暂难迎回", "success": False}), 400
+        # 皇嗣（皇子）归宗须皇帝恩准，以免动摇宗谱
+        child_name = child.get("name", "未命名")
+        if child.get("gender") == "皇子":
+            approved, emperor_note = should_use_emperor_approval(game_state, child, "return")
+            if not approved:
+                return jsonify({"error": f"奏请皇嗣{child_name}归宗，{emperor_note}，只得作罢", "success": False}), 400
+        if game_state.silver < ADOPT_RETURN_COST:
+            return jsonify({"error": f"银两不足，归宗仪式需{ADOPT_RETURN_COST}两", "success": False}), 400
+        game_state.silver -= ADOPT_RETURN_COST
+        if pos >= 0:
+            game_state.children.pop(pos)
+        bm_npc.setdefault("children", []).append(child)
+        if not game_state.children:
+            game_state.has_children = False
+        child["adopted"] = False
+        child["adoptive_mother"] = ""
+        child["adopted_count"] = child.get("adopted_count", 0) + 1
+        child["via_return"] = True
+        child["mood"] = "兴奋"
+        add_adoption_history(child, "归宗", game_state.name, birth_mother, f"归宗仪式{ADOPT_RETURN_COST}两", game_state.day)
+        if birth_mother in game_state.relationships:
+            game_state.relationships[birth_mother]["好感"] = min(100, game_state.relationships[birth_mother].get("好感", 0) + 15)
+            game_state.relationships[birth_mother]["印象"] = "感激"
+        bm_npc["压力"] = max(0, bm_npc.get("压力", 0) - random.randint(5, 10))
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 3)
+        message = f"📜 你将养子{child_name}归宗，送还生母{birth_mother}膝下，骨肉团聚，威望+3"
+        add_child_event(child, message)
+        game_state.add_memory(message)
+        narration = message
+
+    else:
+        # ---------- 接回：从养母处接回自己亲生子嗣 ----------
+        if not mother_name or mother_name not in game_state.npcs:
+            return jsonify({"error": "目标妃嫔不存在", "success": False}), 404
+        npc = game_state.npcs[mother_name]
+        child, pos = resolve_living_child(npc.get("children", []), child_index)
+        if child is None:
+            return jsonify({"error": "子嗣不存在", "success": False}), 404
+        ensure_child_fields(child)
+        child_name = child.get("name", "未命名")
+        gender = child.get("gender", "皇子")
+        age = int(child.get("age", 0) or 0)
+        if not child.get("adoptive_mother") == mother_name:
+            return jsonify({"error": "此子并非由对方抚养，无法接回", "success": False}), 400
+        if not child.get("birth_mother") == game_state.name:
+            return jsonify({"error": "此子并非你亲生，不可接回", "success": False}), 400
+        if age > ADOPT_MAX_AGE:
+            return jsonify({"error": f"子嗣已{age}岁，特尔宗已建档，不易归还", "success": False}), 400
+        if count_living_children(game_state.children) >= ADOPT_MAX_CHILDREN:
+            return jsonify({"error": "你膝下子嗣已满", "success": False}), 400
+        # 皇嗣（皇子）接回亦须皇帝恩准，以免皇嗣归属反复
+        if gender == "皇子":
+            approved, emperor_note = should_use_emperor_approval(game_state, child, "recall")
+            if not approved:
+                return jsonify({"error": f"奏请接回皇嗣{child_name}，{emperor_note}，只得作罢", "success": False}), 400
+        # 对方是否愿意放手
+        if npc.get("alive", True):
+            rel = game_state.relationships.get(mother_name, {"好感": 0}).get("好感", 0)
+            willing = receiver_keep_willingness(game_state, npc, child, rel)
+            if willing < 40 and my_rank_idx <= RANK_LEVELS.get(npc.get("rank", "答应"), 0):
+                return jsonify({"error": f"{mother_name}视{child_name}如己出，不肯放手，还请改日再议", "success": False}), 400
+        cost = ADOPT_BACK_COST
+        if npc.get("alive", True):
+            cost = max(10, cost // 2)
+        if game_state.silver < cost:
+            return jsonify({"error": f"银两不足，接回仪式需{cost}两", "success": False}), 400
+        game_state.silver -= cost
+        if pos >= 0:
+            npc.get("children", []).pop(pos)
+        game_state.children.append(child)
+        game_state.has_children = True
+        child["adopted"] = False
+        child["adoptive_mother"] = ""
+        child["adopted_count"] = child.get("adopted_count", 0) + 1
+        child["mood"] = "开心"
+        add_adoption_history(child, "接回", mother_name, game_state.name, f"接回仪式{cost}两", game_state.day)
+        if npc.get("alive", True):
+            if mother_name in game_state.relationships:
+                game_state.relationships[mother_name]["好感"] = max(-100, game_state.relationships[mother_name].get("好感", 0) - random.randint(12, 22))
+                game_state.relationships[mother_name]["印象"] = "怨怼"
+            npc["压力"] = min(100, npc.get("压力", 0) + random.randint(5, 10))
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 4)
+        message = f"📜 你奏请将{gender}{child_name}从{mother_name}处接回：孩子扑进你怀中，亲热地喊「母妃」，排除了分离的阴霾。威望+4"
+        add_child_event(child, message)
+        game_state.add_memory(message)
+        narration = message
+
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "narration": narration,
+        "children": game_state.children,
+        "has_children": game_state.has_children,
+        "npcs": serialize_npcs_for_client(game_state),
+        "attributes": game_state.attributes,
+        "relationships": game_state.relationships,
         "silver": game_state.silver,
         "remaining_actions": game_state.remaining_actions,
         "max_actions": game_state.max_actions,
