@@ -1587,7 +1587,13 @@ def serialize_npcs_for_client(game_state):
 # ---- 临时调试接口：强制给某个 NPC 或玩家生成一个子嗣（仅用于本地验证，验证完成后会移除）
 @app.route('/__debug/force_spawn_child', methods=['GET','POST'])
 def debug_force_spawn_child():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
+    # Allow passing arguments via query string for GET requests
+    args = request.args or {}
+    # merge args (string values) into data if not present
+    for k, v in args.items():
+        if k not in data or not data.get(k):
+            data[k] = v
     player_id = data.get('player_id')
     target = data.get('target', 'npc')  # 'npc' or 'player'
     npc_name = data.get('npc_name')
