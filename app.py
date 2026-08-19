@@ -1585,10 +1585,6 @@ def serialize_npcs_for_client(game_state):
 
 
 # ---- 临时调试接口：强制给某个 NPC 或玩家生成一个子嗣（仅用于本地验证，验证完成后会移除）
-@app.route('/__debug/force_spawn_child', methods=['GET','POST'])
-def debug_force_spawn_child():
-    pass
-
 # helper: list registered routes (debug only, local access)
 @app.route('/__debug/routes', methods=['GET'])
 def debug_list_routes():
