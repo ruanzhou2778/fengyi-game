@@ -1583,6 +1583,43 @@ def serialize_npcs_for_client(game_state):
         }
     return result
 
+
+# ---- 临时调试接口：强制给某个 NPC 或玩家生成一个子嗣（仅用于本地验证，验证完成后会移除）
+@app.route('/__debug/force_spawn_child', methods=['POST'])
+def debug_force_spawn_child():
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    target = data.get('target', 'npc')  # 'npc' or 'player'
+    npc_name = data.get('npc_name')
+    gender = data.get('gender', None) or random.choice(['皇子', '公主'])
+    child_name = data.get('name') or generate_child_name(gender)
+
+    # require local access to avoid accidental exposure
+    if request.remote_addr not in (None, '127.0.0.1', '::1'):
+        return jsonify({'error': 'debug endpoint only allowed from localhost'}), 403
+
+    if player_id:
+        game_state, err = session_or_404(player_id)
+        if err:
+            return err
+    else:
+        return jsonify({'error': 'player_id required'}), 400
+
+    if target == 'player':
+        game_state.children.append(create_newborn_child(gender, child_name, game_state))
+        autosave_session(player_id)
+        return jsonify({'success': True, 'children': game_state.children})
+    else:
+        if not npc_name or npc_name not in game_state.npcs:
+            return jsonify({'error': 'npc_name required and must exist'}), 400
+        npc = game_state.npcs[npc_name]
+        if 'children' not in npc:
+            npc['children'] = []
+        npc['children'].append(create_newborn_child(gender, child_name, game_state, mother_name=npc_name))
+        autosave_session(player_id)
+        # return serialized npcs so client sees the same structure as API
+        return jsonify({'success': True, 'npcs': serialize_npcs_for_client(game_state)})
+
 def can_npc_get_pregnant(npc):
     if not npc.get("alive", True):
         return False
