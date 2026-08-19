@@ -1244,7 +1244,29 @@ function openInventory() {
 //  核心 UI 更新
 // ============================================================
 function updateHaremPage(data){
-    const npcs = data.npcs || {};
+    const npcs = { ...(data.npcs || {}) };
+    const playerName = data.player_name || data.name || '';
+    const playerRank = data.display_rank || data.rank || '';
+    const playerIsQueen = playerRank === '皇后' || data.rank === '皇后';
+    const playerKey = '__player__';
+    // 主控晋为皇后后，替换 NPC 皇后，避免后宫列表出现两位皇后。
+    if (playerIsQueen && playerName) {
+        Object.keys(npcs).forEach(name => {
+            if (npcs[name]?.rank === '皇后') delete npcs[name];
+        });
+        npcs[playerKey] = {
+            name: playerName,
+            rank: '皇后',
+            icon: '👑',
+            personality: data.personality || '六宫之主',
+            attributes: data.attributes || {},
+            children: data.children || [],
+            is_pregnant: data.is_pregnant || false,
+            pregnancy_month: data.pregnancy_month || 0,
+            alive: true,
+            is_player: true,
+        };
+    }
     const names = Object.keys(npcs);
     const grid = document.getElementById('npcGrid');
     let queen = null, others = [];
@@ -1264,9 +1286,10 @@ function updateHaremPage(data){
     grid.innerHTML = '';
     livingList.forEach(name => {
         const npc = npcs[name];
+        const displayName = npc.is_player ? playerName : name;
         const rel = data.relationships ? data.relationships[name] : null;
         const isQueen = npc.rank === '皇后';
-        const isRival = data.rivalries && data.rivalries[name] > 0;
+        const isRival = !npc.is_player && data.rivalries && data.rivalries[name] > 0;
         const isAlly = data.alliances && data.alliances[name] > 0;
         const card = document.createElement('div');
         card.className = isQueen ? 'npc-card-queen' : 'npc-card';
@@ -1294,7 +1317,7 @@ function updateHaremPage(data){
         card.innerHTML = `
             <div style="display:flex;align-items:center;gap:2px;font-size:10px;">
                 <span style="font-size:${isQueen ? '16' : '12'}px;">${npc.icon || '🌸'}</span>
-                <span style="font-weight:600;color:var(--text-dark);${isQueen ? 'font-size:12px;' : ''}">${name}</span>
+                <span style="font-weight:600;color:var(--text-dark);${isQueen ? 'font-size:12px;' : ''}">${displayName}</span>
                 ${isQueen ? `<span class="queen-badge" style="margin-left:auto;">👑六宫之主</span>` :
                     `<span style="font-size:6px;color:var(--gold);background:var(--gold-light);padding:1px 4px;border-radius:6px;margin-left:auto;">${npc.rank || '妃嫔'}</span>`}
             </div>
@@ -1309,13 +1332,13 @@ function updateHaremPage(data){
             ${!isQueen ? `<div class="npc-badges">${pregnancyBadge}${childrenBadge}${pressureBadge}${tag ? `<span style="font-size:6px;padding:1px 3px;border-radius:6px;background:${isRival ? '#f0d5d0' : '#d5e0e8'};color:${isRival ? '#8a3a2a' : '#2a4a5a'};">${tag}</span>` : ''}</div>` : 
             `<div class="npc-badges">${pregnancyBadge}${childrenBadge}${pressureBadge}</div>`}
         `;
-        if (isQueen) {
+        if (isQueen && !npc.is_player) {
             card.style.cursor = 'pointer';
             card.addEventListener('click', function(e) {
                 e.stopPropagation();
                 openQueenInteract(name);
             });
-        } else {
+        } else if (!npc.is_player) {
             card.addEventListener('click', function(e) {
                 e.stopPropagation();
                 openInteract('npc', name);
