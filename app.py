@@ -1278,7 +1278,9 @@ def child_adoption_pressure(child, base=0):
 
 
 def ensure_child_fields(child):
-    """补全子嗣字段（兼容旧存档）。"""
+    """补全子嗣字段（兼容旧存档）。保证存在稳定的 child_id。"""
+    # Ensure stable unique id for children (migrate old entries)
+    child.setdefault("child_id", uuid.uuid4().hex)
     child.setdefault("affection", random.randint(20, 50))
     child.setdefault("talent", random.randint(30, 70))
     child.setdefault("health", random.randint(65, 90))
@@ -1312,6 +1314,7 @@ def child_talent_label(talent):
 
 def create_newborn_child(gender, name, game_state, mother_name=None):
     child = {
+        "child_id": uuid.uuid4().hex,
         "name": name,
         "gender": gender,
         "age": 0,
