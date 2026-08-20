@@ -158,6 +158,11 @@ class GameState:
         self.has_children = False
         self.rivalries = {}
         self.alliances = {}
+        # 皇后协理六宫：每旬独立计数，旧存档缺字段时由后端按默认值兼容。
+        self.queen_authority_period = None
+        self.queen_authority_uses = 0
+        self.queen_assistance_count = 0
+        self.six_palace_assistant = None
         self.emperor = {
             "name": "萧景琰",
             "personality": random.choice([p.value for p in EmperorPersonality]),
@@ -330,6 +335,10 @@ class GameState:
             "has_children": self.has_children,
             "rivalries": self.rivalries,
             "alliances": self.alliances,
+            "queen_authority_period": getattr(self, "queen_authority_period", None),
+            "queen_authority_uses": getattr(self, "queen_authority_uses", 0),
+            "queen_assistance_count": getattr(self, "queen_assistance_count", 0),
+            "six_palace_assistant": getattr(self, "six_palace_assistant", None),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -404,6 +413,10 @@ class GameState:
             game_state.has_children = data.get("has_children", False)
             game_state.rivalries = data.get("rivalries", {})
             game_state.alliances = data.get("alliances", {})
+            game_state.queen_authority_period = data.get("queen_authority_period")
+            game_state.queen_authority_uses = data.get("queen_authority_uses", 0)
+            game_state.queen_assistance_count = data.get("queen_assistance_count", 0)
+            game_state.six_palace_assistant = data.get("six_palace_assistant")
             game_state.created_at = data.get("created_at", datetime.now().isoformat())
             game_state.updated_at = datetime.now().isoformat()
             game_state.max_actions = data.get("max_actions", 7)

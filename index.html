@@ -402,6 +402,24 @@
         .log-entry { color: #ddd5ca; border-bottom-color: rgba(255,255,255,.07) !important; }
         .log-entry.flip { color: var(--gold-light) !important; background: linear-gradient(90deg,rgba(196,173,148,.1),transparent); border-left-color: var(--gold); }
         .log-entry .calendar-tag { background: rgba(196,173,148,.16); color: #f7e8c7; border: 1px solid rgba(196,173,148,.34); box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
+        /* Dark-theme readability for harem cards and interaction dialogs. */
+        .npc-card,.npc-card-queen { background: linear-gradient(135deg,rgba(255,255,255,.075),rgba(138,179,165,.045)) !important; }
+        .npc-card > div,.npc-card-queen > div { color: #d9d4cc !important; }
+        .npc-card span[style*="color"],.npc-card-queen span[style*="color"] { color: #d9d4cc !important; }
+        .npc-card span[style*="color:var(--text-dark)"],.npc-card-queen span[style*="color:var(--text-dark)"] { color: #fff5e5 !important; }
+        .npc-card span[style*="color:var(--text-light)"],.npc-card-queen span[style*="color:var(--text-light)"] { color: #bdb8af !important; }
+        .npc-card span[style*="background:var(--gold-light)"],.npc-card-queen span[style*="background:var(--gold-light)"] { background: rgba(196,173,148,.2) !important; color: #f4dfb9 !important; }
+        .npc-card .npc-pregnancy-badge,.npc-card .npc-children-badge,.npc-card .npc-badges span { text-shadow: 0 1px 2px rgba(0,0,0,.18); }
+        .modal-box #modalTitle { color: #f5e6ca !important; }
+        .modal-box #modalBody,.modal-box #modalBody > div { color: #ddd5ca !important; }
+        .modal-box #modalBody > div[style*="background"] { background: linear-gradient(135deg,rgba(138,179,165,.12),rgba(196,173,148,.08)) !important; }
+        .modal-box #modalBody [style*="color:var(--text-dark)"],.modal-box #modalBody [style*="color:#2a1a0a"] { color: #fff5e5 !important; }
+        .modal-box #modalBody [style*="color:var(--text-mid)"] { color: #ddd5ca !important; }
+        .modal-box #modalBody [style*="color:var(--text-light)"] { color: #bdb8af !important; }
+        .modal-box #modalBody .interact-btn { background: rgba(138,179,165,.14) !important; color: #f1eadf !important; border-color: rgba(138,179,165,.5) !important; }
+        .modal-box #modalBody .interact-btn:hover { background: rgba(196,173,148,.25) !important; color: #fff8ec !important; }
+        .modal-box #modalBody .interact-result-area { background: rgba(196,173,148,.13) !important; color: #f0e8dc !important; border-color: rgba(196,173,148,.5) !important; }
+        .modal-box #modalBody .edict-modal-content { color: #ddd5ca !important; }
         #currentStoryDisplay { background: rgba(255,255,255,.05); color: var(--text-dark); border-color: var(--gold) !important; box-shadow: 0 0 0 1px rgba(138,179,165,.08) inset,0 2px 16px rgba(0,0,0,.16); }
         textarea,input,select { background: rgba(0,0,0,.2) !important; color: var(--text-dark) !important; border-color: var(--jade) !important; border-radius: 10px !important; }
         textarea:focus,input:focus,select:focus { border-color: var(--gold-light) !important; box-shadow: 0 0 0 3px rgba(196,173,148,.13),0 0 20px rgba(196,173,148,.1) !important; background: rgba(0,0,0,.3) !important; }
@@ -409,7 +427,8 @@
         .stat-block .block-title,.char-card .card-title { color: var(--gold-light) !important; border-bottom-color: rgba(196,173,148,.28) !important; }
         .attr-bar-row .bar-track { background: rgba(0,0,0,.28) !important; }
         .attr-bar-row .bar-track .bar-fill,.bar-fill { background: linear-gradient(90deg,#8ab3a5,#c4ad94) !important; }
-        .child-card-ui,.servant-card,.npc-card,.npc-card-queen { background: rgba(255,255,255,.045) !important; border-color: var(--border-light) !important; color: var(--text-body) !important; }
+        .child-card-ui,.servant-card { background: rgba(255,255,255,.045) !important; border-color: var(--border-light) !important; color: var(--text-body) !important; }
+        .npc-card,.npc-card-queen { background: linear-gradient(135deg,rgba(255,255,255,.075),rgba(138,179,165,.045)) !important; border-color: var(--border-light) !important; color: var(--text-body) !important; }
         .child-card-ui:hover,.servant-card:hover,.npc-card:hover { background: rgba(196,173,148,.1) !important; border-color: var(--gold) !important; }
         .bottom-nav { background: linear-gradient(180deg,rgba(35,48,46,.98),rgba(20,29,29,.98)) !important; border-top-color: rgba(196,173,148,.4) !important; }
         .nav-item { color: var(--text-mid) !important; }
@@ -621,6 +640,22 @@
                         <button onclick="doPray('curse')" class="interact-btn" style="padding:3px 8px;">🕯️ 掌祀 (40两)</button>
                     </div>
                 </div>
+                <div class="stat-block">
+                    <div class="block-title">👑 协理六宫</div>
+                    <div id="queenAuthorityStatus" style="font-size:7px;color:var(--text-light);margin-bottom:3px;">正在核验凤印权限...</div>
+                    <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;">
+                        <select id="queenAuthorityTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择妃位以下妃嫔...</option></select>
+                        <button onclick="queenAuthorityAction('晋位')" class="interact-btn" style="padding:3px 7px;">📜 晋位</button>
+                        <button onclick="queenAuthorityAction('降位')" class="interact-btn" style="padding:3px 7px;">📉 降位</button>
+                    </div>
+                    <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:3px;">
+                        <select id="sixPalaceAssistantCandidate" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择协理六宫人选...</option></select>
+                        <button onclick="petitionRankAction('请示协理')" class="interact-btn" style="padding:3px 7px;">🪶 请示</button>
+                    </div>
+                    <button onclick="queenAuthorityAction('协理六宫')" class="interact-btn" style="width:100%;padding:3px;margin-top:3px;">🪷 亲理六宫事务</button>
+                    <div style="font-size:6px;color:var(--text-light);margin-top:2px;">皇后可向皇帝请示协理人选；皇帝亦可直接任命。仅皇后或协理可直接晋降位。</div>
+                </div>
+
                 <div class="stat-block">
                     <div class="block-title">🎲 随机宫斗</div>
                     <button onclick="triggerRandomConflict()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;">🎲 触发随机事件</button>
@@ -1726,7 +1761,7 @@ if(data.death_message){
 }
 
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
-updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);
+updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);loadQueenAuthority();
 const disabled=rem<=0;
 document.querySelectorAll('.action-btn, .interact-btn, #sendBtn, [onclick*="hireServant"], [onclick*="trainServant"], [onclick*="dowagerInteract"], [onclick*="emperorInteract"], [onclick*="interactAction"]').forEach(btn=>{btn.disabled=disabled;btn.style.opacity=disabled?'0.4':'1';btn.style.cursor=disabled?'not-allowed':'pointer';});
 userInput.disabled=disabled;userInput.placeholder=disabled?'行动点已用完，请转旬':'输入你想做的事...';
@@ -1840,6 +1875,9 @@ async function openInteract(type, name) {
                     <button onclick="interactAction('${d.name}','rival')" class="interact-btn">⚔️ 陷害</button>
                     <button onclick="closeModal();startDuelFromPage('${d.name}')" class="interact-btn">🗡️ 争锋</button>
                     <button onclick="openChildTransferMenu('${d.name}')" class="interact-btn" style="background:#f5ede5;">📜 子嗣过继</button>
+                    <button onclick="petitionRankAction('向皇后请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="background:#f9f1e8;">🌸 向皇后请晋</button>
+                    <button onclick="petitionRankAction('向皇上请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="background:#efe8dc;">👑 向皇上请晋</button>
+                    <button onclick="petitionRankAction('向太后请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="background:#eee7ea;">👵 向太后请晋</button>
                 </div>
                 <div id="interactResultArea" class="interact-result-area"></div>
             </div>
@@ -2341,6 +2379,7 @@ function openEmperorInteract() {
                 <button onclick="emperorInteract('discuss')" class="interact-btn" style="background:#e8f0e8;">📜 奏对</button>
                 <button onclick="emperorInteract('recite_poem')" class="interact-btn" style="background:#e8e8f0;">📝 献诗</button>
                 <button onclick="emperorInteract('ask_reward')" class="interact-btn" style="background:#f0e0d8;">🎁 求赏赐</button>
+                <button onclick="petitionRankAction('任命协理')" class="interact-btn" style="background:#efe6d8;">👑 任命协理</button>
             </div>
             <div id="emperorResultArea" class="interact-result-area"></div>
             <div style="font-size:7px;color:var(--text-light);text-align:center;padding-top:2px;">💡 与皇帝奏对可提升宠爱与威望</div>
@@ -3030,6 +3069,75 @@ function renderDuelPanel(duel, skills, drainOptions) {
         <div style="max-height:90px;overflow-y:auto;font-size:7px;color:var(--text-mid);line-height:1.45;margin:4px 0;">${logHtml}</div>
         <div style="display:flex;flex-wrap:wrap;gap:2px;">${actions}</div>
     `;
+}
+
+async function loadQueenAuthority() {
+    if (!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/queen/authority?player_id=${playerId}`);
+        const d = await r.json();
+        const a = d.authority || {};
+        const status = document.getElementById('queenAuthorityStatus');
+        const select = document.getElementById('queenAuthorityTarget');
+        const assistantSelect = document.getElementById('sixPalaceAssistantCandidate');
+        if (!status || !select) return;
+        const allowed = a.can_assist_six_palaces;
+        const manager = a.can_manage_ranks;
+        const assistantText = a.assistant ? ` · 协理：${a.assistant}` : '';
+        status.textContent = allowed || manager
+            ? `凤印/协理可用 · 威望${a.power || 0} · 本旬余${a.remaining_uses}/${a.max_uses}次${assistantText}`
+            : `当前不可用 · ${a.holder ? `凤印：${a.holder}` : '尚无皇后'}${assistantText} · 威望${a.power || 0}`;
+        status.style.color = (allowed || manager) ? 'var(--gold-dark)' : 'var(--text-light)';
+        select.innerHTML = '<option value="">选择妃位以下妃嫔...</option>';
+        (d.targets || []).filter(t => t.manageable).forEach(t => { select.innerHTML += `<option value="${t.name}">${t.name}（${t.rank}）</option>`; });
+        select.disabled = !manager || !a.remaining_uses;
+        if (assistantSelect) {
+            assistantSelect.innerHTML = '<option value="">选择协理六宫人选...</option>';
+            (d.assistant_candidates || []).forEach(t => { assistantSelect.innerHTML += `<option value="${t.name}">${t.name}（${t.rank}）</option>`; });
+            assistantSelect.disabled = false;
+        }
+    } catch (e) { console.log('加载协理六宫状态失败:', e); }
+}
+
+async function queenAuthorityAction(action) {
+    if (!playerId) return;
+    const target = document.getElementById('queenAuthorityTarget')?.value || null;
+    if ((action === '晋位' || action === '降位') && !target) { showToast('⚠️ 请选择妃位以下妃嫔'); return; }
+    try {
+        const r = await myFetch(`${API_BASE}/api/queen/authority`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({player_id:playerId, target, action})});
+        const d = await r.json();
+        if (d.error) { showToast('❌ ' + d.error, 'error'); return; }
+        addLogEntry(`👑 ${d.message}`, 'promotion');
+        showToast('✅ ' + d.message);
+        const sr = await myFetch(`${API_BASE}/api/state/${playerId}`);
+        updateUI(await sr.json());
+        loadQueenAuthority();
+        loadConflictTargets();
+    } catch (e) { showToast('❌ 协理六宫失败：' + e.message, 'error'); }
+}
+
+async function petitionRankAction(action, targetName=null) {
+    if (!playerId) return;
+    const candidate = document.getElementById('sixPalaceAssistantCandidate')?.value || null;
+    if ((action === '请示协理' || action === '任命协理') && !candidate) {
+        showToast('⚠️ 请选择协理六宫人选');
+        return;
+    }
+    try {
+        const r = await myFetch(`${API_BASE}/api/rank/petition`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({player_id:playerId, action, target:targetName, candidate})
+        });
+        const d = await r.json();
+        if (d.error) { showToast('❌ ' + d.error, 'error'); return; }
+        addLogEntry(`📜 ${d.message}`, d.result?.success === false ? 'system' : 'promotion');
+        showToast((d.result?.success === false ? '⚠️ ' : '✅ ') + d.message);
+        const sr = await myFetch(`${API_BASE}/api/state/${playerId}`);
+        updateUI(await sr.json());
+        loadQueenAuthority();
+        loadConflictTargets();
+    } catch (e) { showToast('❌ 请示失败：' + e.message, 'error'); }
 }
 
 async function startDuelFromPage(name) {

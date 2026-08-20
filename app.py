@@ -36,6 +36,7 @@ from palace_extra import (
     start_duel, play_duel_skill, resolve_duel, chat_probe, pray_or_curse,
     process_pressure, available_skills, DUEL_SKILLS, DRAIN_OPTIONS,
     process_consort_deaths, try_childbirth_death, try_conflict_death,
+    kill_consort, period_key,
 )
 from openai import OpenAI
 import httpx
@@ -759,6 +760,7 @@ def apply_reward(game_state, reward):
 CONFLICT_TYPES = {
     "争宠": {"desc": "争夺皇帝的宠爱", "effects": {"宠爱": (5, 15), "威望": (-5, 5), "心计": (3, 8)}},
     "陷害": {"desc": "设计陷害对手", "effects": {"心计": (5, 12), "威望": (-8, 5), "宠爱": (-5, 5)}},
+    "下毒": {"desc": "在对手饮食中投下剧毒", "effects": {"健康": (-35, -20), "威望": (-8, 2), "宠爱": (-5, 2)}},
     "谣言": {"desc": "散布流言蜚语", "effects": {"心计": (3, 8), "威望": (-10, 3), "宠爱": (-3, 3)}},
     "拉拢": {"desc": "拉拢盟友共同对抗", "effects": {"心计": (3, 6), "威望": (2, 6), "宠爱": (0, 3)}},
     "告发": {"desc": "告发对手的不轨行为", "effects": {"威望": (5, 15), "心计": (5, 10), "宠爱": (-5, 5)}},
@@ -806,6 +808,324 @@ def apply_servant_assist_aftermath(used_servants, player_won):
         else:
             notes.append(f"{names}协助失利，各自惶恐")
     return notes
+def _apply_npc_conflict_effects(npc, effects, winner):
+    """把宫斗结果真正写回 NPC，返回实际属性变化。"""
+    attrs = npc.setdefault("attributes", {})
+    applied = {}
+    for attr, delta in effects.items():
+        if attr not in attrs:
+            continue
+        actual = delta if winner else -delta
+        old = attrs.get(attr, 0)
+        attrs[attr] = max(0, min(100, old + actual))
+        applied[attr] = attrs[attr] - old
+    return applied
+
+
+QUEEN_AUTHORITY_MAX_USES = 3
+QUEEN_AUTHORITY_MIN_PRESTIGE = 80
+QUEEN_MANAGEABLE_MIN_RANK = "答应"
+
+
+def _queen_authority_period_state(game_state):
+    current = period_key(game_state)
+    if getattr(game_state, "queen_authority_period", None) != current:
+        game_state.queen_authority_period = current
+        game_state.queen_authority_uses = 0
+    return current, getattr(game_state, "queen_authority_uses", 0)
+
+
+def _is_queen_manageable_npc(npc):
+    rank = normalize_rank_name(npc.get("rank", "答应"))
+    return (npc.get("alive", True) and rank in RANK_LEVELS and
+            RANK_LEVELS[QUEEN_MANAGEABLE_MIN_RANK] <= RANK_LEVELS[rank] < RANK_LEVELS["妃"])
+
+
+def queen_authority(game_state):
+    """返回凤印持有者、协理六宫权限和本旬剩余次数。"""
+    _queen_authority_period_state(game_state)
+    is_player = game_state.rank.name == "皇后"
+    holder = game_state.name if is_player else get_queen_name(game_state)
+    queen = game_state.npcs.get(holder, {}) if holder else {}
+    power = (game_state.attributes.get("威望", 0) if is_player else
+             queen.get("attributes", {}).get("威望", 0))
+    assistant = _get_six_palace_assistant(game_state)
+    used = getattr(game_state, "queen_authority_uses", 0)
+    can_use = (is_player and power >= QUEEN_AUTHORITY_MIN_PRESTIGE) or assistant == game_state.name
+    return {"holder": holder, "is_player": is_player, "power": max(60, power) if holder else 0,
+            "assistant": assistant,
+            "can_assist_six_palaces": can_use,
+            "can_manage_ranks": _can_manage_ranks(game_state),
+            "uses": used, "max_uses": QUEEN_AUTHORITY_MAX_USES,
+            "remaining_uses": max(0, QUEEN_AUTHORITY_MAX_USES - used),
+            "period": getattr(game_state, "queen_authority_period", None)}
+
+
+def _get_relation_favor(game_state, name):
+    return game_state.relationships.get(name, {}).get("好感", 0)
+
+
+def _target_can_be_petitioned(npc):
+    if not npc or not npc.get("alive", True):
+        return False
+    rank = normalize_rank_name(npc.get("rank", "答应"))
+    return rank in RANK_LEVELS and RANK_LEVELS[QUEEN_MANAGEABLE_MIN_RANK] <= RANK_LEVELS[rank] < RANK_LEVELS["妃"]
+
+
+def _get_six_palace_assistant(game_state):
+    name = getattr(game_state, "six_palace_assistant", None)
+    npc = game_state.npcs.get(name) if name else None
+    if npc and npc.get("alive", True):
+        return name
+    if name and game_state.name == name:
+        return name
+    game_state.six_palace_assistant = None
+    return None
+
+
+def _can_manage_ranks(game_state):
+    if game_state.rank.name == "皇后":
+        return True
+    return _get_six_palace_assistant(game_state) == game_state.name
+
+
+def _appoint_six_palace_assistant(game_state, candidate_name, source):
+    if not candidate_name:
+        return None, "请先指定协理六宫人选"
+    if candidate_name == game_state.name:
+        if game_state.rank.name != "皇后":
+            return None, "非皇后不可自领协理六宫之权"
+        game_state.six_palace_assistant = game_state.name
+        text = "皇帝允准，由你暂掌协理六宫之事。"
+        game_state.add_memory(text)
+        return {"assistant": game_state.name, "source": source}, text
+    candidate = game_state.npcs.get(candidate_name)
+    if not candidate or not candidate.get("alive", True):
+        return None, "所请之人已不在后宫"
+    rank = normalize_rank_name(candidate.get("rank", "答应"))
+    if rank not in RANK_LEVELS or RANK_LEVELS[rank] < RANK_LEVELS["嫔"]:
+        return None, "协理六宫人选需为嫔位及以上妃嫔"
+    if rank == "皇后":
+        return None, "皇后本就执掌凤印，无需再任协理"
+    game_state.six_palace_assistant = candidate_name
+    candidate["assists_six_palaces"] = True
+    text = f"皇帝点头，命{candidate_name}协理六宫，襄助皇后综理宫务。"
+    game_state.add_memory(text)
+    return {"assistant": candidate_name, "source": source, "rank": candidate.get("rank")}, text
+
+
+def _promotion_roll(game_state, source_name, target_name, base_chance, title):
+    target = game_state.npcs.get(target_name)
+    if not _target_can_be_petitioned(target):
+        return None, "只能为仍在后宫且位于妃位以下的妃嫔请晋"
+    current_rank = normalize_rank_name(target.get("rank", "答应"))
+    next_rank = get_next_rank_name(current_rank)
+    if not next_rank or RANK_LEVELS.get(next_rank, 0) >= RANK_LEVELS["妃"]:
+        return None, "该妃嫔已无法再由此途径晋位"
+    if not can_promote_to_rank(game_state, next_rank):
+        return None, f"{next_rank}名额已满，暂不能再晋"
+    chance = base_chance
+    emperor_rel = _get_relation_favor(game_state, "皇帝")
+    queen_name = get_queen_name(game_state)
+    queen_rel = _get_relation_favor(game_state, queen_name) if queen_name else 0
+    assistant_name = _get_six_palace_assistant(game_state)
+    assistant_rel = _get_relation_favor(game_state, assistant_name) if assistant_name and assistant_name != game_state.name else 0
+    if emperor_rel >= 35:
+        chance += 0.08
+    if queen_rel >= 35:
+        chance += 0.06
+    if assistant_rel >= 35:
+        chance += 0.06
+    chance += max(0, min(18, game_state.attributes.get("威望", 0) - 60)) / 300.0
+    chance = min(0.92, max(0.08, chance))
+    if random.random() >= chance:
+        loss = random.randint(1, 4)
+        target_rel = game_state.relationships.setdefault(target_name, {"好感": 0, "印象": "陌生", "互动次数": 0})
+        target_rel["好感"] = max(-100, target_rel.get("好感", 0) - loss)
+        return {"success": False, "chance": round(chance, 2)}, f"你向{title}为{target_name}请晋，但{title}并未允准，{target_name}也难免失望。"
+    target["rank"] = next_rank
+    target["nobletitle"] = None
+    attrs = target.setdefault("attributes", {})
+    attrs["威望"] = min(100, attrs.get("威望", 0) + random.randint(6, 12))
+    attrs["宠爱"] = min(100, attrs.get("宠爱", 0) + random.randint(3, 8))
+    target_rel = game_state.relationships.setdefault(target_name, {"好感": 0, "印象": "陌生", "互动次数": 0})
+    target_rel["好感"] = min(100, target_rel.get("好感", 0) + random.randint(8, 16))
+    if source_name:
+        src_rel = game_state.relationships.setdefault(source_name, {"好感": 0, "印象": "陌生", "互动次数": 0})
+        src_rel["好感"] = min(100, src_rel.get("好感", 0) + random.randint(2, 6))
+    text = f"你向{title}为{target_name}请晋，{title}终于颔首，晋{target_name}为「{next_rank}」。"
+    game_state.add_memory(text)
+    return {"success": True, "chance": round(chance, 2), "rank": next_rank}, text
+
+
+def _consume_queen_authority(game_state):
+    _queen_authority_period_state(game_state)
+    if game_state.queen_authority_uses >= QUEEN_AUTHORITY_MAX_USES:
+        return False
+    game_state.queen_authority_uses += 1
+    return True
+
+
+def _player_relationship_promotion(game_state):
+    if game_state.rank.name == "皇后":
+        return None
+    if game_state._promotion_done:
+        return None
+    step = get_promotion_step(game_state)
+    if not step or step.get("type") != "位份":
+        return None
+    target_rank = step.get("target")
+    if not target_rank or not can_promote_to_rank(game_state, target_rank):
+        return None
+    queen_name = get_queen_name(game_state)
+    assistant_name = _get_six_palace_assistant(game_state)
+    queen_rel = _get_relation_favor(game_state, queen_name) if queen_name else 0
+    assistant_rel = _get_relation_favor(game_state, assistant_name) if assistant_name and assistant_name != game_state.name else 0
+    emperor_rel = _get_relation_favor(game_state, "皇帝")
+    chance = 0.0
+    if queen_rel >= 55:
+        chance += 0.18
+    if assistant_rel >= 55:
+        chance += 0.14
+    if emperor_rel >= 45:
+        chance += 0.10
+    if game_state.attributes.get("宠爱", 0) >= max(40, int(get_favor_threshold(game_state.rank.name) * 0.7)):
+        chance += 0.08
+    if chance <= 0:
+        return None
+    if random.random() >= min(chance, 0.55):
+        return None
+    promo_msg = apply_promotion_step(game_state, step)
+    if not promo_msg:
+        return None
+    game_state._promotion_done = True
+    tag = assistant_name if assistant_rel >= queen_rel and assistant_rel >= 55 else queen_name
+    if tag:
+        promo_msg += f"（{tag}在内廷为你美言）"
+    game_state.add_memory(f"晋升为{game_state.get_display_rank()}")
+    game_state.story_flags.append("关系晋升")
+    return promo_msg
+
+
+def process_rank_petition(game_state, action, target_name=None, candidate_name=None):
+    if action == "请示协理":
+        if game_state.rank.name != "皇后":
+            return None, "只有皇后可以向皇帝请示协理六宫人选"
+        if game_state.attributes.get("威望", 0) < 70:
+            return None, "威望不足，尚不足以向皇帝举荐协理六宫人选"
+        chance = 0.42 + min(0.18, _get_relation_favor(game_state, "皇帝") / 250.0)
+        if random.random() >= min(chance, 0.88):
+            return {"success": False, "chance": round(chance, 2)}, "你向皇帝请示协理六宫人选，皇帝只说容后再议。"
+        return _appoint_six_palace_assistant(game_state, candidate_name, "emperor-approved")
+    if action == "任命协理":
+        chance = 0.38 + min(0.22, _get_relation_favor(game_state, "皇帝") / 220.0)
+        if random.random() >= min(chance, 0.9):
+            return {"success": False, "chance": round(chance, 2)}, "皇帝听罢微微摇头，并未立刻定下协理六宫之人。"
+        return _appoint_six_palace_assistant(game_state, candidate_name, "emperor-direct")
+    if action == "向皇上请晋":
+        return _promotion_roll(game_state, "皇帝", target_name, 0.42, "皇上")
+    if action == "向皇后请晋":
+        queen_name = get_queen_name(game_state)
+        if not queen_name:
+            return None, "宫中尚无皇后，无法请皇后出面"
+        return _promotion_roll(game_state, queen_name, target_name, 0.34 + max(0, _get_relation_favor(game_state, queen_name)) / 350.0, "皇后")
+    if action == "向太后请晋":
+        return _promotion_roll(game_state, "太后", target_name, 0.31 + max(0, _get_relation_favor(game_state, "太后")) / 360.0, "太后")
+    return None, "无效的请示或请晋操作"
+
+
+
+
+def _apply_queen_rank_adjustment(game_state, target_name, action):
+    target = game_state.npcs.get(target_name)
+    if not target or not _is_queen_manageable_npc(target):
+        return None, "协理六宫只能调整仍在后宫的妃位以下妃嫔"
+    old_rank = normalize_rank_name(target.get("rank", "答应"))
+    if action == "晋位":
+        new_rank = get_next_rank_name(old_rank)
+        if not new_rank or RANK_LEVELS.get(new_rank, 0) >= RANK_LEVELS["妃"]:
+            return None, "该妃嫔已无法再晋位"
+        target["rank"] = new_rank
+        target["nobletitle"] = None
+        delta = {"威望": 10, "宠爱": 4}
+        text = f"你以皇后名义协理六宫，晋封{target_name}为「{new_rank}」。"
+    else:
+        if not demote_npc(game_state, target_name, "皇后协理六宫裁定"):
+            return None, "该妃嫔已无法再降位"
+        delta = {"威望": -8, "宠爱": -4}
+        text = f"你以皇后名义协理六宫，{target_name}由「{old_rank}」降位。"
+    attrs = target.setdefault("attributes", {})
+    for key, value in delta.items():
+        attrs[key] = max(0, attrs.get(key, 0) + value)
+    relation = game_state.relationships.setdefault(target_name, {"好感": 0, "印象": "陌生", "互动次数": 0})
+    relation["好感"] = max(-100, min(100, relation.get("好感", 0) + (-8 if action == "晋位" else -18)))
+    target["queen_authority_records"] = target.get("queen_authority_records", 0) + 1
+    return {"rank": target.get("rank"), "display_rank": target.get("nobletitle") + "妃" if target.get("nobletitle") else target.get("rank"), **delta}, text
+
+
+def apply_queen_authority(game_state, target_name, action):
+    """执行凤印事务：协理六宫可调整妃位以下妃嫔。"""
+    authority = queen_authority(game_state)
+    target = game_state.npcs.get(target_name) if target_name else None
+    if target and authority["holder"] == target_name:
+        if action not in ("请安", "申诉", "求情"):
+            return None, "不能对皇后执行此项处置"
+        relation = game_state.relationships.setdefault(target_name, {"好感": 0, "印象": "陌生", "互动次数": 0})
+        gain = 5 if action == "请安" else (3 if action == "求情" else 1)
+        relation["好感"] = min(100, relation.get("好感", 0) + gain)
+        return {"action": action, "target": target_name, "effects": {"好感": gain}}, f"你向{target_name}行{action}礼，皇后记下了你的态度。"
+    if action == "协理六宫":
+        if not authority["can_assist_six_palaces"]:
+            return None, "你尚未满足协理六宫条件（需为皇后或受命协理，且皇后威望达标）"
+        if not _consume_queen_authority(game_state):
+            return None, "本旬协理六宫名额已用尽"
+        gain = 6
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + gain)
+        game_state.queen_assistance_count = getattr(game_state, "queen_assistance_count", 0) + 1
+        text = "你亲理六宫事务，裁决宫规、核查份例，后宫秩序为之一肃。"
+        game_state.add_memory(text)
+        return {"action": action, "effects": {"威望": gain}}, text
+    if action in ("晋位", "降位"):
+        if not authority["can_manage_ranks"]:
+            return None, "非皇后或协理六宫之人，不可直接管理妃嫔位份"
+        if not authority["is_player"] and _get_six_palace_assistant(game_state) != game_state.name:
+            return None, "你尚未执掌凤印，不能行使皇后处置权"
+        if authority["is_player"] and authority["power"] < QUEEN_AUTHORITY_MIN_PRESTIGE:
+            return None, f"威望不足，需达到{QUEEN_AUTHORITY_MIN_PRESTIGE}方可协理六宫"
+        if not target_name:
+            return None, "请先选择需要调整位份的妃嫔"
+        if not _consume_queen_authority(game_state):
+            return None, "本旬协理六宫名额已用尽"
+        result, message = _apply_queen_rank_adjustment(game_state, target_name, action)
+        if not result:
+            game_state.queen_authority_uses = max(0, game_state.queen_authority_uses - 1)
+            return None, message
+        game_state.add_memory(message)
+        return {"action": action, "target": target_name, "effects": result}, message
+    if not authority["is_player"]:
+        return None, "你尚未执掌凤印，不能行使皇后处置权"
+    if action not in ("训诫", "罚俸", "禁足", "降位"):
+        return None, "无效的皇后处置"
+    if not target or target_name == "太后" or not target.get("alive", True):
+        return None, "目标不存在或已不在后宫"
+    attrs = target.setdefault("attributes", {})
+    target["queen_punishments"] = target.get("queen_punishments", 0) + 1
+    if action == "训诫":
+        attrs["威望"] = max(0, attrs.get("威望", 0) - 8); result = {"威望": -8}; text = f"你以凤印训诫{target_name}，其威望下降。"
+    elif action == "罚俸":
+        attrs["宠爱"] = max(0, attrs.get("宠爱", 0) - 6); result = {"宠爱": -6}; text = f"你下令罚没{target_name}本月俸禄，圣宠也受牵连。"
+    elif action == "禁足":
+        target["confined_until"] = period_key(game_state); attrs["威望"] = max(0, attrs.get("威望", 0) - 12); result = {"威望": -12}; text = f"你下凤令令{target_name}禁足一旬。"
+    else:
+        if normalize_rank_name(target.get("rank", "答应")) == "皇后":
+            return None, "皇后不可由自己降位"
+        if not demote_npc(game_state, target_name, "触犯凤仪宫规"):
+            return None, "该妃嫔已无法再降位"
+        result = {"位份": -1}; text = f"你执掌凤印，{target_name}降位。"
+    game_state.add_memory(text)
+    return {"action": action, "target": target_name, "effects": result}, text
+
+
 
 def generate_palace_conflict(game_state, initiator=None, target=None, api_key=None, api_base=None, api_model=None, conflict_type=None, assist_servants=None):
     if initiator is None:
@@ -819,7 +1139,7 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     if not all_names:
         return None
     target = random.choice(all_names) if target is None else target
-    type_aliases = {"造谣": "谣言", "掌嘴": "争辩", "下毒": "陷害"}
+    type_aliases = {"造谣": "谣言", "掌嘴": "争辩"}
     if conflict_type:
         conflict_type = type_aliases.get(conflict_type, conflict_type)
     if conflict_type and conflict_type in CONFLICT_TYPES:
@@ -898,17 +1218,34 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     
     effects = _calc_conflict_effects(conflict_info, initiator_win)
     
+    target_effects = {}
     if initiator == game_state.name:
         for attr, delta in effects.items():
             if attr in game_state.attributes:
                 max_attr = game_state.get_attr_max(attr)
                 game_state.attributes[attr] = max(0, min(max_attr, game_state.attributes[attr] + delta))
+        if target in game_state.npcs:
+            target_effects = _apply_npc_conflict_effects(game_state.npcs[target], effects, False)
     elif target == game_state.name:
         for attr, delta in effects.items():
             if attr in game_state.attributes:
                 max_attr = game_state.get_attr_max(attr)
                 game_state.attributes[attr] = max(0, min(max_attr, game_state.attributes[attr] - delta))
-    
+        if initiator in game_state.npcs:
+            target_effects = _apply_npc_conflict_effects(game_state.npcs[initiator], effects, True)
+    elif initiator in game_state.npcs and target in game_state.npcs:
+        _apply_npc_conflict_effects(game_state.npcs[initiator], effects, True)
+        target_effects = _apply_npc_conflict_effects(game_state.npcs[target], effects, False)
+
+    poison_damage = 0
+    if conflict_type == "下毒" and initiator_win and target in game_state.npcs:
+        poison_damage = random.randint(25, 40)
+        target_effects["健康"] = target_effects.get("健康", 0) - poison_damage
+        target_npc = game_state.npcs[target]
+        target_attrs = target_npc.setdefault("attributes", {})
+        target_attrs["健康"] = max(0, target_attrs.get("健康", 60) - poison_damage)
+        game_state.add_memory(f"{initiator}对{target}下毒，健康-{poison_damage}")
+
     if initiator_win:
         if target in game_state.rivalries:
             game_state.rivalries[target] += 10
@@ -938,7 +1275,17 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         depose_queen_message = try_conflict_depose_queen(game_state, opponent, conflict_type, True)
         if not depose_queen_message:
             npc_demotion_message = try_npc_conflict_demotion(game_state, opponent, conflict_type, True)
-        death_message = try_conflict_death(game_state, opponent, game_state.name, conflict_type, True)
+        if conflict_type == "下毒" and opponent in game_state.npcs:
+            opponent_npc = game_state.npcs[opponent]
+            opponent_health = opponent_npc.get("attributes", {}).get("健康", 60)
+            # 下毒成功后不再是纯随机 6%；重伤或高心计下毒会落实为死亡。
+            poison_kill_chance = 1.0 if opponent_health <= 20 else 0.45 + game_state.attributes.get("心计", 40) / 250
+            if random.random() < min(0.85, poison_kill_chance):
+                death_message = kill_consort(game_state, opponent, "中毒", killer=game_state.name)
+            else:
+                death_message = None
+        else:
+            death_message = try_conflict_death(game_state, opponent, game_state.name, conflict_type, True)
         if death_message:
             game_state.add_memory(death_message)
 
@@ -953,6 +1300,8 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         "narration": narration,
         "effects": effects,
         "player_effects": player_effects,
+        "target_effects": target_effects,
+        "poison_damage": poison_damage,
         "rivalries": game_state.rivalries,
         "demotion_message": demotion_message,
         "npc_demotion_message": npc_demotion_message,
@@ -2774,9 +3123,14 @@ def next_period():
             else:
                 promotion_message = "你已位极人臣，无法再晋升。"
     else:
-        wait_msg = get_promotion_wait_message(game_state)
-        if wait_msg:
-            promotion_message = wait_msg
+        relation_promo = _player_relationship_promotion(game_state)
+        if relation_promo:
+            promotion_message = relation_promo
+            promoted_this_period = True
+        else:
+            wait_msg = get_promotion_wait_message(game_state)
+            if wait_msg:
+                promotion_message = wait_msg
 
     if not promoted_this_period:
         game_state.rank_periods = get_rank_periods(game_state) + 1
@@ -3369,6 +3723,36 @@ def my_saves():
     known_ids = parse_known_player_ids(known_raw)
     return _list_saves_for_client(client_id, known_ids)
 
+
+@app.route('/api/rank/petition', methods=['POST'])
+def rank_petition_api():
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    can_act, remaining = check_and_consume_action(game_state)
+    if not can_act:
+        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    action = data.get('action', '')
+    target = data.get('target')
+    candidate = data.get('candidate')
+    result, message = process_rank_petition(game_state, action, target, candidate)
+    if not result:
+        game_state.remaining_actions += 1
+        return jsonify({"error": message}), 400
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "message": message,
+        "result": result,
+        "authority": queen_authority(game_state),
+        "remaining_actions": game_state.remaining_actions,
+        "player_rank": game_state.get_display_rank(),
+        "target": game_state.npcs.get(target, {}) if target else None,
+        "assistant": getattr(game_state, 'six_palace_assistant', None),
+    })
+
 @app.route('/api/save', methods=['POST'])
 def save_game():
     data = request.get_json()
@@ -3502,6 +3886,44 @@ def delete_save():
         return jsonify({"error": "存档数据损坏"}), 500
     os.remove(filename)
     return jsonify({"success": True, "message": f"已删除存档 ({slot_name})"})
+
+@app.route('/api/queen/authority', methods=['GET', 'POST'])
+def queen_authority_api():
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id') or request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    authority = queen_authority(game_state)
+    if request.method == 'GET':
+        targets = [{"name": name, "rank": npc.get("rank", "妃嫔"), "alive": npc.get("alive", True),
+                    "manageable": _is_queen_manageable_npc(npc)}
+                   for name, npc in game_state.npcs.items()
+                   if name != "太后" and npc.get("alive", True)]
+        assistant_candidates = []
+        if game_state.rank.name == "皇后":
+            assistant_candidates.append({"name": game_state.name, "rank": game_state.rank.name, "is_player": True})
+        for name, npc in game_state.npcs.items():
+            if name == "太后" or not npc.get("alive", True):
+                continue
+            rank = normalize_rank_name(npc.get("rank", "答应"))
+            if rank in RANK_LEVELS and RANK_LEVELS[rank] >= RANK_LEVELS["嫔"] and rank != "皇后":
+                assistant_candidates.append({"name": name, "rank": npc.get("rank", "妃嫔"), "is_player": False})
+        return jsonify({"success": True, "authority": authority, "targets": targets, "assistant_candidates": assistant_candidates})
+    can_act, remaining = check_and_consume_action(game_state)
+    if not can_act:
+        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    target = data.get('target')
+    action = data.get('action', '')
+    result, message = apply_queen_authority(game_state, target, action)
+    if not result:
+        game_state.remaining_actions += 1
+        return jsonify({"error": message}), 400
+    autosave_session(player_id)
+    return jsonify({"success": True, "authority": queen_authority(game_state), "result": result,
+                    "message": message, "remaining_actions": game_state.remaining_actions,
+                    "target": game_state.npcs.get(target, {})})
+
 
 @app.route('/api/duel/start', methods=['POST'])
 def api_duel_start():
