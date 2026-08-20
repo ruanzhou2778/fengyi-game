@@ -2092,14 +2092,18 @@ def health_check():
 
 @app.route('/api/config', methods=['GET', 'POST'])
 def handle_config():
-    data = request.get_json() or {}
-    player_id = data.get('player_id') or request.args.get('player_id')
-    if not player_id:
-        return jsonify({"error": "缺少player_id"}), 400
+    # GET 配置通过查询参数读取，避免无 JSON 请求体时触发 415。
     if request.method == 'GET':
+        player_id = request.args.get('player_id')
+        if not player_id:
+            return jsonify({"error": "缺少player_id"}), 400
         config = user_configs.get(player_id, {"custom_prompt": "", "romance_mode": False, "api_base": "https://cn.jixiangai.xyz/v1", "api_key": "", "api_model": ""})
         return jsonify(config)
-    data = request.get_json()
+
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    if not player_id:
+        return jsonify({"error": "缺少player_id"}), 400
     user_configs[player_id] = {
         "custom_prompt": data.get('custom_prompt', ''),
         "romance_mode": data.get('romance_mode', False),
