@@ -68,18 +68,19 @@ NOBLETITLES = [
 ]
 
 class Servant:
-    def __init__(self, name, type_, loyalty=50, skill=30):
+    def __init__(self, name, type_, loyalty=50, skill=30, age=None):
         self.name = name
         self.type = type_
         self.loyalty = loyalty
         self.skill = skill
+        self.age = age if age is not None else random.randint(14, 28)
         self.is_active = True
         self.hire_day = 0
     def to_dict(self):
-        return {"name": self.name, "type": self.type, "loyalty": self.loyalty, "skill": self.skill, "is_active": self.is_active, "hire_day": self.hire_day}
+        return {"name": self.name, "type": self.type, "loyalty": self.loyalty, "skill": self.skill, "age": self.age, "is_active": self.is_active, "hire_day": self.hire_day}
     @classmethod
     def from_dict(cls, data):
-        s = cls(data["name"], data["type"], data["loyalty"], data["skill"])
+        s = cls(data["name"], data["type"], data["loyalty"], data["skill"], data.get("age"))
         s.is_active = data.get("is_active", True)
         s.hire_day = data.get("hire_day", 0)
         return s
@@ -145,6 +146,8 @@ class GameState:
         self.main_story_progress = 0
         self.storyline = Storyline.主线
         self.ending_unlocked = None
+        self.ending = None  # 结局落定后为字典，见 endings.py
+        self.neglect_periods = 0  # 连续失宠旬数，达阈值打入冷宫
         self.inventory = []
         self.important_memories = []
         self.history = []
@@ -158,6 +161,7 @@ class GameState:
         self.has_children = False
         self.rivalries = {}
         self.alliances = {}
+        self.intrigue = {"heat": 0, "rumors": [], "dirt": {}, "last_action": None}
         # 皇后协理六宫：每旬独立计数，旧存档缺字段时由后端按默认值兼容。
         self.queen_authority_period = None
         self.queen_authority_uses = 0
@@ -307,7 +311,7 @@ class GameState:
             "background_desc": getattr(self, "background_desc", ""),
             "traits": getattr(self, "traits", []),
             "custom_story": getattr(self, "custom_story", ""),
-            "age": self.age,
+            "age": max(12, min(80, int(getattr(self, "age", 16) or 16))),
             "current_time": self.current_time,
             "day": self.day,
             "month": self.month,
@@ -321,6 +325,9 @@ class GameState:
             "story_flags": self.story_flags,
             "main_story_progress": self.main_story_progress,
             "storyline": self.storyline.value,
+            "ending": getattr(self, "ending", None),
+            "ending_unlocked": getattr(self, "ending_unlocked", None),
+            "neglect_periods": getattr(self, "neglect_periods", 0),
             "inventory": self.inventory,
             "silver": self.silver,
             "important_memories": self.important_memories,
@@ -335,6 +342,7 @@ class GameState:
             "has_children": self.has_children,
             "rivalries": self.rivalries,
             "alliances": self.alliances,
+            "intrigue": getattr(self, "intrigue", {"heat": 0, "rumors": [], "dirt": {}, "last_action": None}),
             "queen_authority_period": getattr(self, "queen_authority_period", None),
             "queen_authority_uses": getattr(self, "queen_authority_uses", 0),
             "queen_assistance_count": getattr(self, "queen_assistance_count", 0),
@@ -373,7 +381,11 @@ class GameState:
             game_state.background_desc = data.get("background_desc", "")
             game_state.traits = data.get("traits", [])
             game_state.custom_story = data.get("custom_story", "")
-            game_state.age = data.get("age", 16)
+            try:
+                game_state.age = int(data.get("age", 16) or 16)
+            except (TypeError, ValueError):
+                game_state.age = 16
+            game_state.age = max(12, min(80, game_state.age))
             game_state.current_time = data.get("current_time", "辰时")
             game_state.day = data.get("day", 1)
             game_state.month = data.get("month", 1)
@@ -401,9 +413,7 @@ class GameState:
             servants_data = data.get("servants", [])
             game_state.servants = []
             for sd in servants_data:
-                s = Servant(sd["name"], sd["type"], sd["loyalty"], sd["skill"])
-                s.is_active = sd.get("is_active", True)
-                s.hire_day = sd.get("hire_day", 0)
+                s = Servant.from_dict(sd)
                 game_state.servants.append(s)
             game_state.max_servants = 6 + game_state.rank.value // 2
             game_state.is_pregnant = data.get("is_pregnant", False)
@@ -413,6 +423,13 @@ class GameState:
             game_state.has_children = data.get("has_children", False)
             game_state.rivalries = data.get("rivalries", {})
             game_state.alliances = data.get("alliances", {})
+            intrigue = data.get("intrigue", {}) or {}
+            game_state.intrigue = {
+                "heat": int(intrigue.get("heat", 0) or 0),
+                "rumors": intrigue.get("rumors", []) if isinstance(intrigue.get("rumors", []), list) else [],
+                "dirt": intrigue.get("dirt", {}) if isinstance(intrigue.get("dirt", {}), dict) else {},
+                "last_action": intrigue.get("last_action"),
+            }
             game_state.queen_authority_period = data.get("queen_authority_period")
             game_state.queen_authority_uses = data.get("queen_authority_uses", 0)
             game_state.queen_assistance_count = data.get("queen_assistance_count", 0)
@@ -427,6 +444,13 @@ class GameState:
             game_state._promotion_done = data.get("_promotion_done", False)
             game_state.scandal_strikes = data.get("scandal_strikes", 0)
             game_state.rank_periods = data.get("rank_periods", 0)
+            ending = data.get("ending")
+            game_state.ending = ending if isinstance(ending, dict) else None
+            game_state.ending_unlocked = data.get("ending_unlocked")
+            try:
+                game_state.neglect_periods = int(data.get("neglect_periods", 0) or 0)
+            except (TypeError, ValueError):
+                game_state.neglect_periods = 0
             game_state.client_id = data.get("client_id")
             storyline_value = data.get("storyline", "主线")
             for sl in Storyline:

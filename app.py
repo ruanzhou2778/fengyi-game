@@ -30,6 +30,7 @@ from family_backgrounds import (
     generate_concubine_identity,
     generate_official_background,
     generate_official_background_for_name,
+    get_family_score,
 )
 from player_traits import apply_trait_bonuses, get_trait_catalog, suggest_traits
 from palace_extra import (
@@ -37,6 +38,11 @@ from palace_extra import (
     process_pressure, available_skills, DUEL_SKILLS, DRAIN_OPTIONS,
     process_consort_deaths, try_childbirth_death, try_conflict_death,
     kill_consort, period_key,
+)
+from endings import (
+    ENDINGS, ensure_ending_fields, is_game_over, ending_payload,
+    evaluate_period_endings, check_player_childbirth_death,
+    check_player_poison_death, build_life_summary,
 )
 from openai import OpenAI
 import httpx
@@ -190,6 +196,8 @@ def restore_session_from_file(player_id, slot_name='default'):
             game_state.scandal_strikes = 0
         if not hasattr(game_state, 'rank_periods'):
             game_state.rank_periods = 0
+        ensure_ending_fields(game_state)
+        ensure_character_ages(game_state)
         sessions[player_id] = game_state
         return game_state
     except Exception as e:
@@ -321,7 +329,32 @@ PROMOTION_EXTRA_REQUIREMENTS = {
     "淑妃": {"min_children": 1, "hint": "晋封淑妃须至少诞下一名皇嗣（母凭子贵）"},
     "贵妃": {"min_children": 1, "hint": "晋封贵妃须至少诞下一名皇嗣"},
     "皇贵妃": {"min_children": 2, "hint": "晋封皇贵妃须至少诞下两名皇嗣"},
+    "皇后": {"hint": "册立皇后除圣宠外，还需母家势力与朝臣请立中宫的时机"},
 }
+
+EMPRESS_SUPPORT_FLAG = "朝臣请立中宫"
+EMPRESS_SUPPORT_CLUE_FLAGS = {
+    "heir": "立后风向:皇子储位",
+    "palace": "立后风向:协理六宫",
+    "vacancy": "立后风向:废后朝局",
+}
+EMPRESS_SUPPORT_SOURCE_FLAGS = {
+    "heir": "朝议缘由:皇子储位",
+    "palace": "朝议缘由:协理六宫",
+    "vacancy": "朝议缘由:废后朝局",
+}
+EMPRESS_SUPPORT_SOURCE_LABELS = {
+    "heir": "皇子储位",
+    "palace": "协理六宫",
+    "vacancy": "废后朝局",
+    "legacy": "旧有朝议",
+}
+EMPRESS_SUPPORT_VACANCY_FLAG = "中宫悬空:废后"
+EMPRESS_MIN_FAMILY_POWER = 62
+EMPRESS_EVENT_MIN_FAMILY_POWER = 56
+EMPRESS_EVENT_MIN_PRESTIGE = 320
+EMPRESS_EVENT_MIN_FAVOR = 460
+EMPRESS_EVENT_MIN_EMPEROR_REL = 45
 
 DEPOSE_QUEEN_MIN_RANK = "贵妃"
 
@@ -361,6 +394,204 @@ def get_promotion_step(game_state):
     if next_rank:
         return {"type": "位份", "target": next_rank}
     return None
+
+
+def get_empress_family_power(game_state):
+    base = get_family_score(getattr(game_state, "family_background", ""), getattr(game_state, "family_meta", {}))
+    prestige = game_state.attributes.get("威望", 0)
+    princes = len([c for c in game_state.children if c.get("alive", True) and c.get("gender") == "皇子"])
+    prestige_bonus = min(20, prestige // 50)
+    prince_bonus = min(12, princes * 6)
+    return min(100, base + prestige_bonus + prince_bonus)
+
+
+def _story_flags(game_state):
+    flags = getattr(game_state, "story_flags", None)
+    if not isinstance(flags, list):
+        flags = list(flags) if flags else []
+        game_state.story_flags = flags
+    return flags
+
+
+def _has_story_flag(game_state, flag):
+    return flag in _story_flags(game_state)
+
+
+def _add_story_flag(game_state, flag):
+    flags = _story_flags(game_state)
+    if flag not in flags:
+        flags.append(flag)
+        return True
+    return False
+
+
+def _resolve_empress_source_from_flags(game_state, mapping):
+    for flag in reversed(_story_flags(game_state)):
+        for key, mapped_flag in mapping.items():
+            if flag == mapped_flag:
+                return key
+    return None
+
+
+def get_empress_support_clues(game_state):
+    return [key for key, flag in EMPRESS_SUPPORT_CLUE_FLAGS.items() if _has_story_flag(game_state, flag)]
+
+
+def get_empress_support_source(game_state):
+    source = _resolve_empress_source_from_flags(game_state, EMPRESS_SUPPORT_SOURCE_FLAGS)
+    if source:
+        return source
+    source = _resolve_empress_source_from_flags(game_state, EMPRESS_SUPPORT_CLUE_FLAGS)
+    if source:
+        return source
+    if _has_story_flag(game_state, EMPRESS_SUPPORT_FLAG):
+        return "legacy"
+    return None
+
+
+def get_empress_requirement_status(game_state):
+    step = get_promotion_step(game_state) or {}
+    target = step.get("target")
+    living_children = [c for c in game_state.children if c.get("alive", True)]
+    princes = [c for c in living_children if c.get("gender") == "皇子"]
+    clues = get_empress_support_clues(game_state)
+    source = get_empress_support_source(game_state)
+    support_ready = _has_story_flag(game_state, EMPRESS_SUPPORT_FLAG)
+    return {
+        "is_candidate": target == "皇后",
+        "family_power": get_empress_family_power(game_state),
+        "family_power_required": EMPRESS_MIN_FAMILY_POWER,
+        "support_ready": support_ready,
+        "support_flag": EMPRESS_SUPPORT_FLAG,
+        "support_stage": "ready" if support_ready else ("rumor" if clues else "waiting"),
+        "support_source": source,
+        "support_source_label": EMPRESS_SUPPORT_SOURCE_LABELS.get(source, ""),
+        "support_clues": clues,
+        "support_clue_labels": [EMPRESS_SUPPORT_SOURCE_LABELS.get(key, key) for key in clues],
+        "support_clue_count": len(clues),
+        "children": len(living_children),
+        "princes": len(princes),
+        "queen_vacant": get_queen_name(game_state) is None,
+    }
+
+
+def _empress_support_source_candidates(game_state, status):
+    attrs = game_state.attributes
+    emperor_rel = _get_relation_favor(game_state, "皇帝")
+    has_queen = bool(get_queen_name(game_state))
+    candidates = []
+    if status["princes"] >= 1 and status["family_power"] >= 52 and attrs.get("威望", 0) >= 260:
+        score = 1.20 + min(1.00, status["princes"] * 0.45)
+        score += min(0.80, max(0, status["family_power"] - 52) / 18.0)
+        score += min(0.70, max(0, attrs.get("威望", 0) - 260) / 220.0)
+        candidates.append({
+            "key": "heir",
+            "score": score,
+            "rumor_text": "📜 皇子渐长，宗室与礼臣已在私下议论：若要早定储位，宜先立中宫。",
+            "petition_text": "📜 皇子储位牵动朝局，朝臣请立中宫，礼臣联名上奏，请皇帝早定中宫，以正皇嗣名分。",
+        })
+    palace_ready = (
+        getattr(game_state, "queen_assistance_count", 0) >= 1 or
+        _get_six_palace_assistant(game_state) == game_state.name or
+        (not has_queen and game_state.rank.name == "皇贵妃" and
+         attrs.get("威望", 0) >= 360 and emperor_rel >= 45)
+    )
+    if palace_ready and status["family_power"] >= 54 and attrs.get("威望", 0) >= 300:
+        score = 1.10 + min(0.90, max(0, attrs.get("威望", 0) - 300) / 180.0)
+        score += min(0.55, max(0, emperor_rel - 45) / 90.0)
+        candidates.append({
+            "key": "palace",
+            "score": score,
+            "rumor_text": "📜 中宫暂缺，皇帝命你协理六宫，六宫多称秩序井然，朝野已有人议及你的中宫之望。",
+            "petition_text": "📜 你代掌宫务已久，内外称贤，朝臣请立中宫，联名上奏愿由你名正言顺统摄六宫。",
+        })
+    if (not has_queen and _has_story_flag(game_state, EMPRESS_SUPPORT_VACANCY_FLAG) and
+            status["family_power"] >= 54 and attrs.get("威望", 0) >= 300):
+        score = 1.35 + min(0.75, max(0, status["family_power"] - 54) / 18.0)
+        score += min(0.70, max(0, attrs.get("威望", 0) - 300) / 180.0)
+        score += min(0.35, max(0, emperor_rel - 40) / 70.0)
+        candidates.append({
+            "key": "vacancy",
+            "score": score,
+            "rumor_text": "📜 废后风波未平，中宫悬空，前朝议论纷纷，已有大臣私下提起应尽快再定国母。",
+            "petition_text": "📜 废后之后朝局未稳，朝臣请立中宫，前朝为安六宫与宗庙名分，联名请皇帝尽快册立中宫。",
+        })
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    return candidates
+
+
+def _maybe_open_empress_support_clue(game_state, status):
+    candidates = [
+        item for item in _empress_support_source_candidates(game_state, status)
+        if not _has_story_flag(game_state, EMPRESS_SUPPORT_CLUE_FLAGS[item["key"]])
+    ]
+    if not candidates:
+        return None
+    candidate = candidates[0]
+    chance = min(0.72, 0.18 + candidate["score"] * 0.16)
+    if random.random() >= chance:
+        return None
+    _add_story_flag(game_state, EMPRESS_SUPPORT_CLUE_FLAGS[candidate["key"]])
+    if candidate["key"] == "palace" and not get_queen_name(game_state):
+        game_state.six_palace_assistant = game_state.name
+    game_state.add_memory(candidate["rumor_text"])
+    return candidate["rumor_text"]
+
+
+def _maybe_raise_empress_petition(game_state, status):
+    attrs = game_state.attributes
+    emperor_rel = _get_relation_favor(game_state, "皇帝")
+    if status["family_power"] < EMPRESS_EVENT_MIN_FAMILY_POWER:
+        return None
+    if attrs.get("威望", 0) < EMPRESS_EVENT_MIN_PRESTIGE:
+        return None
+    if attrs.get("宠爱", 0) < EMPRESS_EVENT_MIN_FAVOR:
+        return None
+    if emperor_rel < EMPRESS_EVENT_MIN_EMPEROR_REL and not is_special_favor(game_state):
+        return None
+    active_clues = set(get_empress_support_clues(game_state))
+    if not active_clues:
+        return None
+    candidates = [
+        item for item in _empress_support_source_candidates(game_state, status)
+        if item["key"] in active_clues
+    ]
+    if not candidates:
+        return None
+    candidate = candidates[0]
+    chance = 0.12
+    chance += min(0.18, max(0, status["family_power"] - EMPRESS_EVENT_MIN_FAMILY_POWER) / 100.0)
+    chance += min(0.16, max(0, attrs.get("威望", 0) - EMPRESS_EVENT_MIN_PRESTIGE) / 240.0)
+    chance += min(0.12, max(0, attrs.get("宠爱", 0) - EMPRESS_EVENT_MIN_FAVOR) / 320.0)
+    chance += min(0.12, max(0, emperor_rel - EMPRESS_EVENT_MIN_EMPEROR_REL) / 180.0)
+    chance += min(0.08, candidate["score"] / 12.0)
+    chance += min(0.06, max(0, len(active_clues) - 1) * 0.03)
+    if candidate["key"] == "vacancy":
+        chance += 0.06
+    elif candidate["key"] == "heir":
+        chance += min(0.06, status["princes"] * 0.03)
+    chance = min(0.82, chance)
+    if random.random() >= chance:
+        return None
+    _add_story_flag(game_state, EMPRESS_SUPPORT_FLAG)
+    _add_story_flag(game_state, EMPRESS_SUPPORT_SOURCE_FLAGS[candidate["key"]])
+    game_state.add_memory(candidate["petition_text"])
+    return candidate["petition_text"]
+
+
+def maybe_trigger_empress_support_event(game_state):
+    status = get_empress_requirement_status(game_state)
+    if not status["is_candidate"] or status["support_ready"]:
+        return None
+    if get_queen_name(game_state):
+        return None
+    clue_message = _maybe_open_empress_support_clue(game_state, status)
+    if clue_message:
+        status = get_empress_requirement_status(game_state)
+        petition_message = _maybe_raise_empress_petition(game_state, status)
+        return f"{clue_message} {petition_message}" if petition_message else clue_message
+    return _maybe_raise_empress_petition(game_state, status)
+
 
 def apply_promotion_step(game_state, step):
     if not step:
@@ -544,6 +775,7 @@ def try_depose_queen(game_state, reason=""):
     msg = f"📜 凤印褫夺！{queen_name}被废去后位，降为「{prev}」"
     if reason:
         msg += f"。{reason}"
+    _add_story_flag(game_state, EMPRESS_SUPPORT_VACANCY_FLAG)
     game_state.add_memory(msg)
     return msg
 
@@ -628,6 +860,15 @@ def get_promotion_block_reason(game_state):
     target = step.get("target")
     if not target:
         return None
+    if target == "皇后":
+        status = get_empress_requirement_status(game_state)
+        if status["family_power"] < status["family_power_required"]:
+            return (
+                f"册立皇后须有足够母家势力（需家族势力≥{status['family_power_required']}，"
+                f"当前{status['family_power']}）"
+            )
+        if not status["support_ready"]:
+            return "册立皇后尚需朝臣请立中宫、六宫归心的时机"
     req = PROMOTION_EXTRA_REQUIREMENTS.get(target)
     if not req:
         return None
@@ -974,6 +1215,8 @@ def _player_relationship_promotion(game_state):
     step = get_promotion_step(game_state)
     if not step or step.get("type") != "位份":
         return None
+    if get_promotion_block_reason(game_state):
+        return None
     target_rank = step.get("target")
     if not target_rank or not can_promote_to_rank(game_state, target_rank):
         return None
@@ -1246,6 +1489,14 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         target_attrs["健康"] = max(0, target_attrs.get("健康", 60) - poison_damage)
         game_state.add_memory(f"{initiator}对{target}下毒，健康-{poison_damage}")
 
+    # 玩家被下毒中招：与 NPC 同口径扣健康，为后续死亡判定提供依据
+    player_poisoned_by = None
+    if conflict_type == "下毒" and initiator_win and target == game_state.name:
+        poison_damage = random.randint(25, 40)
+        game_state.attributes["健康"] = max(0, game_state.attributes.get("健康", 60) - poison_damage)
+        player_poisoned_by = initiator
+        game_state.add_memory(f"{initiator}对你下毒，健康-{poison_damage}")
+
     if initiator_win:
         if target in game_state.rivalries:
             game_state.rivalries[target] += 10
@@ -1261,6 +1512,7 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     npc_demotion_message = None
     depose_queen_message = None
     death_message = None
+    player_ending = None
     player_lost = (initiator == game_state.name and not initiator_win) or (target == game_state.name and initiator_win)
     player_won = not player_lost and (initiator == game_state.name or target == game_state.name)
     if player_lost:
@@ -1269,6 +1521,9 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         if demotion_message:
             game_state.attributes["宠爱"] = max(0, game_state.attributes.get("宠爱", 0) - random.randint(8, 18))
             game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - random.randint(5, 12))
+        # 中毒濒危时可能当场毙命
+        if player_poisoned_by:
+            player_ending = check_player_poison_death(game_state, player_poisoned_by)
     elif player_won:
         opponent = target if initiator == game_state.name else initiator
         game_state.scandal_strikes = max(0, getattr(game_state, "scandal_strikes", 0) - 1)
@@ -1307,6 +1562,8 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         "npc_demotion_message": npc_demotion_message,
         "depose_queen_message": depose_queen_message,
         "death_message": death_message,
+        "ending": player_ending,
+        "game_over": bool(player_ending),
         "assist_servants": [{"name": s.name, "type": s.type} for s in assist_used],
         "assist_bonus": round(assist_bonus, 1),
         "assist_notes": assist_notes,
@@ -1882,6 +2139,27 @@ def maybe_child_bonus_event(game_state, child, child_name):
     add_child_event(child, f"💕 {msg}")
     return f"【温情时刻】{msg}，亲密度+{gain}"
 
+def clamp_age(value, default, minimum=12, maximum=80):
+    try:
+        age = int(value)
+    except (TypeError, ValueError):
+        age = default
+    return max(minimum, min(maximum, age))
+
+
+def ensure_character_ages(game_state):
+    game_state.age = clamp_age(getattr(game_state, "age", 16), 16)
+    if not isinstance(getattr(game_state, "emperor", None), dict):
+        game_state.emperor = {}
+    game_state.emperor["age"] = clamp_age(game_state.emperor.get("age"), random.randint(25, 55), 18, 80)
+    for name, npc in game_state.npcs.items():
+        rank = npc.get("rank", "")
+        if name == "太后" or rank == "太后":
+            npc["age"] = clamp_age(npc.get("age"), random.randint(45, 65), 35, 90)
+        else:
+            npc["age"] = clamp_age(npc.get("age"), random.randint(14, 32), 12, 80)
+
+
 def serialize_npcs_for_client(game_state):
     result = {}
     for name, npc in game_state.npcs.items():
@@ -1890,6 +2168,7 @@ def serialize_npcs_for_client(game_state):
         result[name] = {
             "name": name,
             "rank": npc.get("rank", "妃嫔"),
+            "age": clamp_age(npc.get("age"), random.randint(14, 32), 12, 80),
             "personality": npc.get("personality", "未知"),
             "icon": npc.get("icon", "🌸"),
             "children": npc.get("children", []),
@@ -1905,6 +2184,311 @@ def serialize_npcs_for_client(game_state):
             "death_period": npc.get("death_period"),
         }
     return result
+
+def get_intrigue_state(game_state):
+    intrigue = getattr(game_state, "intrigue", None)
+    if not isinstance(intrigue, dict):
+        intrigue = {"heat": 0, "rumors": [], "dirt": {}, "last_action": None}
+        game_state.intrigue = intrigue
+    intrigue.setdefault("heat", 0)
+    intrigue.setdefault("rumors", [])
+    intrigue.setdefault("dirt", {})
+    intrigue.setdefault("last_action", None)
+    return intrigue
+
+
+def summarize_intrigue(game_state):
+    intrigue = get_intrigue_state(game_state)
+    active_rumors = [r for r in intrigue.get("rumors", []) if isinstance(r, dict)]
+    dirt_map = intrigue.get("dirt", {}) if isinstance(intrigue.get("dirt"), dict) else {}
+    top_targets = []
+    for name, payload in dirt_map.items():
+        if not isinstance(payload, dict):
+            continue
+        score = int(payload.get("points", 0) or 0)
+        if score > 0:
+            top_targets.append({"name": name, "points": score, "label": payload.get("label") or "把柄"})
+    top_targets.sort(key=lambda item: item["points"], reverse=True)
+    return {
+        "heat": max(0, int(intrigue.get("heat", 0) or 0)),
+        "rumor_count": len(active_rumors),
+        "dirt_count": len(top_targets),
+        "top_dirt": top_targets[:3],
+        "last_action": intrigue.get("last_action"),
+        "rumors": active_rumors[:5],
+    }
+
+
+def _clamp_attr(game_state, attr_name, delta):
+    current = game_state.attributes.get(attr_name, 0)
+    max_val = game_state.get_attr_max(attr_name)
+    updated = max(0, min(max_val, current + delta))
+    game_state.attributes[attr_name] = updated
+    return updated - current
+
+
+def _touch_relation(game_state, target_name, delta=0, impression=None):
+    rel = game_state.relationships.setdefault(target_name, {"好感": 0, "印象": "陌生", "互动次数": 0})
+    rel["互动次数"] = rel.get("互动次数", 0) + 1
+    if delta:
+        rel["好感"] = max(-100, min(100, rel.get("好感", 0) + delta))
+    if impression:
+        rel["印象"] = impression
+    return rel
+
+
+def _append_intrigue_rumor(game_state, rumor):
+    intrigue = get_intrigue_state(game_state)
+    rumors = intrigue.setdefault("rumors", [])
+    rumors.insert(0, rumor)
+    if len(rumors) > 12:
+        del rumors[12:]
+
+
+def process_intrigue_period(game_state):
+    intrigue = get_intrigue_state(game_state)
+    period_events = []
+    rumors = intrigue.get("rumors", [])
+    kept_rumors = []
+    for rumor in rumors:
+        if not isinstance(rumor, dict):
+            continue
+        rumor["turns_left"] = int(rumor.get("turns_left", 0) or 0) - 1
+        target = rumor.get("target") or "宫中某人"
+        severity = int(rumor.get("severity", 1) or 1)
+        if random.random() < min(0.78, 0.22 + severity * 0.08):
+            if rumor.get("type") == "player":
+                favor_loss = _clamp_attr(game_state, "宠爱", -random.randint(1, 2 + severity))
+                prestige_loss = _clamp_attr(game_state, "威望", -random.randint(1, 3 + severity))
+                intrigue["heat"] = min(100, intrigue.get("heat", 0) + 2)
+                period_events.append(f"🕸️ 关于你的流言仍在蔓延，宠爱{favor_loss}，威望{prestige_loss}")
+            else:
+                npc = game_state.npcs.get(target)
+                if npc and npc.get("alive", True):
+                    attrs = npc.setdefault("attributes", {})
+                    attrs["宠爱"] = max(0, attrs.get("宠爱", 30) - random.randint(1, 2 + severity))
+                    attrs["威望"] = max(0, attrs.get("威望", 20) - random.randint(1, 2 + severity))
+                    period_events.append(f"🕸️ {target}被流言所困，圣心与人望皆受损。")
+        if rumor["turns_left"] > 0:
+            kept_rumors.append(rumor)
+    intrigue["rumors"] = kept_rumors
+    dirt_map = intrigue.get("dirt", {}) if isinstance(intrigue.get("dirt"), dict) else {}
+    for payload in dirt_map.values():
+        if not isinstance(payload, dict):
+            continue
+        payload["age"] = int(payload.get("age", 0) or 0) + 1
+        if payload["age"] > 6 and payload.get("points", 0) > 0:
+            payload["points"] = max(0, int(payload.get("points", 0)) - 1)
+    if intrigue.get("heat", 0) > 0:
+        intrigue["heat"] = max(0, intrigue.get("heat", 0) - 1)
+    return period_events
+
+
+def get_intrigue_targets(game_state):
+    intrigue = get_intrigue_state(game_state)
+    dirt_map = intrigue.get("dirt", {}) if isinstance(intrigue.get("dirt"), dict) else {}
+    targets = []
+    for name, npc in game_state.npcs.items():
+        if name == "太后" or not npc.get("alive", True):
+            continue
+        attrs = npc.get("attributes", {})
+        dirt_payload = dirt_map.get(name, {}) if isinstance(dirt_map.get(name), dict) else {}
+        targets.append({
+            "name": name,
+            "rank": npc.get("rank", "妃嫔"),
+            "icon": npc.get("icon", "🌸"),
+            "favor": int(attrs.get("宠爱", 0) or 0),
+            "prestige": int(attrs.get("威望", 0) or 0),
+            "dirt_points": int(dirt_payload.get("points", 0) or 0),
+            "dirt_label": dirt_payload.get("label") or "暂无把柄",
+        })
+    targets.sort(key=lambda item: (-item["dirt_points"], -item["favor"], item["name"]))
+    return targets
+
+
+
+def handle_intrigue_action(game_state, action, target_name=None):
+    intrigue = get_intrigue_state(game_state)
+    dirt_map = intrigue.setdefault("dirt", {})
+    action_defs = {
+        "spy": {"cost": 12, "label": "刺探"},
+        "rumor": {"cost": 18, "label": "放流言"},
+        "blackmail": {"cost": 0, "label": "勒索"},
+        "cleanse": {"cost": 15, "label": "洗白"},
+    }
+    if action not in action_defs:
+        return None, "无效行动"
+
+    target = None
+    if action != "cleanse":
+        target = game_state.npcs.get(target_name)
+        if not target or not target.get("alive", True):
+            return None, "目标不存在或已失势"
+        if target_name == "太后":
+            return None, "太后耳目众多，不宜轻动"
+
+    silver_cost = action_defs[action]["cost"]
+    if silver_cost > 0 and game_state.silver < silver_cost:
+        return None, f"银两不足，需要{silver_cost}两"
+
+    player_scheme = int(game_state.attributes.get("谋略", 0) or 0)
+    player_mind = int(game_state.attributes.get("心计", 0) or 0)
+    player_prestige = int(game_state.attributes.get("威望", 0) or 0)
+    heat = int(intrigue.get("heat", 0) or 0)
+    effects = {}
+    events = []
+    success = False
+    message = ""
+    silver_change = 0
+
+    if action == "spy":
+        if player_scheme < 15:
+            return None, "谋略不足，难以布下耳目"
+        chance = max(0.18, min(0.88, 0.38 + player_scheme / 180 + player_mind / 240 - heat / 220))
+        if random.random() < chance:
+            success = True
+            gain = random.randint(1, 2) + (1 if player_scheme >= 70 or random.random() < 0.22 else 0)
+            payload = dirt_map.setdefault(target_name, {"points": 0, "age": 0, "label": "私下错处"})
+            payload["points"] = min(9, int(payload.get("points", 0) or 0) + gain)
+            payload["age"] = 0
+            payload["label"] = random.choice(["私相授受", "失仪把柄", "账目漏洞", "口舌错处"])
+            intrigue["heat"] = min(100, heat + random.randint(2, 5))
+            _touch_relation(game_state, target_name, -random.randint(1, 4), "似有戒备")
+            message = f"你安插耳目探查{target_name}，握住了{gain}点把柄。"
+            events.append(f"🕵️ 你探得{target_name}的{payload['label']}，可供日后拿捏。")
+        else:
+            intrigue["heat"] = min(100, heat + random.randint(5, 9))
+            effects["威望"] = _clamp_attr(game_state, "威望", -random.randint(1, 3))
+            _touch_relation(game_state, target_name, -random.randint(3, 7), "察觉你的试探")
+            message = f"你派去的人手露了行迹，{target_name}起了疑心。"
+            events.append(f"⚠️ {target_name}似乎察觉有人窥探，宫中风声顿紧。")
+    elif action == "rumor":
+        if player_mind < 18:
+            return None, "心计不足，流言难成局"
+        payload = dirt_map.get(target_name, {}) if isinstance(dirt_map.get(target_name), dict) else {}
+        dirt_bonus = int(payload.get("points", 0) or 0)
+        chance = max(0.15, min(0.9, 0.32 + player_mind / 190 + min(0.22, dirt_bonus * 0.06) - heat / 260))
+        severity = max(1, min(4, 1 + dirt_bonus // 2 + (1 if player_prestige >= 60 else 0)))
+        if random.random() < chance:
+            success = True
+            if dirt_bonus > 0:
+                payload["points"] = max(0, dirt_bonus - 1)
+            _append_intrigue_rumor(game_state, {
+                "target": target_name,
+                "type": "npc",
+                "severity": severity,
+                "turns_left": random.randint(2, 4),
+                "text": f"{target_name}卷入{payload.get('label') or '失德风波'}",
+            })
+            intrigue["heat"] = min(100, heat + random.randint(4, 8))
+            effects["宠爱"] = _clamp_attr(game_state, "宠爱", random.randint(0, 2))
+            effects["威望"] = _clamp_attr(game_state, "威望", random.randint(1, 4))
+            _touch_relation(game_state, target_name, -random.randint(4, 8), "对你心生怨怼")
+            message = f"你借风放出关于{target_name}的流言，宫中议论纷纷。"
+            events.append(f"🗣️ 流言已起：{target_name}短期内会受人非议。")
+        else:
+            intrigue["heat"] = min(100, heat + random.randint(6, 10))
+            _append_intrigue_rumor(game_state, {
+                "target": game_state.name,
+                "type": "player",
+                "severity": random.randint(1, 2),
+                "turns_left": random.randint(2, 3),
+                "text": "你搬弄是非反遭反噬",
+            })
+            effects["威望"] = _clamp_attr(game_state, "威望", -random.randint(2, 5))
+            message = f"你布下的流言被人反咬，脏水泼回了自己身上。"
+            events.append("🪤 流言反噬，你自己成了闲话中心。")
+    elif action == "blackmail":
+        payload = dirt_map.get(target_name, {}) if isinstance(dirt_map.get(target_name), dict) else {}
+        dirt_points = int(payload.get("points", 0) or 0)
+        if dirt_points < 2:
+            return None, "把柄不足，难以逼迫对方就范"
+        chance = max(0.2, min(0.92, 0.34 + player_mind / 210 + dirt_points * 0.08 + player_prestige / 320 - heat / 300))
+        if random.random() < chance:
+            success = True
+            gain_silver = random.randint(12, 24) + dirt_points * random.randint(3, 5)
+            game_state.silver += gain_silver
+            silver_change += gain_silver
+            payload["points"] = max(0, dirt_points - random.randint(1, 2))
+            payload["age"] = 0
+            intrigue["heat"] = min(100, heat + random.randint(5, 9))
+            effects["威望"] = _clamp_attr(game_state, "威望", random.randint(1, 3))
+            _touch_relation(game_state, target_name, -random.randint(6, 12), "对你又惧又恨")
+            message = f"你以把柄逼迫{target_name}低头，对方送来银两息事宁人。"
+            events.append(f"💰 {target_name}被你拿住命门，暗中送来{gain_silver}两银子。")
+        else:
+            payload["points"] = max(0, dirt_points - 1)
+            intrigue["heat"] = min(100, heat + random.randint(8, 12))
+            effects["威望"] = _clamp_attr(game_state, "威望", -random.randint(2, 4))
+            _touch_relation(game_state, target_name, -random.randint(8, 14), "恨意难消")
+            if random.random() < 0.45:
+                _append_intrigue_rumor(game_state, {
+                    "target": game_state.name,
+                    "type": "player",
+                    "severity": random.randint(1, 3),
+                    "turns_left": random.randint(2, 4),
+                    "text": f"你勒索{target_name}的风声走漏",
+                })
+                events.append("🪤 勒索未成，风声外泄，你反被宫人侧目。")
+            else:
+                events.append(f"⚠️ {target_name}强压怒火，你的威逼并未奏效。")
+            message = f"{target_name}没有就范，还设法反咬了你一口。"
+    elif action == "cleanse":
+        player_rumors = [r for r in intrigue.get("rumors", []) if isinstance(r, dict) and r.get("type") == "player"]
+        if heat <= 0 and not player_rumors:
+            return None, "眼下并无需要洗白的风波"
+        chance = max(0.22, min(0.93, 0.36 + player_prestige / 180 + player_mind / 260 - heat / 240))
+        if random.random() < chance:
+            success = True
+            removed = 0
+            kept_rumors = []
+            for rumor in intrigue.get("rumors", []):
+                if isinstance(rumor, dict) and rumor.get("type") == "player" and removed < 2:
+                    removed += 1
+                    continue
+                kept_rumors.append(rumor)
+            intrigue["rumors"] = kept_rumors
+            intrigue["heat"] = max(0, heat - random.randint(8, 16))
+            effects["威望"] = _clamp_attr(game_state, "威望", random.randint(1, 4))
+            if removed:
+                message = f"你上下打点、澄清风声，暂时压下了{removed}条针对你的流言。"
+                events.append(f"🪶 你成功洗白名声，宫中关于你的闲话散去了{removed}桩。")
+            else:
+                message = "你花银两安抚宫人、打点关系，总算先把热度压了下去。"
+                events.append("🪶 你花钱平事，宫中视线暂时从你身上移开。")
+        else:
+            intrigue["heat"] = max(0, heat - random.randint(1, 4))
+            effects["威望"] = _clamp_attr(game_state, "威望", -random.randint(1, 3))
+            message = "你试图洗白，却被人讥作欲盖弥彰。"
+            events.append("😓 你出面辟谣反惹议论，虽稍稍降温，名声仍受拖累。")
+
+    if silver_cost > 0:
+        game_state.silver -= silver_cost
+        silver_change -= silver_cost
+
+    if silver_change:
+        effects["银两"] = silver_change
+    intrigue["last_action"] = {
+        "action": action,
+        "label": action_defs[action]["label"],
+        "target": target_name,
+        "success": success,
+        "calendar": game_state.get_calendar_str(),
+    }
+    game_state.add_memory(message)
+    game_state.add_attr_change({k: v for k, v in effects.items() if k in game_state.attributes}, f"情报行动：{action_defs[action]['label']}")
+    return {
+        "success": True,
+        "action": action,
+        "action_label": action_defs[action]["label"],
+        "target": target_name,
+        "narration": message,
+        "effects": effects,
+        "silver_change": silver_change,
+        "intrigue": summarize_intrigue(game_state),
+        "intrigue_events": events,
+    }, None
+
 
 def can_npc_get_pregnant(npc):
     if not npc.get("alive", True):
@@ -2059,6 +2643,29 @@ def check_and_consume_action(game_state):
         return False, game_state.remaining_actions
     game_state.consume_action()
     return True, game_state.remaining_actions
+
+def game_over_response(game_state):
+    """终局后拒绝一切推进性操作。"""
+    ending = ending_payload(game_state)
+    return jsonify({
+        "error": f"此局已终——{ending['headline']}。请回顾一生或重建新档。",
+        "game_over": True,
+        "ending": ending,
+    }), 409
+
+def guard_action(game_state):
+    """行动前统一守卫：先查终局，再扣行动点。
+
+    返回 (ok, error_response)。所有消耗行动点的路由都经过这里，
+    避免结局判定散落在各个 route 里出现遗漏。
+    """
+    ensure_ending_fields(game_state)
+    if is_game_over(game_state):
+        return False, game_over_response(game_state)
+    can_act, remaining = check_and_consume_action(game_state)
+    if not can_act:
+        return False, (jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429)
+    return True, None
 
 # ============================================================
 #  AI服务
@@ -2514,9 +3121,9 @@ def hire_servant():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     cost = 30 if servant_type == '宫女' else 20
     if game_state.silver < cost:
         return jsonify({"error": f"银两不足，需要{cost}两"}), 400
@@ -2553,9 +3160,9 @@ def train_servant():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     for s in game_state.servants:
         if s.name == name and s.is_active:
             if game_state.silver < 15:
@@ -2587,8 +3194,12 @@ def get_npc_detail(name):
     if name not in game_state.npcs:
         return jsonify({"error": "NPC不存在"}), 404
     npc = game_state.npcs[name]
+    rank = npc.get("rank", "妃嫔")
+    min_age = 35 if rank == "太后" else 12
+    max_age = 90 if rank == "太后" else 80
+    default_age = random.randint(45, 65) if rank == "太后" else random.randint(14, 32)
     return jsonify({
-        "name": name, "rank": npc.get("rank","妃嫔"), "personality": npc.get("personality","未知"),
+        "name": name, "rank": rank, "age": clamp_age(npc.get("age"), default_age, min_age, max_age), "personality": npc.get("personality","未知"),
         "personality_desc": npc.get("personality_desc",""), "icon": npc.get("icon","🌸"),
         "attributes": npc.get("attributes",{}), "relationship": game_state.relationships.get(name, {"好感":0,"印象":"陌生","互动次数":0}),
         "rivalry": game_state.rivalries.get(name, 0), "alliance": game_state.alliances.get(name, 0),
@@ -2609,9 +3220,9 @@ def interact_npc():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     if npc_name not in game_state.npcs:
         return jsonify({"error": "NPC不存在"}), 404
     npc = game_state.npcs[npc_name]
@@ -2684,9 +3295,9 @@ def emperor_interact():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     if "皇帝" not in game_state.relationships:
         game_state.relationships["皇帝"] = {"好感": 10, "印象": "初识", "互动次数": 0}
     action_map = {'serve_tea': {'desc': '献茶', 'effects': {'宠爱': (1,5), '威望': (0,2)}, 'cost': 10}, 'discuss': {'desc': '奏对', 'effects': {'宠爱': (2,6), '威望': (2,5), '谋略': (1,4)}, 'cost': 0}, 'recite_poem': {'desc': '献诗', 'effects': {'宠爱': (3,8), '才情': (2,5)}, 'cost': 0}, 'ask_reward': {'desc': '求赏赐', 'effects': {'宠爱': (0,3), '威望': (0,2)}, 'cost': 0}}
@@ -2741,9 +3352,9 @@ def dowager_interact():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     if "太后" not in game_state.relationships:
         game_state.relationships["太后"] = {"好感": 20, "印象": "和善", "互动次数": 0}
     action_map = {'pay_respects': {'desc': '请安', 'effects': {'威望': (1,4), '宠爱': (1,3)}, 'cost': 0}, 'present_gift': {'desc': '献礼', 'effects': {'威望': (3,6), '宠爱': (2,5)}, 'cost': 25}, 'chat': {'desc': '陪聊', 'effects': {'威望': (2,5), '心计': (1,3), '魅力': (1,2)}, 'cost': 0}, 'ask_favor': {'desc': '求恩典', 'effects': {'威望': (5,10), '宠爱': (3,7)}, 'cost': 0}}
@@ -2899,6 +3510,9 @@ def next_period():
     game_state, err = session_or_404(player_id)
     if err:
         return err
+    ensure_ending_fields(game_state)
+    if is_game_over(game_state):
+        return game_over_response(game_state)
     api_config = get_user_api_config(request, player_id)
 
     # ---- 时间推进 ----
@@ -2908,6 +3522,20 @@ def next_period():
     game_state.reset_actions()
     game_state.current_time = "卯时"
     game_state._promotion_done = False
+    if game_state.year != old_year:
+        game_state.age = clamp_age(getattr(game_state, "age", 16) + 1, 16)
+        if isinstance(getattr(game_state, "emperor", None), dict):
+            game_state.emperor["age"] = clamp_age(game_state.emperor.get("age", 35) + 1, 35, 18, 80)
+        for npc in game_state.npcs.values():
+            if npc.get("alive", True):
+                rank = npc.get("rank", "")
+                minimum = 35 if rank == "太后" else 12
+                maximum = 90 if rank == "太后" else 80
+                default_age = 50 if rank == "太后" else 18
+                npc["age"] = clamp_age(npc.get("age", default_age) + 1, default_age, minimum, maximum)
+        for servant in getattr(game_state, "servants", []):
+            if getattr(servant, "is_active", True):
+                servant.age = clamp_age(getattr(servant, "age", 18) + 1, 18, 12, 80)
 
     intelligence = []
 
@@ -2962,11 +3590,13 @@ def next_period():
 
     # ---- 玩家怀孕进展 ----
     pregnancy_update = None
+    player_death_ending = None
     if game_state.is_pregnant:
         game_state.pregnancy_month += PREGNANCY_STEP
         miscarriage_msg = check_player_miscarriage(game_state)
         if miscarriage_msg:
             pregnancy_update = miscarriage_msg
+            player_death_ending = check_player_childbirth_death(game_state, survived_child=False)
         elif game_state.pregnancy_month >= 10:
             game_state.is_pregnant = False
             game_state.pregnancy_month = 0
@@ -2974,6 +3604,7 @@ def next_period():
                 game_state.attributes["健康"] = max(0, game_state.attributes["健康"] - 25)
                 pregnancy_update = f"⚠️ 你难产了！健康-25，请好好休养。"
                 game_state.add_memory(f"难产，健康-25")
+                player_death_ending = check_player_childbirth_death(game_state, survived_child=False)
             else:
                 gender = random.choice(["皇子", "公主"])
                 child_name = generate_child_name(gender)
@@ -2983,7 +3614,8 @@ def next_period():
                 game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes["威望"] + 15)
                 pregnancy_update = f"👶 你诞下{gender}，取名{child_name}！宠爱+20，威望+15"
                 game_state.add_memory(f"诞下{gender}，取名{child_name}")
-                if random.random() < 0.35:
+                player_death_ending = check_player_childbirth_death(game_state, survived_child=True)
+                if not player_death_ending and random.random() < 0.35:
                     promo_msg = try_player_promotion(game_state, allow_birth=True)
                     if promo_msg:
                         pregnancy_update += f" 母凭子贵，{promo_msg.replace('📜 圣旨到！', '').strip()}"
@@ -3034,6 +3666,12 @@ def next_period():
     pressure_events = process_pressure(game_state)
     if pressure_events:
         for msg in pressure_events:
+            intelligence.append(msg)
+            game_state.add_memory(msg)
+
+    intrigue_events = process_intrigue_period(game_state)
+    if intrigue_events:
+        for msg in intrigue_events:
             intelligence.append(msg)
             game_state.add_memory(msg)
 
@@ -3105,6 +3743,9 @@ def next_period():
     demotion_message = None
     depose_queen_message = None
     promoted_this_period = False
+    empress_support_message = maybe_trigger_empress_support_event(game_state)
+    if empress_support_message:
+        intelligence.append(empress_support_message)
     if check_promotion_condition(game_state):
         exceptional = is_exceptional_promotion(game_state)
         promotion_msg = try_player_promotion(game_state)
@@ -3231,7 +3872,23 @@ def next_period():
             new_concubine = {"names": new_names, "is_daxuan": False}
             game_state.add_memory(f"{len(new_names)}位新人入宫")
 
+    # ===== 终局判定（放在本旬所有结算之后，保证依据的是最终状态） =====
+    ending = player_death_ending
+    ending_warnings = []
+    if not ending:
+        ending, ending_warnings = evaluate_period_endings(game_state)
+    else:
+        # 生产致死已落定结局，仍需刷新失宠计数以保持存档一致
+        ensure_ending_fields(game_state)
+    for warn in ending_warnings:
+        intelligence.append(warn)
+        game_state.add_memory(warn)
+    if ending:
+        intelligence.append(f"{ending['icon']} 【{ending['key']}】{ending['reason']}")
+
+    ensure_character_ages(game_state)
     npcs_with_children = serialize_npcs_for_client(game_state)
+    dowager_data = game_state.npcs.get("太后")
 
     autosave_session(player_id)
     return jsonify({
@@ -3255,13 +3912,16 @@ def next_period():
         "alliances": game_state.alliances,
         "npcs": npcs_with_children,
         "emperor": game_state.emperor,
+        "dowager": dowager_data,
         "memories": game_state.get_recent_memories(5),
         "attr_change_log": game_state.attr_change_log[-5:],
         "player_name": game_state.name,
+        "age": game_state.age,
         "display_rank": game_state.get_display_rank(),
         "rank_periods": get_rank_periods(game_state),
         "rank_tenure_required": get_min_tenure(game_state.rank.name),
         "special_favor": is_special_favor(game_state),
+        "empress_status": get_empress_requirement_status(game_state),
         "remaining_actions": game_state.remaining_actions,
         "max_actions": game_state.max_actions,
         "promotion_message": promotion_message,
@@ -3276,9 +3936,59 @@ def next_period():
         "prince_events": prince_events,
         "growth_events": growth_events,
         "death_events": death_events,
+        "intrigue": summarize_intrigue(game_state),
+        "intrigue_events": intrigue_events,
         "ai_events_used": ai_events_used,
         "ai_events_fallback": ai_fallback,
+        "ending": ending,
+        "game_over": bool(ending),
+        "ending_warnings": ending_warnings,
     })
+
+@app.route('/api/intrigue/targets', methods=['GET'])
+def intrigue_targets_api():
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    return jsonify({
+        "targets": get_intrigue_targets(game_state),
+        "intrigue": summarize_intrigue(game_state),
+        "remaining_actions": game_state.remaining_actions,
+        "max_actions": game_state.max_actions,
+    })
+
+
+@app.route('/api/intrigue', methods=['POST'])
+def intrigue_action_api():
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    action = data.get('action')
+    target_name = data.get('target')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+
+    result, error = handle_intrigue_action(game_state, action, target_name)
+    if error:
+        game_state.remaining_actions = min(game_state.max_actions, game_state.remaining_actions + 1)
+        return jsonify({"error": error}), 400
+
+    autosave_session(player_id)
+    return jsonify({
+        **result,
+        "targets": get_intrigue_targets(game_state),
+        "attributes": game_state.attributes,
+        "silver": game_state.silver,
+        "relationships": game_state.relationships,
+        "remaining_actions": game_state.remaining_actions,
+        "max_actions": game_state.max_actions,
+        "player_name": game_state.name,
+    })
+
 
 @app.route('/api/scheme', methods=['POST'])
 def scheme_action():
@@ -3289,9 +3999,9 @@ def scheme_action():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     if target not in game_state.npcs:
         return jsonify({"error": "目标不存在"}), 404
     result = {"narration": "", "effects": {}}
@@ -3354,9 +4064,9 @@ def perform_action():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     action_names = {'embroidery': '绣花', 'calligraphy': '练字', 'greet': '请安', 'study': '读书', 'rest': '休养', 'walk': '散步'}
     effects = {'embroidery': {'才艺': 3, '银两': 5, '健康': -1}, 'calligraphy': {'才情': 4, '威望': 2, '健康': -1}, 'greet': {'威望': 3, '宠爱': 1, '心计': 1}, 'study': {'谋略': 4, '才情': 2, '健康': -2}, 'rest': {'健康': 5, '福运': 2}, 'walk': {'健康': 2, '容貌': 1, '福运': 1}}
     if action not in effects:
@@ -3502,6 +4212,7 @@ def start_game():
     game_state.background_desc = character.get('background_desc', '')
     game_state.traits = character.get('traits', [])
     game_state.custom_story = character.get('custom_story', '')
+    game_state.age = clamp_age(character.get('age'), random.randint(14, 22), 12, 40)
     
     if background_data:
         game_state.family_background = background_data.get('label', '未知')
@@ -3545,12 +4256,13 @@ def start_game():
         from models import EmperorPersonality
         game_state.emperor = {"name": emp_name, "age": random.randint(25,55), "personality": random.choice([p.value for p in EmperorPersonality]), "stats": {"威严": random.randint(40,90), "仁德": random.randint(30,85), "勤政": random.randint(30,85), "好色": random.randint(10,80)}, "favor_factors": {"明君": {"容貌":0.2,"才情":0.5,"心计":0.3}, "昏君": {"容貌":0.8,"才情":0.1,"心计":0.1}, "痴情": {"容貌":0.3,"才情":0.3,"心计":0.4}, "多疑": {"容貌":0.2,"才情":0.2,"心计":0.6}}}
 
+    game_state.emperor["age"] = clamp_age(game_state.emperor.get("age"), random.randint(25, 55), 18, 80)
     game_state.attributes["宠爱"] = 10
     first_impression = apply_emperor_first_impression(game_state)
     
     game_state.npcs = generate_all_npcs(10)
     if "太后" not in game_state.npcs:
-        game_state.npcs["太后"] = {"name": "太后", "rank": "太后", "personality": "威严慈祥", "personality_desc": "历经三朝，深谙宫闱之道", "icon": "👑", "attributes": {"威望":90,"心计":80,"健康":60,"宠爱":0,"容貌":70}, "relationship": {"好感":25,"印象":"和善","互动次数":0}, "is_active": True, "alive": True}
+        game_state.npcs["太后"] = {"name": "太后", "rank": "太后", "age": random.randint(45, 65), "personality": "威严慈祥", "personality_desc": "历经三朝，深谙宫闱之道", "icon": "👑", "attributes": {"威望":90,"心计":80,"健康":60,"宠爱":0,"容貌":70}, "relationship": {"好感":25,"印象":"和善","互动次数":0}, "is_active": True, "alive": True}
         game_state.relationships["太后"] = {"好感": 25, "印象": "和善", "互动次数": 0}
     
     for name, npc in game_state.npcs.items():
@@ -3567,6 +4279,7 @@ def start_game():
     if "皇帝" not in game_state.relationships:
         game_state.relationships["皇帝"] = {"好感": 10, "印象": "初识", "互动次数": 0}
     
+    ensure_character_ages(game_state)
     game_state.romance_mode = False
     game_state.custom_prompt = ""
     game_state._pending_promotion = None
@@ -3577,8 +4290,9 @@ def start_game():
     story = generate_story(game_state, "入宫选秀，开启了后宫生涯", npc_names, api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'))
     
     npcs_with_children = serialize_npcs_for_client(game_state)
+    dowager_data = game_state.npcs.get("太后")
     autosave_session(player_id)
-    return jsonify({"player_id": player_id, "player_name": player_name, "family_background": game_state.family_background, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "emperor": game_state.emperor, "storyline": game_state.storyline.value, "silver": game_state.silver, "npcs": npcs_with_children, "narration": story.get("narration","欢迎来到后宫。"), "choices": story.get("choices",["四处看看","去请安","回宫休息"]), "effects": story.get("effects",{}), "ai_warning": story.get("ai_warning"), "is_pregnant": game_state.is_pregnant, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "servants": [], "romance_mode": game_state.romance_mode, "year": game_state.year, "month": game_state.month, "day": game_state.day, "calendar_str": game_state.get_calendar_str(), "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": game_state.appearance, "talent": game_state.talent, "personality": game_state.personality, "traits": game_state.traits, "custom_story": game_state.custom_story, "first_impression": first_impression})
+    return jsonify({"player_id": player_id, "player_name": player_name, "age": game_state.age, "family_background": game_state.family_background, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "emperor": game_state.emperor, "dowager": dowager_data, "storyline": game_state.storyline.value, "silver": game_state.silver, "npcs": npcs_with_children, "narration": story.get("narration","欢迎来到后宫。"), "choices": story.get("choices",["四处看看","去请安","回宫休息"]), "effects": story.get("effects",{}), "ai_warning": story.get("ai_warning"), "is_pregnant": game_state.is_pregnant, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "servants": [], "romance_mode": game_state.romance_mode, "year": game_state.year, "month": game_state.month, "day": game_state.day, "calendar_str": game_state.get_calendar_str(), "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": game_state.appearance, "talent": game_state.talent, "personality": game_state.personality, "traits": game_state.traits, "custom_story": game_state.custom_story, "first_impression": first_impression, "empress_status": get_empress_requirement_status(game_state)})
 
 @app.route('/api/act', methods=['POST'])
 def player_action():
@@ -3592,9 +4306,9 @@ def player_action():
     game_state, err = session_or_404(player_id, "会话已过期")
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     if new_time:
         game_state.current_time = new_time
         if new_time == "卯时":
@@ -3632,9 +4346,11 @@ def player_action():
                 game_state.relationships[name]["好感"] = max(-100, min(100, game_state.relationships[name]["好感"] + change))
     if story.get("effects"):
         game_state.add_attr_change(story["effects"], choice)
+    ensure_character_ages(game_state)
     npcs_with_children = serialize_npcs_for_client(game_state)
+    dowager_data = game_state.npcs.get("太后")
     autosave_session(player_id)
-    return jsonify({"player_id": player_id, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "family_background": game_state.family_background, "npcs": npcs_with_children, "narration": story.get("narration","宫中岁月静好。"), "choices": story.get("choices",["继续","查看状态","保存游戏"]), "effects": story.get("effects",{}), "ai_warning": story.get("ai_warning"), "rivalry_event": rivalry_event, "event_triggered": story.get("event_triggered"), "memories": game_state.get_recent_memories(3), "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "attr_change_log": game_state.attr_change_log[-5:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
+    return jsonify({"player_id": player_id, "rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "family_background": game_state.family_background, "npcs": npcs_with_children, "narration": story.get("narration","宫中岁月静好。"), "choices": story.get("choices",["继续","查看状态","保存游戏"]), "effects": story.get("effects",{}), "ai_warning": story.get("ai_warning"), "rivalry_event": rivalry_event, "event_triggered": story.get("event_triggered"), "memories": game_state.get_recent_memories(3), "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-5:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "age": game_state.age, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "empress_status": get_empress_requirement_status(game_state)})
 
 @app.route('/api/state/<player_id>', methods=['GET'])
 def get_state(player_id):
@@ -3657,8 +4373,11 @@ def get_state(player_id):
             game_state.alliances = {}
         if not hasattr(game_state, 'children') or game_state.children is None:
             game_state.children = []
+        ensure_character_ages(game_state)
         npcs_with_children = serialize_npcs_for_client(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "name": game_state.name, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "restored_from_save": need_restore})
+        dowager_data = game_state.npcs.get("太后")
+        ensure_ending_fields(game_state)
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -3731,9 +4450,9 @@ def rank_petition_api():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     action = data.get('action', '')
     target = data.get('target')
     candidate = data.get('candidate')
@@ -3824,6 +4543,8 @@ def load_game():
             game_state.scandal_strikes = 0
         if not hasattr(game_state, 'rank_periods'):
             game_state.rank_periods = 0
+        ensure_ending_fields(game_state)
+        ensure_character_ages(game_state)
         sessions[player_id] = game_state
         api_config = get_user_api_config(request, player_id)
         existing = user_configs.get(player_id, {})
@@ -3834,7 +4555,10 @@ def load_game():
             "api_key": api_config.get("api_key") or existing.get("api_key", ""),
             "api_model": api_config.get("api_model") or existing.get("api_model", ""),
         }
-        return jsonify({"success": True, "message": f"读取存档成功 ({slot_name})", "game_state": game_state.to_dict()})
+        loaded_state = game_state.to_dict()
+        loaded_state["dowager"] = game_state.npcs.get("太后")
+        loaded_state["empress_status"] = get_empress_requirement_status(game_state)
+        return jsonify({"success": True, "message": f"读取存档成功 ({slot_name})", "game_state": loaded_state})
     except Exception as e:
         return jsonify({"error": f"读取存档失败: {str(e)}"}), 500
 
@@ -3910,9 +4634,9 @@ def queen_authority_api():
             if rank in RANK_LEVELS and RANK_LEVELS[rank] >= RANK_LEVELS["嫔"] and rank != "皇后":
                 assistant_candidates.append({"name": name, "rank": npc.get("rank", "妃嫔"), "is_player": False})
         return jsonify({"success": True, "authority": authority, "targets": targets, "assistant_candidates": assistant_candidates})
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     target = data.get('target')
     action = data.get('action', '')
     result, message = apply_queen_authority(game_state, target, action)
@@ -3936,9 +4660,9 @@ def api_duel_start():
     existing = getattr(game_state, "_active_duel", None)
     resuming = bool(existing and not existing.get("finished"))
     if not resuming:
-        can_act, remaining = check_and_consume_action(game_state)
-        if not can_act:
-            return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+        ok, err = guard_action(game_state)
+        if not ok:
+            return err
     duel, err = start_duel(game_state, target)
     if err:
         game_state.remaining_actions += 1
@@ -3991,9 +4715,9 @@ def api_pray():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     result, err = pray_or_curse(game_state, mode, target)
     if err:
         game_state.remaining_actions += 1
@@ -4012,9 +4736,9 @@ def random_conflict():
     if err:
         return err
     api_config = get_user_api_config(request, player_id)
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     event = generate_palace_conflict(game_state, None, None, api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'))
     if not event:
         return jsonify({"error": "没有合适的宫斗对象"}), 400
@@ -4029,6 +4753,8 @@ def random_conflict():
         "npc_demotion_message": event.get("npc_demotion_message"),
         "depose_queen_message": event.get("depose_queen_message"),
         "death_message": event.get("death_message"),
+        "ending": event.get("ending"),
+        "game_over": bool(event.get("ending")),
         "rank": game_state.rank.name, "display_rank": game_state.get_display_rank(),
     })
 
@@ -4042,9 +4768,9 @@ def initiate_conflict():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     if target not in game_state.npcs and target != game_state.name:
         return jsonify({"error": "目标不存在"}), 404
     if target == game_state.name:
@@ -4077,8 +4803,36 @@ def initiate_conflict():
         "npc_demotion_message": event.get("npc_demotion_message"),
         "depose_queen_message": event.get("depose_queen_message"),
         "death_message": event.get("death_message"),
+        "ending": event.get("ending"),
+        "game_over": bool(event.get("ending")),
         "servants": [s.to_dict() for s in game_state.get_active_servants()],
         "rank": game_state.rank.name, "display_rank": game_state.get_display_rank(),
+    })
+
+@app.route('/api/ending', methods=['GET'])
+def api_ending():
+    """查询当前局的结局与一生回顾。
+
+    未结束时 game_over 为 false，summary 仍返回当前的阶段性统计，
+    方便前端做「一生回顾」的实时预览。
+    """
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ensure_ending_fields(game_state)
+    ending = ending_payload(game_state)
+    return jsonify({
+        "success": True,
+        "game_over": bool(ending),
+        "ending": ending,
+        "summary": ending["summary"] if ending else build_life_summary(game_state),
+        "neglect_periods": getattr(game_state, "neglect_periods", 0),
+        "scandal_strikes": getattr(game_state, "scandal_strikes", 0),
+        "catalog": [
+            {"key": k, "icon": v["icon"], "category": v["category"], "headline": v["headline"]}
+            for k, v in ENDINGS.items()
+        ],
     })
 
 @app.route('/api/conflict/types', methods=['GET'])
@@ -4179,9 +4933,9 @@ def child_interact():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
 
     if mother_name and mother_name != game_state.name:
         if mother_name not in game_state.npcs:
@@ -4408,9 +5162,9 @@ def child_adopt():
     if direction not in ("in", "out", "return", "recall"):
         return jsonify({"error": "方向参数错误", "success": False}), 400
 
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
 
     my_rank_idx = RANK_LEVELS.get(game_state.rank.name, 0)
     period_label = f"建元{game_state.year}年{game_state.month}月"
@@ -4685,10 +5439,12 @@ def child_adopt():
         game_state.add_memory(message)
         narration = message
 
+    ensure_character_ages(game_state)
     autosave_session(player_id)
     return jsonify({
         "success": True,
         "narration": narration,
+        "age": game_state.age,
         "children": game_state.children,
         "has_children": game_state.has_children,
         "npcs": serialize_npcs_for_client(game_state),
@@ -4707,9 +5463,9 @@ def abort_pregnancy():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    can_act, remaining = check_and_consume_action(game_state)
-    if not can_act:
-        return jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
     if target not in game_state.npcs:
         return jsonify({"error": "目标不存在"}), 404
     npc = game_state.npcs[target]

@@ -66,6 +66,7 @@
         .action-bar .month-btn { background: var(--gold-light); border-color: var(--gold); }
         .action-bar .month-btn:hover { background: var(--gold); color: #fff; }
         .action-bar .month-btn.month-btn-always-enabled { opacity: 1 !important; cursor: pointer !important; }
+        .action-bar .month-btn.month-btn-always-enabled:disabled { opacity: .4 !important; cursor: not-allowed !important; }
         .action-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2px; margin: 2px 0 3px 0; }
         .action-grid .action-btn { padding: 4px 1px; border: 1px solid var(--border-light); border-radius: var(--radius-sm); background: var(--bg-card); color: var(--text-dark); font-size: 8px; cursor: pointer; transition: all 0.2s ease; font-family: 'Georgia','楷体',serif; text-align: center; box-shadow: var(--shadow); display: flex; flex-direction: column; align-items: center; gap: 1px; }
         .action-grid .action-btn:hover { background: #e8ddd0; border-color: var(--gold); transform: translateY(-2px); }
@@ -180,6 +181,30 @@
         .edict-modal-content .edict-body .sub { font-size:10px; color:var(--gold-dark); display:block; margin-top:2px; letter-spacing:1px; }
         .edict-modal-content .edict-seal { font-size:20px; margin-top:2px; color:#a03020; }
         .edict-modal-content .edict-effect { font-size:9px; color:var(--text-mid); background:var(--gold-light); padding:2px 8px; border-radius:8px; display:inline-block; margin-top:2px; }
+        /* ===== 结局界面 ===== */
+        .ending-overlay { position:fixed; inset:0; background:rgba(20,14,10,0.82); backdrop-filter:blur(8px); z-index:100020; display:none; justify-content:center; align-items:center; padding:14px; }
+        .ending-overlay.active { display:flex; animation:fadeIn 0.5s ease; }
+        .ending-box { background:linear-gradient(160deg,#fcf8f4,#f0e8e0); border:2px solid var(--gold); border-radius:var(--radius); padding:14px 16px; max-width:420px; width:100%; max-height:92vh; overflow-y:auto; box-shadow:0 30px 90px rgba(0,0,0,0.4); animation:slideUp 0.5s ease; }
+        .ending-icon { font-size:34px; text-align:center; display:block; margin-bottom:2px; }
+        .ending-key { font-size:16px; color:#8a2a1a; font-weight:600; letter-spacing:4px; text-align:center; }
+        .ending-headline { font-size:11px; color:var(--gold-dark); letter-spacing:2px; text-align:center; margin-top:2px; }
+        .ending-meta { font-size:8px; color:var(--text-light); text-align:center; margin-top:3px; letter-spacing:1px; }
+        .ending-reason { font-size:10px; color:#8a3a2a; background:#f7e9e4; border:1px solid #e0c4bc; border-radius:6px; padding:5px 8px; margin-top:6px; line-height:1.6; }
+        .ending-narration { font-size:10px; color:var(--text-dark); line-height:1.9; margin-top:8px; text-indent:1.5em; text-align:justify; }
+        .ending-epitaph { font-size:10px; color:var(--gold-dark); text-align:center; margin-top:8px; letter-spacing:2px; font-style:italic; }
+        .ending-section-title { font-size:10px; color:var(--text-dark); letter-spacing:2px; text-align:center; border-top:1px solid var(--border-light); border-bottom:1px solid var(--border-light); padding:4px 0; margin-top:10px; }
+        .ending-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:6px; }
+        .ending-stat { background:var(--bg-card); border:1px solid var(--border-light); border-radius:6px; padding:4px 6px; display:flex; justify-content:space-between; align-items:center; font-size:9px; }
+        .ending-stat .es-label { color:var(--text-light); }
+        .ending-stat .es-value { color:var(--text-dark); font-weight:600; }
+        .ending-list { font-size:9px; color:var(--text-mid); line-height:1.7; margin-top:6px; }
+        .ending-list .el-item { padding:2px 6px; border-left:2px solid var(--gold-light); margin-bottom:2px; background:rgba(255,255,255,0.5); }
+        .ending-actions { display:flex; gap:4px; justify-content:center; margin-top:12px; border-top:1px solid var(--border-light); padding-top:8px; }
+        .ending-actions button { padding:4px 14px; border-radius:var(--radius-sm); font-family:'Georgia',serif; font-size:9px; letter-spacing:1px; cursor:pointer; transition:all 0.25s ease; }
+        .ending-actions .eb-restart { border:1px solid #d48c7a; background:#f0d5d0; color:#8a3a2a; }
+        .ending-actions .eb-close { border:1px solid var(--border-light); background:transparent; color:var(--text-mid); }
+        .ending-warn-banner { display:none; background:linear-gradient(90deg,#f7e0d8,#fceee8); border:1px solid #d48c7a; border-radius:var(--radius-sm); color:#8a3a2a; font-size:9px; padding:4px 8px; margin-bottom:3px; line-height:1.6; }
+        .ending-warn-banner.visible { display:block; }
         .servant-card { display:inline-flex; align-items:center; gap:2px; background:var(--bg-card); border:1px solid var(--border-light); border-radius:10px; padding:1px 6px 1px 5px; font-size:7px; color:var(--text-mid); cursor:pointer; transition:all 0.2s; margin:1px; }
         .servant-card:hover { border-color:var(--gold); background:var(--gold-light); }
         .servant-card .s-type { font-size:6px; color:var(--text-light); background:#e8ddd0; padding:0 3px; border-radius:5px; }
@@ -296,176 +321,394 @@
             box-shadow: var(--shadow);
             line-height: 1.45;
         }
-        /* Fengyi visual refresh: visual rules only, no IDs or handlers changed. */
+        /* Readability-first theme override: improve contrast without touching behavior. */
         :root {
-            --bg-primary:#f4efe7; --bg-card:#fffdf9; --bg-nav:#2d2431;
-            --gold:#b58a48; --gold-light:#ead8b5; --gold-dark:#8c642f;
-            --text-dark:#30232b; --text-mid:#5e4d58; --text-body:#51434d;
-            --text-light:#927f89; --border-light:#e3d7cf;
-            --shadow:0 10px 28px rgba(73,48,58,.08); --radius:18px; --radius-sm:12px;
+            --bg-primary: #f6f1ea;
+            --bg-card: #fffdfa;
+            --bg-nav: #f1e7da;
+            --gold: #9f6f2f;
+            --gold-light: #ead7b8;
+            --gold-dark: #7b5320;
+            --text-dark: #24180f;
+            --text-mid: #4a3727;
+            --text-body: #38281b;
+            --text-light: #6f5a47;
+            --border-light: #d8c5b1;
+            --shadow: 0 12px 34px rgba(74, 48, 24, 0.12);
+            --radius: 18px;
+            --radius-sm: 12px;
+            --jade: #5f8778;
+            --jade-soft: rgba(95, 135, 120, 0.12);
+            --gold-soft: rgba(159, 111, 47, 0.12);
         }
-        html { background:#e9e1da; }
+        html { background: #efe5d8; }
         body {
-            background:radial-gradient(circle at 15% 10%,rgba(255,255,255,.9),transparent 28%),radial-gradient(circle at 90% 90%,rgba(181,138,72,.13),transparent 32%),linear-gradient(135deg,#eee7df 0%,#f7f3ed 48%,#eadfe0 100%);
-            color:var(--text-body); padding:18px;
+            visibility: hidden;
+            color: var(--text-body);
+            background-color: #f6f1ea;
+            background-image:
+                radial-gradient(circle at 18% 12%, rgba(255,255,255,.82), transparent 28%),
+                radial-gradient(circle at 88% 88%, rgba(159,111,47,.10), transparent 30%),
+                linear-gradient(135deg, #f3ece3 0%, #fbf7f1 52%, #efe4d8 100%);
         }
-        body::before { content:''; position:fixed; inset:0; pointer-events:none; opacity:.22; background-image:radial-gradient(rgba(88,61,68,.18) .55px,transparent .55px); background-size:7px 7px; }
-        .phone-frame { max-width:460px; height:min(820px,94dvh); background:var(--bg-card); border:1px solid rgba(181,138,72,.28); border-radius:28px; box-shadow:0 24px 70px rgba(58,38,48,.22),0 0 0 7px rgba(255,255,255,.32); }
-        .app-header { position:relative; background:linear-gradient(135deg,#3b2c3a 0%,#51364b 58%,#6a4351 100%); color:#fffaf2; padding:10px 14px 9px; border-bottom:1px solid rgba(226,190,115,.5); box-shadow:0 5px 18px rgba(45,36,49,.22); }
-        .app-header::after { content:''; position:absolute; left:14px; right:14px; bottom:4px; height:1px; background:linear-gradient(90deg,transparent,rgba(232,213,181,.75),transparent); }
-        .app-header .title-area { gap:8px; }
-        .app-header .title-area .title { color:#fffaf2; font-size:15px; letter-spacing:3px; text-shadow:0 2px 10px rgba(0,0,0,.2); }
-        .app-header .title-area .title .gold { color:#e8c884; }
-        .app-header .status-mini { gap:5px; font-size:9px; }
-        .app-header .status-mini span { background:rgba(255,255,255,.12); color:#f7ead8; border-color:rgba(232,213,181,.3); padding:3px 7px; }
-        .app-header .status-mini .rank-display { color:#f0bdad; }
-        .app-header .status-mini .silver-display { color:#edcf8c; }
-        .app-header .status-mini .calendar-display { color:#c6d9d2; }
-        .app-header .status-mini .actions-display { color:#b9e0c7; }
-        .app-header .save-btns { gap:5px; }
-        .app-header .save-btns button { padding:4px 8px; background:rgba(255,255,255,.1); color:#fffaf2; border-color:rgba(232,213,181,.42); border-radius:8px; font-size:9px; }
-        .app-header .save-btns button:hover { background:rgba(232,213,181,.25); border-color:#e8d5b5; transform:translateY(-1px); }
-        .page-container { background:linear-gradient(180deg,#f5f0e9,#f1ebe4); }
-        .page { padding:12px 12px 8px; }
-        .page::-webkit-scrollbar { width:5px; }
-        .page::-webkit-scrollbar-track { background:#e8ded8; }
-        .page::-webkit-scrollbar-thumb { background:#bda17a; }
-        .story-scroll { gap:8px; }
-        .log-area,.story-input-area,.stat-block { background:rgba(255,253,249,.92); border:1px solid var(--border-light); box-shadow:var(--shadow); }
-        .log-area { border-radius:16px; padding:12px 13px; }
-        .log-entry { border-bottom-color:#eee4dc !important; line-height:1.75 !important; }
-        .log-entry .log-time { color:var(--gold-dark) !important; }
-        .story-input-area { border-radius:16px !important; padding:10px !important; }
-        textarea,input,select { background:#fffdfa !important; color:var(--text-dark) !important; border:1px solid #d9c9bd !important; border-radius:9px !important; transition:border-color .2s,box-shadow .2s,background .2s; }
-        textarea:focus,input:focus,select:focus { outline:none !important; border-color:var(--gold) !important; box-shadow:0 0 0 3px rgba(181,138,72,.16) !important; background:#fff !important; }
-        button,.interact-btn,.primary-btn,.btn-sm,.config-toggle-btn { min-height:30px; border-radius:9px !important; font-weight:600; letter-spacing:.3px; transition:transform .2s,box-shadow .2s,background .2s,border-color .2s; }
-        .stat-block { border-radius:14px; padding:9px 10px; }
-        .stat-block .block-title { color:#765d68; border-bottom-color:#eadfd7; padding-bottom:6px; margin-bottom:6px; font-size:9px; letter-spacing:2px; }
-        .stat-row { padding:3px 0; }
-        .attr-bar-row { padding:3px 0; }
-        .attr-bar-row .bar-track { height:5px; background:#eee4dc; }
-        .attr-bar-row .bar-track .bar-fill { background:linear-gradient(90deg,#caa263,#8f6740); }
-        .child-card-ui,.servant-card { background:#fffaf4; border-color:#e3d2c4; box-shadow:0 4px 12px rgba(84,57,65,.06); }
-        .child-card-ui:hover,.servant-card:hover { background:#fff5e7; border-color:#c39a5c; }
-        .bottom-nav { background:linear-gradient(180deg,#342936,#271e2b) !important; border-top:1px solid rgba(232,213,181,.35) !important; padding:7px 8px 9px !important; gap:7px !important; }
-        .nav-item { color:#c9b9bf !important; border-radius:11px !important; padding:7px 4px !important; min-height:44px !important; }
-        .nav-item.active { color:#fff3d9 !important; background:linear-gradient(180deg,rgba(181,138,72,.42),rgba(181,138,72,.18)) !important; box-shadow:inset 0 0 0 1px rgba(232,213,181,.28); }
-        .nav-item:hover { color:#fff3d9 !important; background:rgba(255,255,255,.1) !important; }
-        .nav-icon { filter:saturate(.7); }
-        #loadingOverlay,.modal-overlay { background:rgba(42,30,40,.58) !important; backdrop-filter:blur(5px); }
-        .loading-box,.modal-box { background:#fffaf4 !important; border:1px solid #d7bd96 !important; border-radius:18px !important; box-shadow:0 20px 60px rgba(30,20,28,.25) !important; }
-        .loading-spinner { border-color:#ead8b5 !important; border-top-color:#8d6635 !important; }
-        .toast-notification { border-radius:12px !important; box-shadow:0 12px 30px rgba(48,32,40,.18) !important; }
-        @media (max-width:520px) {
-            body { padding:0; align-items:stretch; }
-            .phone-frame { max-width:none; height:100dvh; max-height:none; border-radius:0; box-shadow:none; border:0; }
-            .app-header { padding-top:calc(9px + env(safe-area-inset-top)); }
-            .bottom-nav { padding-bottom:calc(8px + env(safe-area-inset-bottom)) !important; }
-        }
-        @media (prefers-reduced-motion:reduce) {
-            *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
-        }
-        button:hover,.interact-btn:hover,.primary-btn:hover,.btn-sm:hover,.config-toggle-btn:hover { transform:translateY(-1px); box-shadow:0 5px 12px rgba(85,55,64,.12); }
-        .primary-btn,.send-btn,.action-btn { background:linear-gradient(135deg,#b58a48,#8d6635) !important; color:#fffaf0 !important; border-color:#a47a3e !important; }
-        .interact-btn,.btn-sm,.config-toggle-btn { background:#fffaf3 !important; color:#684b32 !important; border-color:#d7bd96 !important; }
-        /* Ink-and-jade theme override: visual skin only. */
-        :root {
-            --bg-primary: #25302e; --bg-card: rgba(32,42,42,.88); --bg-nav: rgba(22,30,30,.96);
-            --gold: #c4ad94; --gold-light: #ddd0c0; --gold-dark: #a88d70;
-            --text-dark: #f8f5f0; --text-mid: #d5d0c8; --text-body: #e9e4dc; --text-light: #aaa79e;
-            --border-light: rgba(160,190,180,.2); --shadow: 0 16px 56px rgba(0,0,0,.35);
-            --radius: 18px; --radius-sm: 12px; --jade: #8ab3a5; --jade-soft: rgba(138,179,165,.11); --gold-soft: rgba(196,173,148,.12);
-        }
-        html { background: #202a28; }
-        body { visibility: hidden; color: var(--text-body); background-color: #25302e; background-image: radial-gradient(ellipse at 20% 15%,rgba(138,179,165,.12),transparent 42%),radial-gradient(ellipse at 85% 90%,rgba(196,173,148,.09),transparent 45%),linear-gradient(135deg,#25302e,#1e2928); }
         body.ui-ready { visibility: visible; }
-        body::before { opacity: .16; background-image: radial-gradient(rgba(221,208,192,.15) .55px,transparent .55px); background-size: 8px 8px; }
-        .phone-frame { max-width: 460px; height: min(820px,94dvh); background: rgba(32,42,42,.92); border: 2px solid transparent; border-radius: 28px; box-shadow: 0 20px 70px rgba(0,0,0,.5),0 0 0 2px var(--jade) inset,0 0 0 5px var(--gold) inset; }
-        .app-header { background: linear-gradient(135deg,#202d2c,#2d3c39 58%,#3a3934); color: #f8f5f0; padding: 12px 14px 11px; border-bottom: 1px solid rgba(196,173,148,.48); box-shadow: 0 6px 22px rgba(0,0,0,.24); }
-        .app-header::after { background: linear-gradient(90deg,transparent,rgba(221,208,192,.8),transparent); }
-        .app-header .title-area .title { color: #f8f5f0; font-size: 15px; letter-spacing: 3px; text-shadow: 0 0 24px rgba(196,173,148,.14); }
-        .app-header .title-area .title .gold { color: var(--gold-light); }
-        .app-header .status-mini { gap: 5px; color: var(--text-mid); }
-        .app-header .status-mini span { background: rgba(255,255,255,.055); color: var(--text-mid); border-color: rgba(138,179,165,.34); }
-        .app-header .status-mini .rank-display { color: var(--gold-light); }
-        .app-header .status-mini .silver-display { color: var(--jade); }
-        .app-header .status-mini .calendar-display { color: #cbd8d1; }
-        .app-header .status-mini .actions-display { color: #b9d8c9; }
-        .app-header .save-btns button { background: rgba(255,255,255,.05); color: var(--text-mid); border-color: rgba(196,173,148,.34); }
-        .app-header .save-btns button:hover { background: var(--gold-soft); border-color: var(--gold-light); }
-        .page-container { background: linear-gradient(180deg,#263331,#202b2a); }
-        .page { padding: 12px 12px 8px; }
-        .page::-webkit-scrollbar-track { background: rgba(0,0,0,.12); }
+        body::before {
+            opacity: .12;
+            background-image: radial-gradient(rgba(122, 83, 32, .16) .55px, transparent .55px);
+            background-size: 8px 8px;
+        }
+        .phone-frame {
+            max-width: 460px;
+            height: min(820px,94dvh);
+            background: linear-gradient(180deg, rgba(255,253,250,.98), rgba(248,241,232,.98));
+            border: 1px solid rgba(159,111,47,.24);
+            border-radius: 28px;
+            box-shadow: 0 24px 70px rgba(74,48,24,.18), 0 0 0 6px rgba(255,255,255,.42);
+        }
+        .app-header {
+            background: linear-gradient(135deg, #6f4a22 0%, #8a5d2b 58%, #a06f35 100%);
+            color: #fffaf3;
+            padding: 12px 14px 11px;
+            border-bottom: 1px solid rgba(255, 236, 205, .55);
+            box-shadow: 0 6px 22px rgba(74,48,24,.18);
+        }
+        .app-header::after { background: linear-gradient(90deg, transparent, rgba(255,244,224,.82), transparent); }
+        .app-header .title-area .title { color: #fffaf3; font-size: 17px; letter-spacing: 3px; text-shadow: 0 1px 10px rgba(0,0,0,.16); }
+        .app-header .title-area .title .gold { color: #fff0c8; }
+        .app-header .status-mini { gap: 6px; color: #fff4e4; font-size: 10px; }
+        .app-header .status-mini span {
+            background: rgba(255,255,255,.18);
+            color: #fff7eb;
+            border-color: rgba(255,244,224,.42);
+            text-shadow: 0 1px 1px rgba(0,0,0,.08);
+            padding: 4px 8px;
+        }
+        .app-header .status-mini .rank-display { color: #fff0c8; }
+        .app-header .status-mini .silver-display { color: #e7fff4; }
+        .app-header .status-mini .calendar-display { color: #f8f3ea; }
+        .app-header .status-mini .actions-display { color: #efffe8; }
+        .app-header .save-btns button {
+            background: rgba(255,255,255,.16);
+            color: #fffaf3;
+            border-color: rgba(255,244,224,.42);
+        }
+        .app-header .save-btns button:hover { background: rgba(255,255,255,.28); border-color: #fff0c8; }
+        .page-container { background: linear-gradient(180deg, #f7f1e8, #f2e9de); }
+        .page {
+            padding: 14px 14px 10px;
+            position: relative;
+        }
+        .page::before {
+            content: '';
+            position: sticky;
+            top: 0;
+            display: block;
+            height: 0;
+            pointer-events: none;
+        }
+        #pageStory {
+            background: linear-gradient(180deg, rgba(255,250,244,.92), rgba(248,239,228,.88));
+        }
+        #pageHarem {
+            background: linear-gradient(180deg, rgba(250,245,238,.94), rgba(241,232,220,.90));
+        }
+        #pageStatus {
+            background: linear-gradient(180deg, rgba(246,250,247,.94), rgba(233,242,236,.90));
+        }
+        #pageConflict {
+            background: linear-gradient(180deg, rgba(252,244,238,.94), rgba(245,228,220,.90));
+        }
+        .page::-webkit-scrollbar-track { background: #eadfd2; }
         .page::-webkit-scrollbar-thumb { background: var(--gold); }
-        .log-area,.story-input-area,.stat-block,.emperor-card,.dowager-card { background: rgba(255,255,255,.045) !important; border: 1px solid var(--border-light) !important; box-shadow: 0 2px 16px rgba(0,0,0,.18),0 0 0 1px rgba(196,173,148,.04) inset !important; }
-        .log-area { border-color: var(--jade) !important; border-radius: 16px; }
-        .log-entry { color: #ddd5ca; border-bottom-color: rgba(255,255,255,.07) !important; }
-        .log-entry.flip { color: var(--gold-light) !important; background: linear-gradient(90deg,rgba(196,173,148,.1),transparent); border-left-color: var(--gold); }
-        .log-entry .calendar-tag { background: rgba(196,173,148,.16); color: #f7e8c7; border: 1px solid rgba(196,173,148,.34); box-shadow: inset 0 0 0 1px rgba(255,255,255,.04); }
-        /* Dark-theme readability for harem cards and interaction dialogs. */
-        .npc-card,.npc-card-queen { background: linear-gradient(135deg,rgba(255,255,255,.075),rgba(138,179,165,.045)) !important; }
-        .npc-card > div,.npc-card-queen > div { color: #d9d4cc !important; }
-        .npc-card span[style*="color"],.npc-card-queen span[style*="color"] { color: #d9d4cc !important; }
-        .npc-card span[style*="color:var(--text-dark)"],.npc-card-queen span[style*="color:var(--text-dark)"] { color: #fff5e5 !important; }
-        .npc-card span[style*="color:var(--text-light)"],.npc-card-queen span[style*="color:var(--text-light)"] { color: #bdb8af !important; }
-        .npc-card span[style*="background:var(--gold-light)"],.npc-card-queen span[style*="background:var(--gold-light)"] { background: rgba(196,173,148,.2) !important; color: #f4dfb9 !important; }
-        .npc-card .npc-pregnancy-badge,.npc-card .npc-children-badge,.npc-card .npc-badges span { text-shadow: 0 1px 2px rgba(0,0,0,.18); }
-        .modal-box #modalTitle { color: #f5e6ca !important; }
-        .modal-box #modalBody,.modal-box #modalBody > div { color: #ddd5ca !important; }
-        .modal-box #modalBody > div[style*="background"] { background: linear-gradient(135deg,rgba(138,179,165,.12),rgba(196,173,148,.08)) !important; }
-        .modal-box #modalBody [style*="color:var(--text-dark)"],.modal-box #modalBody [style*="color:#2a1a0a"] { color: #fff5e5 !important; }
-        .modal-box #modalBody [style*="color:var(--text-mid)"] { color: #ddd5ca !important; }
-        .modal-box #modalBody [style*="color:var(--text-light)"] { color: #bdb8af !important; }
-        .modal-box #modalBody .interact-btn { background: rgba(138,179,165,.14) !important; color: #f1eadf !important; border-color: rgba(138,179,165,.5) !important; }
-        .modal-box #modalBody .interact-btn:hover { background: rgba(196,173,148,.25) !important; color: #fff8ec !important; }
-        .modal-box #modalBody .interact-result-area { background: rgba(196,173,148,.13) !important; color: #f0e8dc !important; border-color: rgba(196,173,148,.5) !important; }
-        .modal-box #modalBody .edict-modal-content { color: #ddd5ca !important; }
-        #currentStoryDisplay { background: rgba(255,255,255,.05); color: var(--text-dark); border-color: var(--gold) !important; box-shadow: 0 0 0 1px rgba(138,179,165,.08) inset,0 2px 16px rgba(0,0,0,.16); }
-        textarea,input,select { background: rgba(0,0,0,.2) !important; color: var(--text-dark) !important; border-color: var(--jade) !important; border-radius: 10px !important; }
-        textarea:focus,input:focus,select:focus { border-color: var(--gold-light) !important; box-shadow: 0 0 0 3px rgba(196,173,148,.13),0 0 20px rgba(196,173,148,.1) !important; background: rgba(0,0,0,.3) !important; }
-        textarea::placeholder,input::placeholder { color: var(--text-light) !important; }
-        .stat-block .block-title,.char-card .card-title { color: var(--gold-light) !important; border-bottom-color: rgba(196,173,148,.28) !important; }
-        .attr-bar-row .bar-track { background: rgba(0,0,0,.28) !important; }
-        .attr-bar-row .bar-track .bar-fill,.bar-fill { background: linear-gradient(90deg,#8ab3a5,#c4ad94) !important; }
-        .child-card-ui,.servant-card { background: rgba(255,255,255,.045) !important; border-color: var(--border-light) !important; color: var(--text-body) !important; }
-        .npc-card,.npc-card-queen { background: linear-gradient(135deg,rgba(255,255,255,.075),rgba(138,179,165,.045)) !important; border-color: var(--border-light) !important; color: var(--text-body) !important; }
-        .child-card-ui:hover,.servant-card:hover,.npc-card:hover { background: rgba(196,173,148,.1) !important; border-color: var(--gold) !important; }
-        .bottom-nav { background: linear-gradient(180deg,rgba(35,48,46,.98),rgba(20,29,29,.98)) !important; border-top-color: rgba(196,173,148,.4) !important; }
-        .nav-item { color: var(--text-mid) !important; }
-        .nav-item.active { color: #f5e6ca !important; background: linear-gradient(180deg,rgba(196,173,148,.24),rgba(138,179,165,.09)) !important; box-shadow: inset 0 0 0 1px rgba(196,173,148,.35) !important; }
-        .nav-item:hover { color: #f8f5f0 !important; background: rgba(255,255,255,.07) !important; }
-        button:hover,.interact-btn:hover,.primary-btn:hover,.btn-sm:hover,.config-toggle-btn:hover { box-shadow: 0 6px 20px rgba(0,0,0,.25),0 0 0 1px var(--jade) inset; }
-        .primary-btn,.send-btn,.action-btn { background: rgba(255,255,255,.045) !important; color: var(--text-mid) !important; border-color: var(--gold) !important; }
-        .primary-btn:hover,.send-btn:hover,.action-btn:hover { background: var(--gold-soft) !important; color: var(--text-dark) !important; }
-        .interact-btn,.btn-sm,.config-toggle-btn,.btn { background: var(--jade-soft) !important; color: var(--text-mid) !important; border-color: var(--jade) !important; }
-        .month-btn { background: var(--gold-soft) !important; color: var(--gold-light) !important; border-color: var(--gold) !important; }
-        #loadingOverlay,.modal-overlay { background: rgba(15,23,22,.72) !important; backdrop-filter: blur(8px); }
-        .loading-box,.modal-box { background: #202c2b !important; color: var(--text-body) !important; border: 1px solid var(--gold) !important; border-radius: 20px !important; box-shadow: 0 20px 60px rgba(0,0,0,.45),0 0 0 1px var(--jade) inset !important; }
-        .loading-spinner { border-color: rgba(138,179,165,.25) !important; border-top-color: var(--gold-light) !important; }
-        .toast-notification { background: #202c2b !important; color: var(--text-dark) !important; border-color: var(--gold) !important; box-shadow: 0 12px 30px rgba(0,0,0,.35) !important; }
-        .scenario-overlay { background: rgba(25,35,34,.98) !important; color: var(--text-body); padding: 18px 14px 24px; }
-        .scenario-hero { width: min(460px,100%); padding: 18px 0 14px !important; border-bottom: 1px solid rgba(196,173,148,.3); margin-bottom: 12px; }
-        .scenario-hero > div:first-child { color: var(--text-dark) !important; font-size: 24px !important; letter-spacing: 7px !important; text-shadow: 0 0 24px rgba(196,173,148,.12); }
-        .scenario-hero > div:first-child span { color: var(--gold-light) !important; }
+        .log-area,.story-input-area,.stat-block,.emperor-card,.dowager-card {
+            background: rgba(255,253,249,.96) !important;
+            border: 1px solid var(--border-light) !important;
+            box-shadow: 0 4px 18px rgba(74,48,24,.08), 0 0 0 1px rgba(255,255,255,.55) inset !important;
+        }
+        .log-area { border-color: #ccb08d !important; border-radius: 16px; }
+        .log-entry {
+            color: var(--text-body);
+            border-bottom-color: rgba(123,83,32,.10) !important;
+            font-size: 12px;
+            line-height: 1.72;
+        }
+        .log-entry.flip {
+            color: #5a3510 !important;
+            background: linear-gradient(90deg, rgba(234,215,184,.72), rgba(255,249,240,.92));
+            border-left-color: var(--gold);
+        }
+        .log-entry .calendar-tag {
+            background: rgba(159,111,47,.14);
+            color: #6a4518;
+            border: 1px solid rgba(159,111,47,.24);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,.45);
+        }
+        .npc-card,.npc-card-queen {
+            background: linear-gradient(135deg, rgba(255,252,247,.98), rgba(244,235,224,.96)) !important;
+            border-color: #d8c5b1 !important;
+            color: var(--text-body) !important;
+        }
+        .npc-card > div,.npc-card-queen > div { color: var(--text-body) !important; }
+        .npc-card span[style*="color"],.npc-card-queen span[style*="color"] { color: var(--text-body) !important; }
+        .npc-card span[style*="color:var(--text-dark)"],.npc-card-queen span[style*="color:var(--text-dark)"] { color: #24180f !important; }
+        .npc-card span[style*="color:var(--text-light)"],.npc-card-queen span[style*="color:var(--text-light)"] { color: #6f5a47 !important; }
+        .npc-card span[style*="background:var(--gold-light)"],.npc-card-queen span[style*="background:var(--gold-light)"] {
+            background: rgba(234,215,184,.72) !important;
+            color: #5f3d16 !important;
+        }
+        .modal-box #modalTitle { color: #5f3d16 !important; }
+        .modal-box #modalBody,.modal-box #modalBody > div { color: var(--text-body) !important; }
+        .modal-box #modalBody > div[style*="background"] {
+            background: linear-gradient(135deg, rgba(95,135,120,.08), rgba(234,215,184,.18)) !important;
+        }
+        .modal-box #modalBody [style*="color:var(--text-dark)"],.modal-box #modalBody [style*="color:#2a1a0a"] { color: #24180f !important; }
+        .modal-box #modalBody [style*="color:var(--text-mid)"] { color: var(--text-mid) !important; }
+        .modal-box #modalBody [style*="color:var(--text-light)"] { color: var(--text-light) !important; }
+        .modal-box #modalBody .interact-btn {
+            background: rgba(95,135,120,.10) !important;
+            color: #2f4a40 !important;
+            border-color: rgba(95,135,120,.42) !important;
+        }
+        .modal-box #modalBody .interact-btn:hover {
+            background: rgba(159,111,47,.16) !important;
+            color: #4b2f12 !important;
+        }
+        .modal-box #modalBody .interact-result-area {
+            background: rgba(234,215,184,.28) !important;
+            color: #3b2a1d !important;
+            border-color: rgba(159,111,47,.34) !important;
+        }
+        .modal-box #modalBody .edict-modal-content { color: var(--text-body) !important; }
+        #currentStoryDisplay {
+            background: linear-gradient(180deg, rgba(255,253,249,.98), rgba(248,241,232,.98));
+            color: var(--text-dark);
+            border-color: #ccb08d !important;
+            box-shadow: 0 0 0 1px rgba(255,255,255,.55) inset, 0 2px 16px rgba(74,48,24,.08);
+            font-size: 14px;
+            line-height: 1.7;
+            padding: 10px 12px;
+            max-height: 92px;
+        }
+        .input-area input,
+        .input-area button,
+        .action-bar button,
+        .action-grid .action-btn,
+        .promotion-option-btn,
+        .interact-btn,
+        .btn-sm,
+        .config-toggle-btn,
+        .save-config-btn,
+        .start-area .btn,
+        .start-area .btn-primary {
+            font-size: 10px !important;
+        }
+        .action-grid .action-btn {
+            min-height: 58px;
+            gap: 3px;
+        }
+        .action-grid .action-btn .icon { font-size: 14px; }
+        .action-grid .action-btn .sub { font-size: 7px; }
+        .stat-row,
+        .attr-bar-row,
+        .char-card .card-row,
+        #memoriesList,
+        #changeLog,
+        #conflictLog,
+        .child-recent-events,
+        .interact-result-area {
+            font-size: 10px !important;
+            line-height: 1.6;
+        }
+        .stat-block .block-title,
+        .char-card .card-title {
+            font-size: 10px !important;
+        }
+        textarea,input,select {
+            background: #fffdfa !important;
+            color: var(--text-dark) !important;
+            border-color: #cdb79f !important;
+            border-radius: 10px !important;
+        }
+        textarea:focus,input:focus,select:focus {
+            border-color: var(--gold) !important;
+            box-shadow: 0 0 0 3px rgba(159,111,47,.14), 0 0 18px rgba(159,111,47,.08) !important;
+            background: #ffffff !important;
+        }
+        textarea::placeholder,input::placeholder { color: #8a735d !important; }
+        .stat-block .block-title,.char-card .card-title { color: #6a4518 !important; border-bottom-color: rgba(159,111,47,.18) !important; }
+        .attr-bar-row .bar-track { background: rgba(123,83,32,.12) !important; }
+        .attr-bar-row .bar-track .bar-fill,.bar-fill { background: linear-gradient(90deg, #5f8778, #b98a4a) !important; }
+        .child-card-ui,.servant-card {
+            background: rgba(255,252,247,.98) !important;
+            border-color: #d8c5b1 !important;
+            color: var(--text-body) !important;
+        }
+        .child-card-ui:hover,.servant-card:hover,.npc-card:hover { background: #fff6ea !important; border-color: var(--gold) !important; }
+        .bottom-nav {
+            background: linear-gradient(180deg, #f0e5d7, #e6d7c4) !important;
+            border-top-color: rgba(159,111,47,.22) !important;
+        }
+        .nav-item {
+            color: #6f5a47 !important;
+            font-size: 11px !important;
+            letter-spacing: .5px;
+        }
+        .nav-item.active {
+            color: #4b2f12 !important;
+            background: linear-gradient(180deg, rgba(234,215,184,.82), rgba(255,248,236,.92)) !important;
+            box-shadow: inset 0 0 0 1px rgba(159,111,47,.24) !important;
+        }
+        .nav-item:hover { color: #3b2410 !important; background: rgba(255,255,255,.55) !important; }
+        button:hover,.interact-btn:hover,.primary-btn:hover,.btn-sm:hover,.config-toggle-btn:hover {
+            box-shadow: 0 6px 18px rgba(74,48,24,.12), 0 0 0 1px rgba(95,135,120,.12) inset;
+        }
+        .primary-btn,.send-btn,.action-btn {
+            background: linear-gradient(135deg, #b98a4a, #8d622a) !important;
+            color: #fffaf3 !important;
+            border-color: #8d622a !important;
+        }
+        .primary-btn:hover,.send-btn:hover,.action-btn:hover { background: linear-gradient(135deg, #c99855, #9a6d31) !important; color: #fffdf8 !important; }
+        .interact-btn,.btn-sm,.config-toggle-btn,.btn {
+            background: rgba(95,135,120,.08) !important;
+            color: #355247 !important;
+            border-color: rgba(95,135,120,.34) !important;
+        }
+        .month-btn {
+            background: rgba(159,111,47,.12) !important;
+            color: #6a4518 !important;
+            border-color: rgba(159,111,47,.34) !important;
+        }
+        #loadingOverlay,.modal-overlay { background: rgba(58,40,22,.28) !important; backdrop-filter: blur(8px); }
+        .loading-box,.modal-box {
+            background: #fffaf4 !important;
+            color: var(--text-body) !important;
+            border: 1px solid #d2b48c !important;
+            border-radius: 20px !important;
+            box-shadow: 0 20px 60px rgba(74,48,24,.18), 0 0 0 1px rgba(255,255,255,.55) inset !important;
+        }
+        .loading-spinner { border-color: rgba(95,135,120,.18) !important; border-top-color: var(--gold) !important; }
+        .toast-notification {
+            background: #fffaf4 !important;
+            color: var(--text-dark) !important;
+            border-color: #d2b48c !important;
+            box-shadow: 0 12px 30px rgba(74,48,24,.16) !important;
+        }
+        .scenario-overlay {
+            background: linear-gradient(180deg, rgba(247,241,232,.98), rgba(241,232,221,.98)) !important;
+            color: var(--text-body);
+            padding: 18px 14px 24px;
+        }
+        .scenario-hero {
+            width: min(460px,100%);
+            padding: 18px 0 14px !important;
+            border-bottom: 1px solid rgba(159,111,47,.18);
+            margin-bottom: 12px;
+        }
+        .scenario-hero > div:first-child {
+            color: var(--text-dark) !important;
+            font-size: 24px !important;
+            letter-spacing: 7px !important;
+            text-shadow: 0 0 18px rgba(159,111,47,.08);
+        }
+        .scenario-hero > div:first-child span { color: #9f6f2f !important; }
         .scenario-hero > div:last-child { color: var(--text-light) !important; letter-spacing: 3px !important; }
-        .char-card { background: rgba(255,255,255,.045) !important; border-color: var(--border-light) !important; border-radius: 16px !important; box-shadow: 0 2px 16px rgba(0,0,0,.16),0 0 0 1px rgba(138,179,165,.05) inset !important; }
-        .char-card .card-title { color: var(--gold-light) !important; }
+        .char-card {
+            background: rgba(255,253,249,.96) !important;
+            border-color: #d8c5b1 !important;
+            border-radius: 16px !important;
+            box-shadow: 0 2px 16px rgba(74,48,24,.08), 0 0 0 1px rgba(255,255,255,.55) inset !important;
+        }
+        .char-card .card-title { color: #6a4518 !important; }
         .char-card .card-row .label,.story-editor-footer,.story-hint { color: var(--text-light) !important; }
-        .char-card .badge { background: var(--jade-soft) !important; color: var(--jade) !important; border-color: rgba(138,179,165,.3) !important; }
-        .char-card .tag { background: rgba(255,255,255,.04) !important; color: var(--text-mid) !important; border-color: var(--border-light) !important; }
-        .char-card .tag:hover,.char-card .tag.active { background: var(--gold) !important; color: #25302e !important; border-color: var(--gold-light) !important; }
-        .scenario-overlay #startBtn { background: var(--gold) !important; color: #25302e !important; border-color: var(--jade) !important; box-shadow: 0 8px 24px rgba(196,173,148,.16); }
-        .scenario-overlay #startBtn:hover { background: var(--gold-light) !important; }
-        .scenario-overlay .preview-box { background: rgba(0,0,0,.16) !important; border-color: var(--jade) !important; color: var(--text-body) !important; }
-        .scenario-overlay .story-editor-wrap { background: rgba(0,0,0,.1) !important; border-color: var(--border-light) !important; }
-        .scenario-overlay .bar-track { background: rgba(0,0,0,.28) !important; }
-        .scenario-overlay .bar-fill { background: linear-gradient(90deg,#8ab3a5,#c4ad94) !important; }
-        .pregnancy-progress { display: none; margin: 4px 0 5px; padding: 5px 7px; border: 1px solid rgba(196,173,148,.38); border-radius: 10px; background: linear-gradient(135deg,rgba(138,179,165,.12),rgba(196,173,148,.08)); color: var(--text-mid); font-size: 8px; }
+        .char-card .badge {
+            background: rgba(95,135,120,.10) !important;
+            color: #355247 !important;
+            border-color: rgba(95,135,120,.24) !important;
+        }
+        .char-card .tag {
+            background: rgba(255,255,255,.72) !important;
+            color: var(--text-mid) !important;
+            border-color: #d8c5b1 !important;
+        }
+        .char-card .tag:hover,.char-card .tag.active {
+            background: var(--gold) !important;
+            color: #fffaf3 !important;
+            border-color: #b98a4a !important;
+        }
+        .scenario-overlay #startBtn {
+            background: linear-gradient(135deg, #b98a4a, #8d622a) !important;
+            color: #fffaf3 !important;
+            border-color: rgba(95,135,120,.28) !important;
+            box-shadow: 0 8px 24px rgba(159,111,47,.14);
+        }
+        .scenario-overlay #startBtn:hover { background: linear-gradient(135deg, #c99855, #9a6d31) !important; }
+        .scenario-overlay .preview-box {
+            background: rgba(255,255,255,.72) !important;
+            border-color: rgba(95,135,120,.24) !important;
+            color: var(--text-body) !important;
+        }
+        .scenario-overlay .story-editor-wrap { background: rgba(255,255,255,.42) !important; border-color: #d8c5b1 !important; }
+        .scenario-overlay .bar-track { background: rgba(123,83,32,.12) !important; }
+        .scenario-overlay .bar-fill { background: linear-gradient(90deg, #5f8778, #b98a4a) !important; }
+        .pregnancy-progress {
+            display: none;
+            margin: 4px 0 5px;
+            padding: 5px 7px;
+            border: 1px solid rgba(159,111,47,.24);
+            border-radius: 10px;
+            background: linear-gradient(135deg, rgba(95,135,120,.08), rgba(234,215,184,.24));
+            color: var(--text-mid);
+            font-size: 8px;
+        }
         .pregnancy-progress.visible { display: block; }
-        .pregnancy-progress-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; color: var(--gold-light); }
-        .pregnancy-progress-track { height: 6px; overflow: hidden; border-radius: 6px; background: rgba(0,0,0,.3); box-shadow: inset 0 0 0 1px rgba(138,179,165,.2); }
-        .pregnancy-progress-fill { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg,#79a99b,#c4ad94,#e4cda9); box-shadow: 0 0 10px rgba(196,173,148,.38); transition: width .45s ease; }
-        @media (max-width:520px) { .scenario-overlay { padding: calc(12px + env(safe-area-inset-top)) 10px calc(18px + env(safe-area-inset-bottom)); } .scenario-hero { padding: 10px 0 12px !important; } }
+        .pregnancy-progress-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; color: #6a4518; }
+        .pregnancy-progress-track {
+            height: 6px;
+            overflow: hidden;
+            border-radius: 6px;
+            background: rgba(123,83,32,.12);
+            box-shadow: inset 0 0 0 1px rgba(95,135,120,.12);
+        }
+        .pregnancy-progress-fill {
+            height: 100%;
+            width: 0;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #5f8778, #b98a4a, #e0bf8d);
+            box-shadow: 0 0 10px rgba(159,111,47,.24);
+            transition: width .45s ease;
+        }
+        #pageStory #currentStoryDisplay,
+        #pageStory .log-area,
+        #pageStory .story-input-area,
+        #pageStory .action-bar,
+        #pageStory .input-area,
+        #pageStory .action-grid {
+            border-left: 3px solid rgba(159,111,47,.34);
+            padding-left: 10px;
+        }
+        #pageHarem .npc-card,
+        #pageHarem .npc-card-queen,
+        #pageHarem .child-card-ui,
+        #pageHarem .servant-card {
+            box-shadow: 0 8px 22px rgba(122, 78, 38, .10), 0 0 0 1px rgba(255,255,255,.55) inset !important;
+        }
+        #pageStatus .stat-block,
+        #pageStatus .emperor-card,
+        #pageStatus .dowager-card {
+            border-top: 3px solid rgba(95,135,120,.42) !important;
+            background: linear-gradient(180deg, rgba(250,255,252,.96), rgba(241,248,244,.96)) !important;
+        }
+        #pageConflict .log-area,
+        #pageConflict .conflict-panel,
+        #pageConflict .conflict-card,
+        #pageConflict .rival-card {
+            border-top: 3px solid rgba(176,92,58,.38) !important;
+            background: linear-gradient(180deg, rgba(255,250,247,.96), rgba(250,239,233,.96)) !important;
+        }
+        @media (max-width:520px) {
+            .scenario-overlay { padding: calc(12px + env(safe-area-inset-top)) 10px calc(18px + env(safe-area-inset-bottom)); }
+            .scenario-hero { padding: 10px 0 12px !important; }
+        }
     </style>
 </head>
 <body>
@@ -482,10 +725,12 @@
         <div class="save-btns">
             <button onclick="saveGame('default')">💾 保存</button>
             <button onclick="openSaveListModal()">📂 读档</button>
+            <button onclick="openLifeReview()">📖 回顾</button>
             <button class="reset-btn" onclick="confirmReset()">🔄 重开</button>
         </div>
     </div>
     <div id="actionPointBanner" class="action-point-banner">⚡ 行动点已用完，请点击「转旬」恢复行动点</div>
+    <div id="endingWarnBanner" class="ending-warn-banner" aria-live="polite"></div>
     <div class="page-container">
         <div class="page active" id="pageStory">
             <div class="story-scroll">
@@ -657,6 +902,23 @@
                 </div>
 
                 <div class="stat-block">
+                    <div class="block-title">🕵️ 情报系统</div>
+                    <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">刺探、流言、勒索、洗白会消耗行动点；热度越高，越容易翻车。</div>
+                    <div id="intrigueSummary" style="font-size:7px;color:var(--text-mid);line-height:1.5;padding:3px 0;border-top:1px dashed rgba(213,200,188,0.35);border-bottom:1px dashed rgba(213,200,188,0.35);">情报网尚未铺开。</div>
+                    <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:3px;">
+                        <select id="intrigueTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择目标...</option></select>
+                        <select id="intrigueAction" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);" onchange="toggleIntrigueTargetRequirement()">
+                            <option value="spy">🕵️ 刺探 (12两)</option>
+                            <option value="rumor">🗣️ 放流言 (18两)</option>
+                            <option value="blackmail">💰 勒索 (需2点把柄)</option>
+                            <option value="cleanse">🪶 洗白 (15两)</option>
+                        </select>
+                    </div>
+                    <button onclick="performIntrigueAction()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;margin-top:3px;">🕸️ 发动情报行动</button>
+                    <div id="intrigueLog" style="font-size:7px;color:var(--text-mid);line-height:1.5;max-height:92px;overflow-y:auto;margin-top:4px;"></div>
+                </div>
+
+                <div class="stat-block">
                     <div class="block-title">🎲 随机宫斗</div>
                     <button onclick="triggerRandomConflict()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;">🎲 触发随机事件</button>
                 </div>
@@ -703,6 +965,10 @@
             <button class="primary-btn" onclick="closeSaveListModal()" style="padding:2px 12px;border-radius:var(--radius-sm);border:1px solid var(--gold);background:var(--gold-light);color:var(--text-dark);cursor:pointer;font-family:'Georgia',serif;font-size:8px;transition:all 0.25s ease;letter-spacing:1px;font-weight:400;">关 闭</button>
         </div>
     </div>
+</div>
+
+<div class="ending-overlay" id="endingOverlay">
+    <div class="ending-box" id="endingBox"></div>
 </div>
 
 <script src="js/config.js"></script>
@@ -912,6 +1178,9 @@ async function parseApiResponse(r, opts = {}) {
     }
     if (!r.ok || data.error) {
         const msg = data.error || `请求失败 (${r.status})`;
+        if (data.game_over && typeof handleEndingPayload === 'function') {
+            try { handleEndingPayload(data); } catch (e) { /* 结局展示失败不阻塞错误抛出 */ }
+        }
         if (allowError) return data;
         if (msg.includes('会话无效') || msg.includes('会话不存在') || msg.includes('会话已过期')) {
             throw new Error('会话已失效，请从存档列表读取进度');
@@ -1125,7 +1394,7 @@ this.classList.add('active');
 document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
 const pageId=this.dataset.page;
 document.getElementById(pageId).classList.add('active');
-if(pageId==='pageConflict') loadConflictTargets();
+if(pageId==='pageConflict') { loadConflictTargets(); toggleIntrigueTargetRequirement(); }
 });
 });
 
@@ -1171,6 +1440,139 @@ document.getElementById('saveListModal').addEventListener('click',function(e){if
 
 function showEdictModal(title,bodyHtml){const h=`<div class="edict-modal-content"><span class="edict-icon">📜</span><div class="edict-title">${title||'圣 旨 到'}</div><div class="edict-body">${bodyHtml||'皇恩浩荡'}</div><div class="edict-seal">🔴</div></div>`;openModal('📜 圣 旨',h,'谢 恩',null,true);}
 
+// ============================================================
+//  结局 / 一生回顾
+// ============================================================
+let gameOverEnding = null;
+
+function escapeHtmlText(v){
+    return String(v === undefined || v === null ? '' : v)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function buildEndingStatsHtml(s){
+    if(!s) return '';
+    const stats = [
+        ['最终位份', s.final_rank],
+        ['终年', `${s.age} 岁`],
+        ['在宫年数', `${s.years_in_palace} 年`],
+        ['出身', s.family_background],
+        ['宠爱', s.favor],
+        ['威望', s.prestige],
+        ['心计', s.scheme],
+        ['积蓄', `${s.silver} 两`],
+        ['子嗣', `${s.children_total} 人（${s.princes}子${s.princesses}女）`],
+        ['结下仇敌', `${s.rival_count} 人`],
+        ['缔结盟友', `${s.ally_count} 人`],
+        ['手上人命', `${s.killed_count} 条`],
+    ];
+    const grid = stats.map(([k,v])=>`<div class="ending-stat"><span class="es-label">${escapeHtmlText(k)}</span><span class="es-value">${escapeHtmlText(v)}</span></div>`).join('');
+    let html = `<div class="ending-section-title">📖 一 生 回 顾</div><div class="ending-stat-grid">${grid}</div>`;
+    if(s.killed_list && s.killed_list.length){
+        html += `<div class="ending-list">${s.killed_list.map(k=>`<div class="el-item">🕯️ ${escapeHtmlText(k.name)} · ${escapeHtmlText(k.cause)}</div>`).join('')}</div>`;
+    }
+    if(s.child_names && s.child_names.length){
+        html += `<div class="ending-list"><div class="el-item">👶 ${s.child_names.map(escapeHtmlText).join('、')}</div></div>`;
+    }
+    if(s.memories && s.memories.length){
+        html += `<div class="ending-section-title">🕰️ 最 后 的 记 事</div><div class="ending-list">${s.memories.map(m=>`<div class="el-item">${escapeHtmlText(m)}</div>`).join('')}</div>`;
+    }
+    return html;
+}
+
+function showEndingOverlay(ending){
+    if(!ending) return;
+    gameOverEnding = ending;
+    const box = document.getElementById('endingBox');
+    if(!box) return;
+    box.innerHTML = `
+        <span class="ending-icon">${escapeHtmlText(ending.icon)}</span>
+        <div class="ending-key">${escapeHtmlText(ending.key)}</div>
+        <div class="ending-headline">${escapeHtmlText(ending.headline)}</div>
+        <div class="ending-meta">${escapeHtmlText(ending.calendar)} · 终年 ${escapeHtmlText(ending.age)} 岁 · ${escapeHtmlText(ending.category)}结局</div>
+        <div class="ending-reason">${escapeHtmlText(ending.reason)}</div>
+        <div class="ending-narration">${escapeHtmlText(ending.narration)}</div>
+        <div class="ending-epitaph">「${escapeHtmlText(ending.epitaph)}」</div>
+        ${buildEndingStatsHtml(ending.summary)}
+        <div class="ending-actions">
+            <button class="eb-close" onclick="closeEndingOverlay()">留在此局</button>
+            <button class="eb-restart" onclick="closeEndingOverlay();confirmReset();">重 新 入 宫</button>
+        </div>
+    `;
+    document.getElementById('endingOverlay').classList.add('active');
+}
+
+function closeEndingOverlay(){
+    const el = document.getElementById('endingOverlay');
+    if(el) el.classList.remove('active');
+}
+
+function applyGameOverLock(ending){
+    gameOverEnding = ending || gameOverEnding;
+    document.querySelectorAll('.action-btn, .interact-btn, #sendBtn, #nextPeriodBtn, [onclick*="hireServant"], [onclick*="trainServant"], [onclick*="dowagerInteract"], [onclick*="emperorInteract"], [onclick*="interactAction"]').forEach(btn=>{
+        btn.disabled = true;
+        btn.style.opacity = '0.4';
+        btn.style.cursor = 'not-allowed';
+    });
+    if(typeof userInput !== 'undefined' && userInput){
+        userInput.disabled = true;
+        userInput.placeholder = '此局已终，请重建新档';
+    }
+    const banner = document.getElementById('endingWarnBanner');
+    if(banner && gameOverEnding){
+        banner.classList.add('visible');
+        banner.innerHTML = `${escapeHtmlText(gameOverEnding.icon)} 此局已终——${escapeHtmlText(gameOverEnding.key)}：${escapeHtmlText(gameOverEnding.reason)} <span style="text-decoration:underline;cursor:pointer;" onclick="showEndingOverlay(gameOverEnding)">查看一生回顾</span>`;
+    }
+}
+
+function renderEndingWarnings(list){
+    const banner = document.getElementById('endingWarnBanner');
+    if(!banner) return;
+    if(gameOverEnding) return;  // 终局提示优先，不被预警覆盖
+    if(!list || !list.length){
+        banner.classList.remove('visible');
+        banner.innerHTML = '';
+        return;
+    }
+    banner.classList.add('visible');
+    banner.innerHTML = list.map(escapeHtmlText).join('<br>');
+}
+
+/** 统一处理任意接口返回中的结局字段。返回是否已终局。 */
+function handleEndingPayload(d){
+    if(!d) return false;
+    if(d.ending_warnings) renderEndingWarnings(d.ending_warnings);
+    const ending = d.ending;
+    if(!ending){
+        if(d.game_over && gameOverEnding) applyGameOverLock(gameOverEnding);
+        return !!d.game_over;
+    }
+    const alreadyShown = gameOverEnding && gameOverEnding.key === ending.key;
+    applyGameOverLock(ending);
+    if(!alreadyShown){
+        addLogEntry(`${ending.icon} 【${ending.key}】${ending.reason}`, 'demotion');
+        showToast(`${ending.icon} ${ending.key}`, 'error');
+        showEndingOverlay(ending);
+    }
+    return true;
+}
+
+async function openLifeReview(){
+    const pid = playerId || localStorage.getItem('gongdou_playerId');
+    if(!pid){ showToast('当前没有进行中的游戏'); return; }
+    try{
+        const r = await myFetch(`${API_BASE}/api/ending?player_id=${encodeURIComponent(pid)}`, { skipLoading: true });
+        const d = await parseApiResponse(r, { allowError: true });
+        if(d.error){ showToast('❌ ' + d.error, 'error'); return; }
+        if(d.game_over && d.ending){ showEndingOverlay(d.ending); return; }
+        openModal('📖 一 生 回 顾', `<div class="edict-modal-content" style="text-align:left;">${buildEndingStatsHtml(d.summary)}</div>`, '关 闭', null, true);
+    }catch(e){ showToast('❌ 读取回顾失败：' + e.message, 'error'); }
+}
+
+document.getElementById('endingOverlay').addEventListener('click', function(e){ if(e.target===this) closeEndingOverlay(); });
+
+
 function openSaveListModal(){document.getElementById('saveListModal').classList.add('active');renderSaveListModal();}
 function closeSaveListModal(){document.getElementById('saveListModal').classList.remove('active');}
 
@@ -1180,7 +1582,7 @@ try{let saves=[];if(playerId){const r=await myFetch(appendClientQuery(`${API_BAS
 if(saves.length===0){body.innerHTML='<div style="text-align:center;color:var(--text-light);padding:8px;">📭 暂无存档</div>';return;}
 let html='';saves.forEach(s=>{const pid=s.player_id||playerId;html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid var(--border-light);gap:2px;"><div style="font-size:8px;"><strong>${s.player_name}</strong><span style="color:var(--gold);margin-left:2px;">${s.rank}</span><span style="color:var(--text-light);font-size:6px;margin-left:2px;">📅 ${s.day||1}天</span><div style="font-size:6px;color:var(--text-light);">${new Date(s.save_time).toLocaleString()}</div></div><div style="display:flex;gap:2px;flex-shrink:0;"><button onclick="loadGameFromModal('${pid}','${s.slot}')" style="padding:1px 5px;border:1px solid var(--border-light);border-radius:3px;background:var(--bg-card);cursor:pointer;font-size:7px;font-family:inherit;">读取</button><button onclick="deleteSaveFromModal('${pid}','${s.slot}')" style="padding:1px 5px;border:1px solid #d48c7a;border-radius:3px;background:transparent;color:#8a3a2a;cursor:pointer;font-size:7px;font-family:inherit;">删除</button></div></div>`;});body.innerHTML=html;}catch(e){body.innerHTML='<div style="text-align:center;color:var(--text-light);padding:8px;">❌ 加载失败</div>';}}
 
-async function loadGameFromModal(pid,slot){closeSaveListModal();showToast('📂 读取中...');try{const r=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){playerId=pid;localStorage.setItem('gongdou_playerId',pid);trackKnownPlayerId(pid);await syncConfigToBackend(playerId);const gs=d.game_state;eventLogs=[];flipTriggeredThisRound=false;if(gs.memories)gs.memories.forEach(m=>addLogEntry(m,'system'));updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,children:gs.children||[],has_children:gs.has_children||false,nobletitle:gs.nobletitle||null,rivalries:gs.rivalries||{},alliances:gs.alliances||{},npcs:gs.npcs||{},emperor:gs.emperor||{},remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,inventory:gs.inventory||[],player_id:pid});document.getElementById('scenarioOverlayContainer').innerHTML='';showToast('✅ 读取成功');}else showToast('❌ '+(d.error||'读取失败'));}catch(e){showToast('❌ 读取失败');}}
+async function loadGameFromModal(pid,slot){closeSaveListModal();showToast('📂 读取中...');try{const r=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){playerId=pid;localStorage.setItem('gongdou_playerId',pid);trackKnownPlayerId(pid);await syncConfigToBackend(playerId);const gs=d.game_state;eventLogs=[];flipTriggeredThisRound=false;gameOverEnding=null;closeEndingOverlay();if(gs.memories)gs.memories.forEach(m=>addLogEntry(m,'system'));updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',age:gs.age||16,appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,children:gs.children||[],has_children:gs.has_children||false,nobletitle:gs.nobletitle||null,rivalries:gs.rivalries||{},alliances:gs.alliances||{},npcs:gs.npcs||{},emperor:gs.emperor||{},dowager:gs.dowager||(gs.npcs||{})['太后'],remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,inventory:gs.inventory||[],ending:gs.ending||null,game_over:!!gs.ending,player_id:pid});document.getElementById('scenarioOverlayContainer').innerHTML='';showToast('✅ 读取成功');}else showToast('❌ '+(d.error||'读取失败'));}catch(e){showToast('❌ 读取失败');}}
 
 async function deleteSaveFromModal(pid,slot){if(!confirm(`删除存档「${slot}」？`))return;try{const r=await myFetch(`${API_BASE}/api/save/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){showToast('🗑️ 已删除');renderSaveListModal();}}catch(e){showToast('删除失败');}}
 
@@ -1326,9 +1728,10 @@ else{if(currentCharData.traits.length>=5){showToast('最多选择5个特质');re
 }
 
 function showPreview(){
-const box=document.getElementById('previewBox');const name=document.getElementById('playerName').value.trim()||'未命名';const bg=currentCharData.background;const bgDesc=document.getElementById('bgDescInput').value||'未知';const app=document.getElementById('appearanceInput').value||'未描述';const talent=document.getElementById('talentSelect').value||'未选择';const pers=document.getElementById('personalitySelect').value||'未选择';const traits=currentCharData.traits.length?currentCharData.traits.map(t=>`${t}（${TRAIT_HINTS[t]||'加成'}）`).join('、'):'无';const story=document.getElementById('customStoryInput').value||'未填写';const attrsText=CREATION_ATTR_KEYS.map(k=>`${k} ${currentCharData.attrs[k]||0}`).join(' | ')+'（宠爱、威望入宫后由皇帝初印象决定）';
+const box=document.getElementById('previewBox');const name=document.getElementById('playerName').value.trim()||'未命名';const age=Math.max(12, Math.min(40, Number(document.getElementById('playerAgeInput')?.value||16) || 16));const bg=currentCharData.background;const bgDesc=document.getElementById('bgDescInput').value||'未知';const app=document.getElementById('appearanceInput').value||'未描述';const talent=document.getElementById('talentSelect').value||'未选择';const pers=document.getElementById('personalitySelect').value||'未选择';const traits=currentCharData.traits.length?currentCharData.traits.map(t=>`${t}（${TRAIT_HINTS[t]||'加成'}）`).join('、'):'无';const story=document.getElementById('customStoryInput').value||'未填写';const attrsText=CREATION_ATTR_KEYS.map(k=>`${k} ${currentCharData.attrs[k]||0}`).join(' | ')+'（宠爱、威望入宫后由皇帝初印象决定）';
 box.innerHTML=`<div class="preview-title">📜 完整人设档案</div>
 <div><strong>姓名：</strong>${name}</div>
+<div><strong>年龄：</strong>${age}岁</div>
 <div><strong>家世：</strong>${bg?bg.label:'未选择'}</div>
 <div style="font-size:8px;color:var(--text-light);">${bgDesc}</div>
 <div><strong>容貌描述：</strong>${app}</div>
@@ -1433,6 +1836,7 @@ function openInventory() {
 function updateHaremPage(data){
     const npcs = { ...(data.npcs || {}) };
     const playerName = data.player_name || data.name || '';
+    const playerAge = Math.max(12, Math.floor(Number(data.age||16) || 16));
     const playerRank = data.display_rank || data.rank || '';
     const playerIsQueen = playerRank === '皇后' || data.rank === '皇后';
     const playerKey = '__player__';
@@ -1444,6 +1848,7 @@ function updateHaremPage(data){
         npcs[playerKey] = {
             name: playerName,
             rank: '皇后',
+            age: playerAge,
             icon: '👑',
             personality: data.personality || '六宫之主',
             attributes: data.attributes || {},
@@ -1499,6 +1904,7 @@ function updateHaremPage(data){
         }
         const attrs = npc.attributes || {};
         const attrDisplay = `容${attrs.容貌||'?'} 才${attrs.才情||'?'} 心${attrs.心计||'?'} 倾${attrs.倾向||'?'}`;
+        const ageDisplay = npc.age ? `${npc.age}岁` : '年龄未知';
         const familyDisplay = npc.family_background ? `🏛️${npc.family_background}` : '';
         
         card.innerHTML = `
@@ -1510,7 +1916,7 @@ function updateHaremPage(data){
             </div>
             <div style="font-size:7px;color:var(--text-light);display:flex;justify-content:space-between;flex-wrap:wrap;">
                 <span style="color:var(--text-mid);">${rel ? `好感 ${rel.好感 || 0}` : '未知'}</span>
-                <span${isQueen ? ' style="color:#c0392b;font-weight:500;"' : ''}>${npc.personality || '未知'}</span>
+                <span${isQueen ? ' style="color:#c0392b;font-weight:500;"' : ''}>${npc.personality || '未知'} · ${ageDisplay}</span>
             </div>
             <div style="font-size:6px;color:var(--text-light);display:flex;gap:4px;flex-wrap:wrap;">
                 <span>${attrDisplay}</span>
@@ -1562,11 +1968,13 @@ function updateHaremPage(data){
 }
 
 function updateStatusPage(data){
-const attrs=data.attributes||{};const attrMax=data.attr_max||{宠爱:999,威望:3000};
-sName.textContent=data.player_name||data.name||'未命名';sFamily.textContent=data.family_background||'未知';
+const attrs=data.attributes||{};const attrMax=data.attr_max||{宠爱:999,威望:3000};const playerAge=Math.max(12, Math.floor(Number(data.age||16) || 16));
+sName.textContent=`${data.player_name||data.name||'未命名'} · ${playerAge}岁`;sFamily.textContent=data.family_background||'未知';
 let rankText=data.display_rank||data.rank||'-';
 if(data.rank_tenure_required>0)rankText+=` · 资历${data.rank_periods||0}/${data.rank_tenure_required}旬`;
 if(data.special_favor)rankText+=' · 专宠';
+const empress=data.empress_status||null;
+if(empress&&empress.is_candidate){const sourceLabel=empress.support_source_label||((empress.support_clue_labels||[])[0]||'');rankText+=` · 母家势力${empress.family_power||0}/${empress.family_power_required||0}`;if(empress.support_ready)rankText+=sourceLabel?` · 朝议已起（${sourceLabel}）`:' · 朝议已起';else if((empress.support_clue_count||0)>0)rankText+=sourceLabel?` · 朝议酝酿（${sourceLabel}）`:' · 朝议酝酿';else rankText+=' · 待朝议';}
 sRank.textContent=rankText;
 sSilver.textContent=`🪙 ${data.silver||0}`;
 sCalendar.textContent=data.calendar_str||data.calendar||'建元元年一月上旬';
@@ -1580,12 +1988,12 @@ const allies={}; if(data.alliances){for(let k in data.alliances){if(data.allianc
 if(Object.keys(rivals).length===0&&Object.keys(allies).length===0){fc.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无仇敌或盟友</span>';}else{let html='';if(Object.keys(rivals).length>0)html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span style="font-size:8px;color:var(--text-light);">⚔️ 仇敌 ${Object.keys(rivals).length}人</span><button onclick="openRivalList()" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;font-size:8px;cursor:pointer;font-family:inherit;">查看</button></div>`;if(Object.keys(allies).length>0)html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span style="font-size:8px;color:var(--text-light);">🤝 盟友 ${Object.keys(allies).length}人</span><button onclick="openAllianceList()" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;font-size:8px;cursor:pointer;font-family:inherit;">查看</button></div>`;fc.innerHTML=html;}
 }
 
-function updateEmperorDisplay(data){if(data.emperor){const e=data.emperor;document.getElementById('empName').textContent=e.name||'萧景琰';document.getElementById('empPersonality').textContent=e.personality||'明君';const s=e.stats||{};document.getElementById('empStats').innerHTML=`<span>威严 ${s.威严||'-'}</span><span>仁德 ${s.仁德||'-'}</span><span>勤政 ${s.勤政||'-'}</span><span>好色 ${s.好色||'-'}</span>`;}}
-function updateDowagerDisplay(data){const rel=data.relationships?data.relationships['太后']:null;document.getElementById('dowagerFavor').textContent=rel?rel.好感:'-';}
+function updateEmperorDisplay(data){if(data.emperor){const e=data.emperor;document.getElementById('empName').textContent=e.name||'萧景琰';document.getElementById('empPersonality').textContent=`${e.personality||'明君'}${e.age?` · ${e.age}岁`:''}`;const s=e.stats||{};document.getElementById('empStats').innerHTML=`<span>威严 ${s.威严||'-'}</span><span>仁德 ${s.仁德||'-'}</span><span>勤政 ${s.勤政||'-'}</span><span>好色 ${s.好色||'-'}</span>`;}}
+function updateDowagerDisplay(data){const rel=data.relationships?data.relationships['太后']:null;const dowager=(data.dowager)||((window._lastGameData||{}).dowager)||{};document.getElementById('dowagerFavor').textContent=rel?rel.好感:'-';const personalityEl=document.getElementById('dowagerPersonality');if(personalityEl)personalityEl.textContent=`${dowager.personality||'威严慈祥'}${dowager.age?` · ${dowager.age}岁`:''}`;}
 function updateServantList(data){
 const servants=data.servants||[];const container=document.getElementById('servantList');const countEl=document.getElementById('servantCount');
 if(servants.length===0){container.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无宫女太监</span>';countEl.textContent='0人';return;}
-container.innerHTML='';servants.forEach(s=>{const card=document.createElement('span');card.className='servant-card';card.innerHTML=`${s.type==='宫女'?'👩':'🧑'} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">忠${s.loyalty}</span><span class="s-skill">技${s.skill}</span>`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});countEl.textContent=`${servants.length}人`;
+container.innerHTML='';servants.forEach(s=>{const card=document.createElement('span');card.className='servant-card';card.innerHTML=`${s.type==='宫女'?'👩':'🧑'} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">${s.age||'-'}岁</span><span class="s-skill">技${s.skill}</span>`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});countEl.textContent=`${servants.length}人`;
 renderConflictAssist(servants);
 }
 
@@ -1702,8 +2110,9 @@ function newbornTrait(gender) {
 }
 
 function updateUI(data){
-const displayRank=data.display_rank||data.rank||'-';const silver=data.silver||0;const calendarStr=data.calendar_str||data.calendar||'建元元年一月上旬';const rem=data.remaining_actions!==undefined?data.remaining_actions:7;const max=data.max_actions||7;const attrMax=data.attr_max||{宠爱:999,威望:3000};
+const displayRank=data.display_rank||data.rank||'-';const silver=data.silver||0;const calendarStr=data.calendar_str||data.calendar||'建元元年一月上旬';const rem=data.remaining_actions!==undefined?data.remaining_actions:7;const max=data.max_actions||7;const attrMax=data.attr_max||{宠爱:999,威望:3000};const playerAge=Math.max(12, Math.floor(Number(data.age||16) || 16));
 miniRank.textContent=displayRank;miniSilver.textContent=`🪙 ${silver}`;miniCalendar.textContent=calendarStr;miniActions.textContent=`⚡${rem}/${max}`;
+renderIntriguePanel(data.intrigue||window._lastGameData?.intrigue, data.intrigue_events||[]);
 const apBanner=document.getElementById('actionPointBanner');
 if(apBanner){if(rem<=0){apBanner.classList.add('visible');apBanner.textContent=`⚡ 行动点已用完（0/${max}），请点击「转旬」恢复`;}else{apBanner.classList.remove('visible');}}
 if(rem<=0)miniActions.style.color='#c0392b';else miniActions.style.color='#2a5a4a';
@@ -1791,8 +2200,11 @@ if(data.other_birth_msgs && data.other_birth_msgs.length>0){data.other_birth_msg
 if(data.prince_events && data.prince_events.length>0){data.prince_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'👑'),'prince');showToast(formatEventMsg(msg,'👑'));});}
 if(data.growth_events && data.growth_events.length>0){data.growth_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'🌱'),'prince');showToast(formatEventMsg(msg,'🌱'));});}
 if(data.death_events && data.death_events.length>0){data.death_events.forEach(msg=>{addLogEntry(`🕯️ ${msg}`,'demotion');showToast('🕯️ 宫闱噩耗','error');});}
+if(data.intrigue_events && data.intrigue_events.length>0){data.intrigue_events.forEach(msg=>addLogEntry(msg,'intel'));}
 }
-window._lastGameData=data;
+window._lastGameData={...data,age:playerAge};
+// ===== 终局处理：放在最后，锁死操作并覆盖行动点相关的启用状态 =====
+if(handleEndingPayload(data)) return;
 if(!data._skipFlip) triggerFlip(data);
 }
 
@@ -2549,7 +2961,7 @@ async function interactAction(name, action) {
 }
 
 function openServantDetail(servant){
-const html=`<div style="display:flex;flex-direction:column;gap:2px;font-size:9px;color:var(--text-mid);"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:12px;font-weight:600;color:var(--text-dark);">${servant.type==='宫女'?'👩':'🧑'} ${servant.name}</span><span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;">${servant.type}</span></div><div><span style="color:var(--text-light);">忠诚度：</span>${servant.loyalty}</div><div><span style="color:var(--text-light);">技能：</span>${servant.skill}</div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><button onclick="trainServant('${servant.name}')" class="interact-btn">📚 训练 (15两)</button><button onclick="dismissServant('${servant.name}')" class="interact-btn" style="border-color:#d48c7a;color:#8a3a2a;">🚪 遣散</button></div><div id="servantResultArea" class="interact-result-area"></div></div>`;
+const html=`<div style="display:flex;flex-direction:column;gap:2px;font-size:9px;color:var(--text-mid);"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:12px;font-weight:600;color:var(--text-dark);">${servant.type==='宫女'?'👩':'🧑'} ${servant.name}</span><span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;">${servant.type}</span></div><div><span style="color:var(--text-light);">年龄：</span>${servant.age||'-'}岁</div><div><span style="color:var(--text-light);">忠诚度：</span>${servant.loyalty}</div><div><span style="color:var(--text-light);">技能：</span>${servant.skill}</div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><button onclick="trainServant('${servant.name}')" class="interact-btn">📚 训练 (15两)</button><button onclick="dismissServant('${servant.name}')" class="interact-btn" style="border-color:#d48c7a;color:#8a3a2a;">🚪 遣散</button></div><div id="servantResultArea" class="interact-result-area"></div></div>`;
 openModal(`👤 ${servant.name}`,html,'关闭',null,true);
 }
 
@@ -2803,8 +3215,9 @@ async function applyRestoredGameState(pid,gs,fromSave){
 playerId=pid;localStorage.setItem('gongdou_playerId',pid);trackKnownPlayerId(pid);
 await syncConfigToBackend(playerId);
 eventLogs=[];flipTriggeredThisRound=false;
+gameOverEnding=null;closeEndingOverlay();
 if(gs.memories)gs.memories.forEach(m=>addLogEntry(m.replace(/触发了事件：/g,''),'system'));
-updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',inventory:gs.inventory||[],npcs:gs.npcs||{},emperor:gs.emperor||{},children:gs.children||[],is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,has_children:gs.has_children||false,rivalries:gs.rivalries||{},alliances:gs.alliances||{},servants:gs.servants||[],romance_mode:gs.romance_mode||false,remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,player_id:pid});
+updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',age:gs.age||16,appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',inventory:gs.inventory||[],npcs:gs.npcs||{},emperor:gs.emperor||{},dowager:gs.dowager||(gs.npcs||{})['太后'],children:gs.children||[],is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,has_children:gs.has_children||false,rivalries:gs.rivalries||{},alliances:gs.alliances||{},servants:gs.servants||[],romance_mode:gs.romance_mode||false,remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,ending:gs.ending||null,game_over:!!gs.ending,player_id:pid});
 document.getElementById('scenarioOverlayContainer').innerHTML='';
 showToast(fromSave?'📂 已从存档恢复进度':'✅ 已恢复进度');
 }
@@ -2859,6 +3272,8 @@ function confirmReset(){
 if(!playerId){showToast('当前没有进行中的游戏');return;}
 openModal('⚠️ 重建新档','确定要放弃当前进度，重新选秀入宫吗？\n当前游戏进度将不会被保存。','确定重建',function(){
 localStorage.removeItem('gongdou_playerId');playerId=null;eventLogs=[];flipTriggeredThisRound=false;
+gameOverEnding=null;closeEndingOverlay();
+const warnBanner=document.getElementById('endingWarnBanner');if(warnBanner){warnBanner.classList.remove('visible');warnBanner.innerHTML='';}
 document.getElementById('scenarioOverlayContainer').innerHTML='';createScenarioOverlay();
 logContent.innerHTML='<div style="color:var(--text-light);text-align:center;padding:14px;">🌸 点击"入宫选秀"开始你的后宫之旅...</div>';
 statusTags.innerHTML='';edictContainer.innerHTML='';miniRank.textContent='-';miniSilver.textContent='🪙 -';miniCalendar.textContent='建元元年一月上旬';miniActions.textContent='⚡7/7';
@@ -2895,6 +3310,7 @@ container.innerHTML=`<div class="scenario-overlay" id="scenarioOverlay"><div cla
 <span style="font-size:6px;margin-left:2px;">（每项最小值~最大值）</span></div>
 <div id="attrAllocContainer">${CREATION_ATTR_KEYS.map(key=>`<div class="attr-alloc-row"><span class="attr-name">${key}</span><button class="attr-btn" id="attrDec_${key}" onclick="adjustAttr('${key}',-1)">−</button><div class="bar-track"><div class="bar-fill" id="attrFill_${key}" style="width:50%;"></div></div><span class="attr-value" id="attrVal_${key}">11</span><button class="attr-btn" id="attrInc_${key}" onclick="adjustAttr('${key}',1)">+</button></div>`).join('')}</div>
 <div class="total-points"><span id="totalPointsDisplay">已分配 100/100 点</span><span id="totalPointsRemain" style="margin-left:8px;color:#2a5a4a;">剩余 0 点</span></div>
+<div class="card-row" style="margin-top:4px;"><span class="label">年龄</span><input type="number" id="playerAgeInput" min="12" max="40" value="16" style="font-size:8px;flex:1;"><span style="font-size:7px;color:var(--text-light);">建议 12-40 岁</span></div>
 <div style="display:flex;gap:3px;justify-content:center;padding-top:3px;border-top:1px solid var(--border-light);margin-top:3px;flex-wrap:wrap;">
 <button class="btn" onclick="randomizeAttrs()" style="font-size:7px;padding:1px 8px;">🎲 随机分配</button>
 <button class="preview-btn" onclick="showPreview()">👁 预览人设</button>
@@ -2972,6 +3388,7 @@ updateStoryCharCount();
 async function startGame(){
 saveConfigFromInputs('scenario', true);
 const name=document.getElementById('playerName').value.trim()||'未命名';
+const playerAge=Math.max(12, Math.min(40, Number(document.getElementById('playerAgeInput')?.value||16) || 16));
 let bg=currentCharData.background;
 if(!bg){showToast('⚠️ 请先掷骰生成官家出身');return;}
 const nameSurname=extractSurname(name);
@@ -2999,7 +3416,7 @@ const startBtn=document.getElementById('startBtn');
 showLoading(true,{title:'入宫选秀中…',sub:'正在安排殿选与册封，请稍候',icon:'🏯'});
 if(startBtn){startBtn.disabled=true;}
 try{
-const r=await myFetch(`${API_BASE}/api/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:'才女入宫',name:name,background:bg.id,background_data:bg,attributes:attrs,emperor:currentEmperor,character:{appearance,talent,personality,traits,background_desc:bgDesc,custom_story:customStory},...getConfigFromStorage()}),skipLoading:true});
+const r=await myFetch(`${API_BASE}/api/start`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scenario:'才女入宫',name:name,background:bg.id,background_data:bg,attributes:attrs,emperor:currentEmperor,character:{appearance,talent,personality,traits,background_desc:bgDesc,custom_story:customStory,age:playerAge},...getConfigFromStorage()}),skipLoading:true});
 const d=await r.json();
 if(!d.player_id){showToast('❌ 入宫失败，请重试');return;}
 playerId=d.player_id;localStorage.setItem('gongdou_playerId',playerId);trackKnownPlayerId(playerId);
@@ -3008,6 +3425,8 @@ localStorage.setItem('gongdou_player_name', name);
 showLoading(true,{title:'入宫选秀中…',sub:'正在载入宫廷名册…',icon:'📜'});
 await syncConfigToBackend(playerId);
 eventLogs=[];flipTriggeredThisRound=false;addLogEntry(`🌸 欢迎入宫，${name}！`,'system');
+gameOverEnding=null;closeEndingOverlay();
+const newWarnBanner=document.getElementById('endingWarnBanner');if(newWarnBanner){newWarnBanner.classList.remove('visible');newWarnBanner.innerHTML='';}
 if(d.first_impression&&d.first_impression.message){addLogEntry(d.first_impression.message,'system');showToast(`👑 ${d.first_impression.impression||'初印象'}：宠爱+${d.first_impression.favor_gain||0} 威望+${d.first_impression.prestige_gain||0}`);}
 updateUI(d);document.getElementById('scenarioOverlayContainer').innerHTML='';showToast(`🌸 欢迎入宫，${name}！`);if(d.ai_warning)showToast('⚠️ '+d.ai_warning);
 }catch(e){console.error(e);showToast('❌ 入宫失败：'+e.message);}
@@ -3039,7 +3458,86 @@ function loadConflictTargets() {
             fill('curseTarget');
         })
         .catch(e => console.log('加载目标失败:', e));
+    loadIntrigueTargets();
 }
+
+function renderIntriguePanel(intrigue, events) {
+    const summary = document.getElementById('intrigueSummary');
+    const log = document.getElementById('intrigueLog');
+    if (summary && intrigue) {
+        const heat = intrigue.heat || 0;
+        const rumors = intrigue.rumor_count || 0;
+        const top = (intrigue.top_dirt || []).map(d => `${d.name}(${d.points})`).join('、') || '暂无把柄';
+        const last = intrigue.last_action ? `${intrigue.last_action.label}${intrigue.last_action.target ? ` · ${intrigue.last_action.target}` : ''}${intrigue.last_action.success === false ? '（失手）' : ''}` : '暂无';
+        summary.innerHTML = `🔥 热度 ${heat}/100 · 🗣️ 流言 ${rumors}条<br>📎 把柄：${top}<br>🕰️ 上次行动：${last}`;
+    }
+    if (log && events && events.length) {
+        log.innerHTML = events.map(msg => `<div style="padding:2px 0;border-bottom:1px solid rgba(213,200,188,0.2);">${msg}</div>`).join('') + log.innerHTML;
+        while (log.children.length > 12) log.removeChild(log.lastChild);
+    }
+}
+
+function toggleIntrigueTargetRequirement() {
+    const action = document.getElementById('intrigueAction')?.value || 'spy';
+    const target = document.getElementById('intrigueTarget');
+    if (!target) return;
+    target.disabled = action === 'cleanse';
+    if (action === 'cleanse') target.value = '';
+}
+
+function loadIntrigueTargets() {
+    if (!playerId) return;
+    myFetch(`${API_BASE}/api/intrigue/targets?player_id=${playerId}`)
+        .then(r => parseApiResponse(r, { allowError: true }))
+        .then(d => {
+            if (!d || d.error) return;
+            const select = document.getElementById('intrigueTarget');
+            if (!select) return;
+            const keep = select.value;
+            select.innerHTML = '<option value="">选择目标...</option>';
+            (d.targets || []).forEach(t => {
+                const dirtText = t.dirt_points > 0 ? ` · 把柄${t.dirt_points}` : '';
+                select.innerHTML += `<option value="${t.name}">${t.icon} ${t.name}（${t.rank}）${dirtText}</option>`;
+            });
+            if (keep) select.value = keep;
+            renderIntriguePanel(d.intrigue || window._lastGameData?.intrigue, []);
+            if (window._lastGameData) window._lastGameData.intrigue = d.intrigue || window._lastGameData.intrigue;
+            toggleIntrigueTargetRequirement();
+        })
+        .catch(e => console.log('加载情报目标失败:', e));
+}
+
+async function performIntrigueAction() {
+    if (!playerId || isProcessing) return;
+    const action = document.getElementById('intrigueAction')?.value;
+    const target = document.getElementById('intrigueTarget')?.value || '';
+    if (action !== 'cleanse' && !target) {
+        showToast('⚠️ 请选择情报目标');
+        return;
+    }
+    isProcessing = true;
+    loading.style.display = 'block';
+    try {
+        const r = await myFetch(`${API_BASE}/api/intrigue`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId, action, target })
+        });
+        const d = await parseApiResponse(r);
+        addConflictLog(`【情报】${d.action_label}${d.target ? ` → ${d.target}` : ''}：${d.narration}`);
+        addLogEntry(`🕸️ ${d.narration}`, 'intel');
+        (d.intrigue_events || []).forEach(msg => addLogEntry(msg, 'intel'));
+        updateUI({ ...window._lastGameData, ...d, _skipPeriodEvents: true });
+        loadIntrigueTargets();
+        showToast('🕸️ 情报行动完成');
+    } catch (e) {
+        showToast('❌ ' + e.message, 'error');
+    }
+    isProcessing = false;
+    loading.style.display = 'none';
+}
+
+;
 
 function renderDuelPanel(duel, skills, drainOptions) {
     const panel = document.getElementById('duelPanel');

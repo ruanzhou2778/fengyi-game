@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行时数据（存档为本地游玩数据，不入库）
+saves/
+*.log
+
+# 一次性补丁脚本与验证产物
+_*.py
+_*.js
+_*.txt
+
+# 本地配置
+.env
+config.local.json
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
