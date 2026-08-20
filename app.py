@@ -39,6 +39,7 @@ from palace_extra import (
 )
 from openai import OpenAI
 import httpx
+from urllib.parse import urlparse
 from ai_service import generate_period_events
 
 app = Flask(__name__)
@@ -2080,6 +2081,37 @@ def get_user_api_config(request, player_id=None):
     if not config['api_base']:
         config['api_base'] = os.getenv('OPENAI_BASE_URL', 'https://cn.jixiangai.xyz/v1')
     return config
+
+@app.route('/api/models', methods=['GET'])
+def proxy_models():
+    """Proxy an OpenAI-compatible model list to avoid browser CORS restrictions."""
+    api_base = (request.headers.get('X-API-Base') or '').strip().rstrip('/')
+    api_key = (request.headers.get('Authorization') or '').strip()
+    parsed = urlparse(api_base)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        return jsonify({"error": "API 地址必须是有效的 http/https URL"}), 400
+    if not api_key:
+        return jsonify({"error": "缺少 API Key"}), 400
+
+    try:
+        response = httpx.get(
+            api_base + '/models',
+            headers={"Authorization": api_key, "Accept": "application/json"},
+            timeout=15.0,
+            follow_redirects=True,
+        )
+    except httpx.RequestError as exc:
+        return jsonify({"error": f"请求模型服务失败: {exc}"}), 502
+
+    content_type = response.headers.get('content-type', '')
+    if 'application/json' in content_type.lower():
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {"error": "模型服务返回了无效 JSON"}
+    else:
+        payload = {"error": response.text[:1000] or "模型服务返回空响应"}
+    return jsonify(payload), response.status_code
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

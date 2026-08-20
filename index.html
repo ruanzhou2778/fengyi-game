@@ -368,6 +368,85 @@
         button:hover,.interact-btn:hover,.primary-btn:hover,.btn-sm:hover,.config-toggle-btn:hover { transform:translateY(-1px); box-shadow:0 5px 12px rgba(85,55,64,.12); }
         .primary-btn,.send-btn,.action-btn { background:linear-gradient(135deg,#b58a48,#8d6635) !important; color:#fffaf0 !important; border-color:#a47a3e !important; }
         .interact-btn,.btn-sm,.config-toggle-btn { background:#fffaf3 !important; color:#684b32 !important; border-color:#d7bd96 !important; }
+        /* Ink-and-jade theme override: visual skin only. */
+        :root {
+            --bg-primary: #25302e; --bg-card: rgba(32,42,42,.88); --bg-nav: rgba(22,30,30,.96);
+            --gold: #c4ad94; --gold-light: #ddd0c0; --gold-dark: #a88d70;
+            --text-dark: #f8f5f0; --text-mid: #d5d0c8; --text-body: #e9e4dc; --text-light: #aaa79e;
+            --border-light: rgba(160,190,180,.2); --shadow: 0 16px 56px rgba(0,0,0,.35);
+            --radius: 18px; --radius-sm: 12px; --jade: #8ab3a5; --jade-soft: rgba(138,179,165,.11); --gold-soft: rgba(196,173,148,.12);
+        }
+        html { background: #202a28; }
+        body { visibility: hidden; color: var(--text-body); background-color: #25302e; background-image: radial-gradient(ellipse at 20% 15%,rgba(138,179,165,.12),transparent 42%),radial-gradient(ellipse at 85% 90%,rgba(196,173,148,.09),transparent 45%),linear-gradient(135deg,#25302e,#1e2928); }
+        body.ui-ready { visibility: visible; }
+        body::before { opacity: .16; background-image: radial-gradient(rgba(221,208,192,.15) .55px,transparent .55px); background-size: 8px 8px; }
+        .phone-frame { max-width: 460px; height: min(820px,94dvh); background: rgba(32,42,42,.92); border: 2px solid transparent; border-radius: 28px; box-shadow: 0 20px 70px rgba(0,0,0,.5),0 0 0 2px var(--jade) inset,0 0 0 5px var(--gold) inset; }
+        .app-header { background: linear-gradient(135deg,#202d2c,#2d3c39 58%,#3a3934); color: #f8f5f0; padding: 12px 14px 11px; border-bottom: 1px solid rgba(196,173,148,.48); box-shadow: 0 6px 22px rgba(0,0,0,.24); }
+        .app-header::after { background: linear-gradient(90deg,transparent,rgba(221,208,192,.8),transparent); }
+        .app-header .title-area .title { color: #f8f5f0; font-size: 15px; letter-spacing: 3px; text-shadow: 0 0 24px rgba(196,173,148,.14); }
+        .app-header .title-area .title .gold { color: var(--gold-light); }
+        .app-header .status-mini { gap: 5px; color: var(--text-mid); }
+        .app-header .status-mini span { background: rgba(255,255,255,.055); color: var(--text-mid); border-color: rgba(138,179,165,.34); }
+        .app-header .status-mini .rank-display { color: var(--gold-light); }
+        .app-header .status-mini .silver-display { color: var(--jade); }
+        .app-header .status-mini .calendar-display { color: #cbd8d1; }
+        .app-header .status-mini .actions-display { color: #b9d8c9; }
+        .app-header .save-btns button { background: rgba(255,255,255,.05); color: var(--text-mid); border-color: rgba(196,173,148,.34); }
+        .app-header .save-btns button:hover { background: var(--gold-soft); border-color: var(--gold-light); }
+        .page-container { background: linear-gradient(180deg,#263331,#202b2a); }
+        .page { padding: 12px 12px 8px; }
+        .page::-webkit-scrollbar-track { background: rgba(0,0,0,.12); }
+        .page::-webkit-scrollbar-thumb { background: var(--gold); }
+        .log-area,.story-input-area,.stat-block,.emperor-card,.dowager-card { background: rgba(255,255,255,.045) !important; border: 1px solid var(--border-light) !important; box-shadow: 0 2px 16px rgba(0,0,0,.18),0 0 0 1px rgba(196,173,148,.04) inset !important; }
+        .log-area { border-color: var(--jade) !important; border-radius: 16px; }
+        .log-entry { color: var(--text-mid) !important; border-bottom-color: rgba(255,255,255,.07) !important; }
+        .log-entry.flip { color: var(--gold-light) !important; background: linear-gradient(90deg,rgba(196,173,148,.1),transparent); border-left-color: var(--gold); }
+        .log-entry .log-time { color: var(--gold-light) !important; }
+        #currentStoryDisplay { background: rgba(255,255,255,.05); color: var(--text-dark); border-color: var(--gold) !important; box-shadow: 0 0 0 1px rgba(138,179,165,.08) inset,0 2px 16px rgba(0,0,0,.16); }
+        textarea,input,select { background: rgba(0,0,0,.2) !important; color: var(--text-dark) !important; border-color: var(--jade) !important; border-radius: 10px !important; }
+        textarea:focus,input:focus,select:focus { border-color: var(--gold-light) !important; box-shadow: 0 0 0 3px rgba(196,173,148,.13),0 0 20px rgba(196,173,148,.1) !important; background: rgba(0,0,0,.3) !important; }
+        textarea::placeholder,input::placeholder { color: var(--text-light) !important; }
+        .stat-block .block-title,.char-card .card-title { color: var(--gold-light) !important; border-bottom-color: rgba(196,173,148,.28) !important; }
+        .attr-bar-row .bar-track { background: rgba(0,0,0,.28) !important; }
+        .attr-bar-row .bar-track .bar-fill,.bar-fill { background: linear-gradient(90deg,#8ab3a5,#c4ad94) !important; }
+        .child-card-ui,.servant-card,.npc-card,.npc-card-queen { background: rgba(255,255,255,.045) !important; border-color: var(--border-light) !important; color: var(--text-body) !important; }
+        .child-card-ui:hover,.servant-card:hover,.npc-card:hover { background: rgba(196,173,148,.1) !important; border-color: var(--gold) !important; }
+        .bottom-nav { background: linear-gradient(180deg,rgba(35,48,46,.98),rgba(20,29,29,.98)) !important; border-top-color: rgba(196,173,148,.4) !important; }
+        .nav-item { color: var(--text-mid) !important; }
+        .nav-item.active { color: #f5e6ca !important; background: linear-gradient(180deg,rgba(196,173,148,.24),rgba(138,179,165,.09)) !important; box-shadow: inset 0 0 0 1px rgba(196,173,148,.35) !important; }
+        .nav-item:hover { color: #f8f5f0 !important; background: rgba(255,255,255,.07) !important; }
+        button:hover,.interact-btn:hover,.primary-btn:hover,.btn-sm:hover,.config-toggle-btn:hover { box-shadow: 0 6px 20px rgba(0,0,0,.25),0 0 0 1px var(--jade) inset; }
+        .primary-btn,.send-btn,.action-btn { background: rgba(255,255,255,.045) !important; color: var(--text-mid) !important; border-color: var(--gold) !important; }
+        .primary-btn:hover,.send-btn:hover,.action-btn:hover { background: var(--gold-soft) !important; color: var(--text-dark) !important; }
+        .interact-btn,.btn-sm,.config-toggle-btn,.btn { background: var(--jade-soft) !important; color: var(--text-mid) !important; border-color: var(--jade) !important; }
+        .month-btn { background: var(--gold-soft) !important; color: var(--gold-light) !important; border-color: var(--gold) !important; }
+        #loadingOverlay,.modal-overlay { background: rgba(15,23,22,.72) !important; backdrop-filter: blur(8px); }
+        .loading-box,.modal-box { background: #202c2b !important; color: var(--text-body) !important; border: 1px solid var(--gold) !important; border-radius: 20px !important; box-shadow: 0 20px 60px rgba(0,0,0,.45),0 0 0 1px var(--jade) inset !important; }
+        .loading-spinner { border-color: rgba(138,179,165,.25) !important; border-top-color: var(--gold-light) !important; }
+        .toast-notification { background: #202c2b !important; color: var(--text-dark) !important; border-color: var(--gold) !important; box-shadow: 0 12px 30px rgba(0,0,0,.35) !important; }
+        .scenario-overlay { background: rgba(25,35,34,.98) !important; color: var(--text-body); padding: 18px 14px 24px; }
+        .scenario-hero { width: min(460px,100%); padding: 18px 0 14px !important; border-bottom: 1px solid rgba(196,173,148,.3); margin-bottom: 12px; }
+        .scenario-hero > div:first-child { color: var(--text-dark) !important; font-size: 24px !important; letter-spacing: 7px !important; text-shadow: 0 0 24px rgba(196,173,148,.12); }
+        .scenario-hero > div:first-child span { color: var(--gold-light) !important; }
+        .scenario-hero > div:last-child { color: var(--text-light) !important; letter-spacing: 3px !important; }
+        .char-card { background: rgba(255,255,255,.045) !important; border-color: var(--border-light) !important; border-radius: 16px !important; box-shadow: 0 2px 16px rgba(0,0,0,.16),0 0 0 1px rgba(138,179,165,.05) inset !important; }
+        .char-card .card-title { color: var(--gold-light) !important; }
+        .char-card .card-row .label,.story-editor-footer,.story-hint { color: var(--text-light) !important; }
+        .char-card .badge { background: var(--jade-soft) !important; color: var(--jade) !important; border-color: rgba(138,179,165,.3) !important; }
+        .char-card .tag { background: rgba(255,255,255,.04) !important; color: var(--text-mid) !important; border-color: var(--border-light) !important; }
+        .char-card .tag:hover,.char-card .tag.active { background: var(--gold) !important; color: #25302e !important; border-color: var(--gold-light) !important; }
+        .scenario-overlay #startBtn { background: var(--gold) !important; color: #25302e !important; border-color: var(--jade) !important; box-shadow: 0 8px 24px rgba(196,173,148,.16); }
+        .scenario-overlay #startBtn:hover { background: var(--gold-light) !important; }
+        .scenario-overlay .preview-box { background: rgba(0,0,0,.16) !important; border-color: var(--jade) !important; color: var(--text-body) !important; }
+        .scenario-overlay .story-editor-wrap { background: rgba(0,0,0,.1) !important; border-color: var(--border-light) !important; }
+        .scenario-overlay .bar-track { background: rgba(0,0,0,.28) !important; }
+        .scenario-overlay .bar-fill { background: linear-gradient(90deg,#8ab3a5,#c4ad94) !important; }
+        .pregnancy-progress { display: none; margin: 4px 0 5px; padding: 5px 7px; border: 1px solid rgba(196,173,148,.38); border-radius: 10px; background: linear-gradient(135deg,rgba(138,179,165,.12),rgba(196,173,148,.08)); color: var(--text-mid); font-size: 8px; }
+        .pregnancy-progress.visible { display: block; }
+        .pregnancy-progress-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; color: var(--gold-light); }
+        .pregnancy-progress-track { height: 6px; overflow: hidden; border-radius: 6px; background: rgba(0,0,0,.3); box-shadow: inset 0 0 0 1px rgba(138,179,165,.2); }
+        .pregnancy-progress-fill { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg,#79a99b,#c4ad94,#e4cda9); box-shadow: 0 0 10px rgba(196,173,148,.38); transition: width .45s ease; }
+        @media (max-width:520px) { .scenario-overlay { padding: calc(12px + env(safe-area-inset-top)) 10px calc(18px + env(safe-area-inset-bottom)); } .scenario-hero { padding: 10px 0 12px !important; } }
     </style>
 </head>
 <body>
@@ -393,6 +472,7 @@
             <div class="story-scroll">
                 <div id="currentStoryDisplay">🌸 点击"入宫选秀"开始你的后宫之旅...</div>
                 <div class="log-area" id="logArea"><div id="logContent"><div style="color:var(--text-light);text-align:center;padding:14px;">暂无事件，开始你的宫斗之旅吧。</div></div></div>
+                <div id="pregnancyProgress" class="pregnancy-progress" aria-live="polite"><div class="pregnancy-progress-head"><span>🤰 孕期进度</span><span id="pregnancyProgressLabel">0% · 0/10月</span></div><div class="pregnancy-progress-track"><div id="pregnancyProgressFill" class="pregnancy-progress-fill"></div></div></div>
                 <div class="status-tags" id="statusTags"></div>
                 <div id="edictContainer"></div>
                 <div class="action-bar"><button class="month-btn month-btn-always-enabled" id="nextPeriodBtn">🌙 转旬（推进一旬）</button></div>
@@ -1598,7 +1678,23 @@ if (data.narration) {
     document.getElementById('currentStoryDisplay').innerHTML = data.narration;
 }
 
-let tags='';if(data.is_pregnant)tags+=`<span class="status-tag pregnant">🤰 孕期 ${Math.floor(data.pregnancy_month||0)+1}/10月</span>`;
+const pregnancyProgress = document.getElementById('pregnancyProgress');
+const pregnancyProgressFill = document.getElementById('pregnancyProgressFill');
+const pregnancyProgressLabel = document.getElementById('pregnancyProgressLabel');
+let tags='';
+if(data.is_pregnant){
+    const pregnancyMonth = Math.max(0, Math.min(10, Number(data.pregnancy_month) || 0));
+    const pregnancyPct = Math.round((pregnancyMonth / 10) * 100);
+    tags += `<span class="status-tag pregnant">🤰 孕期 ${Math.floor(pregnancyMonth) + 1}/10月</span>`;
+    if(pregnancyProgress && pregnancyProgressFill && pregnancyProgressLabel){
+        pregnancyProgress.classList.add('visible');
+        pregnancyProgressFill.style.width = `${pregnancyPct}%`;
+        pregnancyProgressLabel.textContent = `孕期进度 ${pregnancyPct}% · ${Math.floor(pregnancyMonth)}/10月`;
+    }
+}else if(pregnancyProgress){
+    pregnancyProgress.classList.remove('visible');
+    if(pregnancyProgressFill) pregnancyProgressFill.style.width = '0%';
+}
 if(data.has_children&&data.children&&data.children.length>0){const c=data.children[data.children.length-1];tags+=`<span class="status-tag child">👶 ${c.gender}·${c.name}</span>`;}
 
 const _rv = data.rivalries ? Object.values(data.rivalries).filter(v=>v>0).length : 0;
@@ -3229,8 +3325,12 @@ async function fetchModels(prefix = 'main') {
     if (!key) { showToast('请先填写 API Key'); return; }
     const savedModel = select.value;
     try {
-        const resp = await fetch(base.replace(/\/$/, '') + '/models', {
-            headers: { 'Authorization': 'Bearer ' + key }
+        const gameBase = resolveGameBase(API_BASE);
+        const resp = await fetch(gameBase + '/api/models', {
+            headers: {
+                'Authorization': 'Bearer ' + key,
+                'X-API-Base': base.replace(/\/$/, '')
+            }
         });
         if (!resp.ok) throw new Error('获取模型列表失败: ' + resp.status);
         const data = await resp.json();
@@ -3287,6 +3387,7 @@ userInput.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDe
 nextPeriodBtn.addEventListener('click',nextPeriod);
 
 createScenarioOverlay();
+document.body.classList.add('ui-ready');
 initConfigFromStorage();
 bindConfigAutoSave('main');
 async function initApp() {
