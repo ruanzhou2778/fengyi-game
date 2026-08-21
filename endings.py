@@ -28,8 +28,22 @@ AGE_WARN_AT = 55
 ENDING_CATEGORY_FALL = "失势"
 ENDING_CATEGORY_DEATH = "身死"
 ENDING_CATEGORY_TWILIGHT = "迟暮"
+ENDING_CATEGORY_TRIUMPH = "登顶"
 
 ENDINGS = {
+    "母仪天下": {
+        "icon": "👑",
+        "category": ENDING_CATEGORY_TRIUMPH,
+        "headline": "母仪天下，垂范后宫",
+        "default_reason": "皇帝驾崩，你的子嗣继位为帝，尊你为太后",
+        "narration": (
+            "先帝驾崩的哀钟还在梁间回荡，新帝的登基诏书已经颁行天下。"
+            "你换上明黄的太后朝服，在百官山呼中一步步走向御座之侧。"
+            "那个曾经在御花园里追风筝的孩子，如今端坐在龙椅上。"
+            "他看向你的目光，和当年一模一样。"
+        ),
+        "epitaph": "从深宫妃嫔到一国太后，这一路，你走得比谁都远。",
+    },
     "冷宫幽闭": {
         "icon": "🏚️",
         "category": ENDING_CATEGORY_FALL,

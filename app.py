@@ -6,6 +6,7 @@ import uuid
 import json
 import os
 import random
+import re
 import sys
 from datetime import datetime
 
@@ -17,7 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 load_dotenv()
-from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort
+from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, default_heir_status
 from scenarios import START_SCENARIOS, apply_scenario
 from events import get_daily_actions, apply_daily_action
 from names import (
@@ -37,12 +38,12 @@ from palace_extra import (
     start_duel, play_duel_skill, resolve_duel, chat_probe, pray_or_curse,
     process_pressure, available_skills, DUEL_SKILLS, DRAIN_OPTIONS,
     process_consort_deaths, try_childbirth_death, try_conflict_death,
-    kill_consort, period_key,
+    kill_consort, period_key, npc_display_rank,
 )
 from endings import (
     ENDINGS, ensure_ending_fields, is_game_over, ending_payload,
     evaluate_period_endings, check_player_childbirth_death,
-    check_player_poison_death, build_life_summary,
+    check_player_poison_death, build_life_summary, trigger_ending,
 )
 from openai import OpenAI
 import httpx
@@ -182,7 +183,7 @@ def restore_session_from_file(player_id, slot_name='default'):
             return None
         game_state = GameState.from_save_data(save_data)
         if not hasattr(game_state, 'npcs') or not game_state.npcs:
-            game_state.npcs = generate_all_npcs(10)
+            game_state.npcs = generate_all_npcs(10, surname=royal_surname(game_state))
             for name, npc in game_state.npcs.items():
                 if name not in game_state.relationships:
                     game_state.relationships[name] = npc.get("relationship", {"好感": 0, "印象": "陌生", "互动次数": 0})
@@ -1370,6 +1371,193 @@ def apply_queen_authority(game_state, target_name, action):
 
 
 
+ALLIANCE_PLEDGES = [
+    "他日若有一人得势，必不忘今日之约",
+    "你我同舟共济，宫中风浪一并担",
+    "彼此耳目相通，凡有风声先递一信",
+    "若谁被人构陷，另一人必在御前分说",
+    "无论谁诞下皇嗣，另一人皆护其周全",
+]
+
+ALLIANCE_SCENES = [
+    "你与{name}在偏殿设一小席，屏退宫人，仅留一盏灯。她亲手为你斟茶，茶烟袅袅间彼此交换了各自的软肋",
+    "夜雨敲窗，{name}执你之手立于廊下，说宫中人心难测，唯有并肩才不至于被逐一吞没",
+    "你以一支旧簪相赠，{name}回你一方绣帕。物虽轻，却是彼此立信的凭据",
+    "你与{name}于御花园假山后低语良久，把各自与旁人的恩怨一一摊开，反倒生出几分惺惺相惜",
+    "{name}半夜遣心腹宫女送来密笺，字迹仓促，只写「愿与姐姐同进退」。你在灯下批了一个「诺」字",
+]
+
+ALLIANCE_LEVEL_BONUS = {
+    "泛交": {"favor": 8, "威望": 2, "心计": 1},
+    "互助": {"favor": 12, "威望": 4, "心计": 2},
+    "深交": {"favor": 16, "威望": 6, "心计": 4},
+    "金石之交": {"favor": 20, "威望": 9, "心计": 5},
+}
+
+
+def _alliance_strength(game_state, npc_name):
+    """结盟牢固度：由好感、位份、威望共同决定。返回 (level, value)。"""
+    favor = game_state.relationships.get(npc_name, {}).get("好感", 0)
+    npc = game_state.npcs.get(npc_name, {}) or {}
+    rank_power = get_rank_power(normalize_rank_name(npc.get("rank", "答应")), npc.get("nobletitle"))
+    prestige = npc.get("attributes", {}).get("威望", 20)
+    score = favor * 0.5 + rank_power * 2.5 + prestige * 0.25
+    if score >= 85:
+        return "金石之交", random.randint(55, 70)
+    if score >= 60:
+        return "深交", random.randint(42, 54)
+    if score >= 40:
+        return "互助", random.randint(32, 41)
+    return "泛交", random.randint(22, 31)
+
+
+def form_alliance(game_state, npc_name):
+    """缔结盟约：写入盟友值，给出即时收益与一段成型剧情。"""
+    level, value = _alliance_strength(game_state, npc_name)
+    game_state.alliances[npc_name] = value
+    bonus = ALLIANCE_LEVEL_BONUS[level]
+
+    rel = game_state.relationships.setdefault(npc_name, {"好感": 0, "印象": "陌生", "互动次数": 0})
+    favor_gain = bonus["favor"]
+    rel["好感"] = min(100, rel.get("好感", 0) + favor_gain)
+    rel["印象"] = "盟友"
+    rel["互动次数"] = rel.get("互动次数", 0) + 1
+
+    prestige_gain = bonus["威望"]
+    wit_gain = bonus["心计"]
+    game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + prestige_gain)
+    game_state.attributes["心计"] = min(game_state.get_attr_max("心计"), game_state.attributes.get("心计", 0) + wit_gain)
+
+    npc = game_state.npcs.get(npc_name, {}) or {}
+    npc["压力"] = max(0, npc.get("压力", 20) - random.randint(3, 8))
+
+    pledge = random.choice(ALLIANCE_PLEDGES)
+    scene = random.choice(ALLIANCE_SCENES).format(name=npc_name)
+    display = npc_display_rank(npc) if npc else "妃嫔"
+    effects = {"威望": prestige_gain, "心计": wit_gain, "好感": favor_gain}
+    dowry = ""
+    if level in ("深交", "金石之交"):
+        gift = random.randint(15, 40)
+        game_state.silver += gift
+        effects["银两"] = gift
+        dowry = f" 临别时{npc_name}塞给你一只荷包，内有{gift}两银，说「莫要与我推让」。"
+
+    narration = (
+        f"🤝 你与{display}{npc_name}结为盟友（{level}）。{scene}。"
+        f"临了她低声立誓：「{pledge}」。"
+        f"好感+{favor_gain}，威望+{prestige_gain}，心计+{wit_gain}。{dowry}"
+    ).strip()
+
+    return {
+        "level": level,
+        "value": value,
+        "pledge": pledge,
+        "narration": narration,
+        "effects": effects,
+        "memory": f"与{npc_name}结为{level}盟友：{pledge}",
+    }
+
+
+def process_alliance_period(game_state):
+    """每旬盟友互动：情报、援手、共谋，或因疏远而生嫌隙。返回事件文案列表。"""
+    events = []
+    if not getattr(game_state, "alliances", None):
+        return events
+
+    for name in list(game_state.alliances.keys()):
+        npc = game_state.npcs.get(name)
+        if not isinstance(npc, dict) or not npc.get("alive", True) or not npc.get("is_active", True):
+            game_state.alliances.pop(name, None)
+            continue
+
+        bond = game_state.alliances.get(name, 0)
+        favor = game_state.relationships.get(name, {}).get("好感", 0)
+
+        # 好感跌破门槛：盟约松动乃至破裂
+        if favor < 15:
+            bond -= random.randint(5, 12)
+            if bond <= 5:
+                game_state.alliances.pop(name, None)
+                events.append(f"💔 {name} 遣人递话，说「情分已淡，往后各安其位」，与你的盟约就此散了")
+            else:
+                game_state.alliances[name] = bond
+                events.append(f"🍂 {name} 近来与你少了往来，盟友之谊淡了几分（盟友值{bond}）")
+            continue
+
+        if random.random() < 0.45:
+            game_state.alliances[name] = min(100, bond + random.randint(1, 4))
+        if random.random() > 0.55:
+            continue
+
+        events.append(_alliance_period_event(game_state, name))
+
+    events = [e for e in events if e]
+    for msg in events:
+        game_state.add_memory(msg)
+    return events
+
+
+def _alliance_period_event(game_state, name):
+    """随机抽取一条盟友互动事件并结算，返回文案。"""
+    roll = random.random()
+    if roll < 0.30:
+        rivals = [n for n, v in game_state.rivalries.items() if v > 0 and n in game_state.npcs]
+        wit = random.randint(2, 5) if rivals else random.randint(1, 3)
+        game_state.attributes["心计"] = min(game_state.get_attr_max("心计"), game_state.attributes.get("心计", 0) + wit)
+        if rivals:
+            foe = random.choice(rivals)
+            return f"📨 {name} 密报：{foe} 近日频往内务府走动，似在筹谋对你不利。你心中有了防备，心计+{wit}"
+        return f"📨 {name} 将各宫近日的动静抄了一份给你，心计+{wit}"
+    if roll < 0.52:
+        gain = random.randint(2, 6)
+        game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + gain)
+        return f"🌸 御前侍膳时，{name} 有意提起你近日抄经祈福之事，皇帝颔首称贤，宠爱+{gain}"
+    if roll < 0.70:
+        gain = random.randint(2, 5)
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + gain)
+        return f"🏮 六宫议事，{name} 处处替你说话，无人再敢轻慢，威望+{gain}"
+    if roll < 0.84:
+        silver = random.randint(8, 25)
+        game_state.silver += silver
+        return f"🎁 {name} 派人送来时令点心与{silver}两银，说是「姐妹间不必客套」"
+    if roll < 0.94 and game_state.rivalries:
+        foe = random.choice(list(game_state.rivalries.keys()))
+        foe_npc = game_state.npcs.get(foe)
+        if isinstance(foe_npc, dict) and foe_npc.get("alive", True):
+            press = random.randint(5, 14)
+            foe_npc["压力"] = min(120, foe_npc.get("压力", 20) + press)
+            return f"⚔️ 你与{name}合谋，借宫人之口散了{foe}几句闲话，{foe}压力+{press}"
+    health = random.randint(2, 6)
+    game_state.attributes["健康"] = min(game_state.get_attr_max("健康"), game_state.attributes.get("健康", 0) + health)
+    return f"🍲 {name} 亲手炖了补品送来，你饮后气色转好，健康+{health}"
+
+
+def _record_conflict_rivalry(game_state, initiator, target, initiator_win):
+    """记录一次宫斗产生的仇恨。
+
+    只有玩家亲身参与（作为发起者或目标）时才写入 game_state.rivalries；
+    NPC 与 NPC 之间的宫斗写入各自 npc["npc_rivals"]，不再污染玩家仇敌列表。
+    """
+    player = game_state.name
+    loser = target if initiator_win else initiator
+    winner = initiator if initiator_win else target
+
+    if player in (initiator, target):
+        # 玩家参与：仇恨记在对手身上（无论玩家胜负，双方都结下嫌隙）
+        opponent = target if initiator == player else initiator
+        if opponent and opponent != player:
+            game_state.rivalries[opponent] = game_state.rivalries.get(opponent, 0) + (10 if opponent in game_state.rivalries else 15)
+        return
+
+    # NPC vs NPC：败者记恨胜者，胜者也留意败者
+    for owner, foe, amount in ((loser, winner, 15), (winner, loser, 8)):
+        npc = game_state.npcs.get(owner)
+        if not isinstance(npc, dict) or not foe or foe == owner:
+            continue
+        rivals = npc.setdefault("npc_rivals", {})
+        rivals[foe] = min(100, rivals.get(foe, 0) + amount)
+
+
 def generate_palace_conflict(game_state, initiator=None, target=None, api_key=None, api_base=None, api_model=None, conflict_type=None, assist_servants=None):
     if initiator is None:
         all_names = [game_state.name] + [n for n in game_state.npcs.keys() if game_state.npcs[n].get("alive", True)]
@@ -1497,16 +1685,10 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
         player_poisoned_by = initiator
         game_state.add_memory(f"{initiator}对你下毒，健康-{poison_damage}")
 
-    if initiator_win:
-        if target in game_state.rivalries:
-            game_state.rivalries[target] += 10
-        else:
-            game_state.rivalries[target] = 15
-    else:
-        if initiator in game_state.rivalries:
-            game_state.rivalries[initiator] += 10
-        else:
-            game_state.rivalries[initiator] = 15
+    # ---- 仇恨归属 ----
+    # rivalries 是「玩家与他人」的仇恨表，只有玩家参与的宫斗才应写入；
+    # NPC 之间的争斗记在双方 NPC 自己的 npc_rivals 上，避免误加到主控角色头上。
+    _record_conflict_rivalry(game_state, initiator, target, initiator_win)
 
     demotion_message = None
     npc_demotion_message = None
@@ -1689,7 +1871,7 @@ def generate_npc(is_queen=False):
         "压力": random.randint(8, 28) if not is_queen else random.randint(5, 18),
     }
 
-def generate_all_npcs(count=10):
+def generate_all_npcs(count=10, surname=None):
     npcs = {}
     queen = generate_npc(is_queen=True)
     npcs[queen["name"]] = queen
@@ -1702,7 +1884,7 @@ def generate_all_npcs(count=10):
             child_count = random.randint(1, 2)
             for _ in range(child_count):
                 gender = random.choice(["皇子", "公主"])
-                child_name = generate_child_name(gender)
+                child_name = new_child_name(gender, npcs=npcs, surname=surname or "")
                 age = round(random.randint(0, 36) / 12, 1)
                 if "children" not in npc:
                     npc["children"] = []
@@ -1888,6 +2070,9 @@ def ensure_child_fields(child):
     child.setdefault("adoption_history", [])
     child.setdefault("needs_doctor", child.get("health", 70) < 45)
     child.setdefault("want_return_home", False)
+    child.setdefault("honorary_title", None)   # 徽号
+    child.setdefault("palace", "")             # 所居宫殿
+    child.setdefault("uid", None)              # 唯一标识
     return child
 
 def child_talent_label(talent):
@@ -1901,6 +2086,78 @@ def child_talent_label(talent):
     if t >= 40:
         return CHILD_TALENT_LABELS[1]
     return CHILD_TALENT_LABELS[0]
+
+def royal_surname(game_state=None, emperor=None):
+    """取国姓（皇帝姓氏）。取不到时返回空串，调用方退化为无姓。"""
+    emp = emperor if isinstance(emperor, dict) else getattr(game_state, "emperor", None)
+    if not isinstance(emp, dict):
+        return ""
+    emp_name = (emp.get("name") or "").strip()
+    if not emp_name:
+        return ""
+    surname = extract_surname(emp_name)
+    return "" if surname in ("", "某") else surname
+
+
+def collect_used_child_names(game_state=None, npcs=None, extra=None):
+    """汇总宫中已占用的皇嗣名（含玩家与所有妃嫔，含已故），用于避免重名。"""
+    used = set()
+
+    def _absorb(children):
+        for child in children or []:
+            if isinstance(child, dict):
+                name = (child.get("name") or "").strip()
+            else:
+                name = str(child or "").strip()
+            if name:
+                used.add(name)
+
+    if game_state is not None:
+        _absorb(getattr(game_state, "children", None))
+        for npc in (getattr(game_state, "npcs", None) or {}).values():
+            if isinstance(npc, dict):
+                _absorb(npc.get("children"))
+    for npc in (npcs or {}).values():
+        if isinstance(npc, dict):
+            _absorb(npc.get("children"))
+    for name in extra or []:
+        if name:
+            used.add(str(name).strip())
+    return used
+
+
+def new_child_name(gender, game_state=None, npcs=None, surname=None, extra_used=None):
+    """生成不与宫中现有皇嗣重名的「国姓+名」。"""
+    if surname is None:
+        surname = royal_surname(game_state)
+    used = collect_used_child_names(game_state, npcs, extra_used)
+    return generate_child_name(gender, used=used, surname=surname)
+
+
+CHILD_NAME_MAX_LEN = 6
+_CHILD_NAME_RE = re.compile(r"^[\u4e00-\u9fa5]{1,%d}$" % CHILD_NAME_MAX_LEN)
+
+
+def validate_child_name(raw_name, game_state, current_name=None):
+    """校验并规范玩家自定义的皇嗣名。返回 (完整名, error)。
+
+    输入允许只写名（自动补国姓）或已带国姓；长度按「去掉国姓后的名」计算。
+    """
+    name = (raw_name or "").strip()
+    if not name:
+        return None, "请输入名字"
+    surname = royal_surname(game_state)
+    given = name[len(surname):] if surname and name.startswith(surname) else name
+    if not _CHILD_NAME_RE.match(given):
+        return None, f"名字须为 1-{CHILD_NAME_MAX_LEN} 个汉字"
+    full = (surname + given) if surname else given
+    used = collect_used_child_names(game_state)
+    if current_name:
+        used.discard(current_name)
+    if full in used:
+        return None, f"宫中已有皇嗣名为「{full}」，请另择"
+    return full, None
+
 
 def create_newborn_child(gender, name, game_state, mother_name=None):
     child = {
@@ -2139,6 +2396,10 @@ def maybe_child_bonus_event(game_state, child, child_name):
     add_child_event(child, f"💕 {msg}")
     return f"【温情时刻】{msg}，亲密度+{gain}"
 
+PLAYER_MIN_AGE = 16
+PLAYER_MAX_CREATE_AGE = 40
+
+
 def clamp_age(value, default, minimum=12, maximum=80):
     try:
         age = int(value)
@@ -2148,7 +2409,7 @@ def clamp_age(value, default, minimum=12, maximum=80):
 
 
 def ensure_character_ages(game_state):
-    game_state.age = clamp_age(getattr(game_state, "age", 16), 16)
+    game_state.age = clamp_age(getattr(game_state, "age", PLAYER_MIN_AGE), PLAYER_MIN_AGE, PLAYER_MIN_AGE)
     if not isinstance(getattr(game_state, "emperor", None), dict):
         game_state.emperor = {}
     game_state.emperor["age"] = clamp_age(game_state.emperor.get("age"), random.randint(25, 55), 18, 80)
@@ -2157,8 +2418,61 @@ def ensure_character_ages(game_state):
         if name == "太后" or rank == "太后":
             npc["age"] = clamp_age(npc.get("age"), random.randint(45, 65), 35, 90)
         else:
-            npc["age"] = clamp_age(npc.get("age"), random.randint(14, 32), 12, 80)
+            npc["age"] = clamp_age(npc.get("age"), random.randint(PLAYER_MIN_AGE, 32), PLAYER_MIN_AGE, 80)
 
+
+# ---- 立储/继承/宫殿/徽号 辅助函数 ----
+
+PALACE_LIST = ["长春宫", "钟粹宫", "承乾宫", "翊坤宫", "永寿宫", "储秀宫", "咸福宫", "景仁宫", "永和宫", "景阳宫"]
+
+def is_child_heir(game_state, child_name_or_mother_name):
+    """判断某妃嫔的子嗣是否被立为储君；若传入妃嫔名，检查其子嗣。"""
+    heir_id = (game_state.heir_status or {}).get("heir_id")
+    if not heir_id:
+        return False
+    # 检查玩家子嗣中是否有储君
+    for c in game_state.children:
+        if c.get("uid") == heir_id or c.get("name") == heir_id:
+            return True
+    # 检查 NPC 子嗣中是否有储君
+    npc = game_state.npcs.get(child_name_or_mother_name)
+    if npc:
+        for c in npc.get("children", []):
+            if c.get("uid") == heir_id or c.get("name") == heir_id:
+                return True
+    return False
+
+def get_heir_child(game_state):
+    """返回储君子嗣对象（dict）或 None。"""
+    heir_id = (game_state.heir_status or {}).get("heir_id")
+    if not heir_id:
+        return None
+    for c in game_state.children:
+        if c.get("uid") == heir_id or c.get("name") == heir_id:
+            return c
+    for name, npc in game_state.npcs.items():
+        for c in npc.get("children", []):
+            if c.get("uid") == heir_id or c.get("name") == heir_id:
+                return c
+    return None
+
+def get_heir_mother_name(game_state):
+    """返回储君生母/养母的名称。"""
+    child = get_heir_child(game_state)
+    if not child:
+        return ""
+    return child.get("adoptive_mother") or child.get("birth_mother") or ""
+
+def find_child_by_uid(game_state, uid):
+    """在所有子嗣中按 uid 查找。"""
+    for c in game_state.children:
+        if c.get("uid") == uid:
+            return c, "player", len(game_state.children)
+    for name, npc in game_state.npcs.items():
+        for i, c in enumerate(npc.get("children", [])):
+            if c.get("uid") == uid:
+                return c, name, i
+    return None, None, None
 
 def serialize_npcs_for_client(game_state):
     result = {}
@@ -2168,7 +2482,7 @@ def serialize_npcs_for_client(game_state):
         result[name] = {
             "name": name,
             "rank": npc.get("rank", "妃嫔"),
-            "age": clamp_age(npc.get("age"), random.randint(14, 32), 12, 80),
+            "age": clamp_age(npc.get("age"), random.randint(PLAYER_MIN_AGE, 32), PLAYER_MIN_AGE, 80),
             "personality": npc.get("personality", "未知"),
             "icon": npc.get("icon", "🌸"),
             "children": npc.get("children", []),
@@ -2177,6 +2491,9 @@ def serialize_npcs_for_client(game_state):
             "attributes": npc.get("attributes", {}),
             "family_background": npc.get("family_background", ""),
             "nobletitle": npc.get("nobletitle", None),
+            "honorary_title": npc.get("honorary_title", None),
+            "palace": npc.get("palace", ""),
+            "is_heir": is_child_heir(game_state, name),
             "压力": npc.get("压力", 0),
             "alive": npc.get("alive", True),
             "is_active": npc.get("is_active", True),
@@ -2611,7 +2928,7 @@ def process_npc_pregnancy(game_state):
                         pregnancy_events.append(death_msg)
                 elif event_type == "生产":
                     gender = random.choice(["皇子", "公主"])
-                    child_name = generate_child_name(gender)
+                    child_name = new_child_name(gender, game_state)
                     if "children" not in npc: npc["children"] = []
                     npc["children"].append(create_newborn_child(gender, child_name, game_state, mother_name=name))
                     birth_events.append(f"👶 {name} 诞下{gender}，取名{child_name}！")
@@ -2953,13 +3270,6 @@ def get_promotion_wait_message(game_state):
 def is_exceptional_promotion(game_state):
     return is_special_favor(game_state) and not check_tenure_met(game_state)
 
-# ============================================================
-#  晋升事件（废弃，保留占位）
-# ============================================================
-def generate_promotion_event(game_state, api_key=None, api_base=None, api_model=None):
-    # 已废弃，但保留以防调用
-    return None
-
 def get_flip_candidates(game_state):
     candidates = []
     player_name = game_state.name
@@ -3195,9 +3505,9 @@ def get_npc_detail(name):
         return jsonify({"error": "NPC不存在"}), 404
     npc = game_state.npcs[name]
     rank = npc.get("rank", "妃嫔")
-    min_age = 35 if rank == "太后" else 12
+    min_age = 35 if rank == "太后" else PLAYER_MIN_AGE
     max_age = 90 if rank == "太后" else 80
-    default_age = random.randint(45, 65) if rank == "太后" else random.randint(14, 32)
+    default_age = random.randint(45, 65) if rank == "太后" else random.randint(PLAYER_MIN_AGE, 32)
     return jsonify({
         "name": name, "rank": rank, "age": clamp_age(npc.get("age"), default_age, min_age, max_age), "personality": npc.get("personality","未知"),
         "personality_desc": npc.get("personality_desc",""), "icon": npc.get("icon","🌸"),
@@ -3258,10 +3568,12 @@ def interact_npc():
             return jsonify({"error": "已经是盟友"}), 400
         if npc_name in game_state.rivalries:
             del game_state.rivalries[npc_name]
-        game_state.alliances[npc_name] = 30
-        game_state.relationships[npc_name]["好感"] += 10
-        result["narration"] = f"你与{npc_name}结为盟友！"
-        game_state.add_memory(f"与{npc_name}结盟")
+        pact = form_alliance(game_state, npc_name)
+        result["narration"] = pact["narration"]
+        result["effects"] = pact["effects"]
+        result["alliance_level"] = pact["level"]
+        result["alliance_pledge"] = pact["pledge"]
+        game_state.add_memory(pact["memory"])
     elif action == 'rival':
         if game_state.attributes["心计"] < 30:
             return jsonify({"error": "心计不足，无法陷害"}), 400
@@ -3523,19 +3835,19 @@ def next_period():
     game_state.current_time = "卯时"
     game_state._promotion_done = False
     if game_state.year != old_year:
-        game_state.age = clamp_age(getattr(game_state, "age", 16) + 1, 16)
+        game_state.age = clamp_age(getattr(game_state, "age", PLAYER_MIN_AGE) + 1, PLAYER_MIN_AGE, PLAYER_MIN_AGE)
         if isinstance(getattr(game_state, "emperor", None), dict):
             game_state.emperor["age"] = clamp_age(game_state.emperor.get("age", 35) + 1, 35, 18, 80)
         for npc in game_state.npcs.values():
             if npc.get("alive", True):
                 rank = npc.get("rank", "")
-                minimum = 35 if rank == "太后" else 12
+                minimum = 35 if rank == "太后" else PLAYER_MIN_AGE
                 maximum = 90 if rank == "太后" else 80
                 default_age = 50 if rank == "太后" else 18
                 npc["age"] = clamp_age(npc.get("age", default_age) + 1, default_age, minimum, maximum)
         for servant in getattr(game_state, "servants", []):
             if getattr(servant, "is_active", True):
-                servant.age = clamp_age(getattr(servant, "age", 18) + 1, 18, 12, 80)
+                servant.age = clamp_age(getattr(servant, "age", 18) + 1, 18, PLAYER_MIN_AGE, 80)
 
     intelligence = []
 
@@ -3607,7 +3919,7 @@ def next_period():
                 player_death_ending = check_player_childbirth_death(game_state, survived_child=False)
             else:
                 gender = random.choice(["皇子", "公主"])
-                child_name = generate_child_name(gender)
+                child_name = new_child_name(gender, game_state)
                 game_state.children.append(create_newborn_child(gender, child_name, game_state))
                 game_state.has_children = True
                 game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes["宠爱"] + 20)
@@ -3680,6 +3992,10 @@ def next_period():
         for msg in death_events:
             intelligence.append(msg)
             game_state.add_memory(msg)
+
+    alliance_events = process_alliance_period(game_state)
+    for msg in alliance_events:
+        intelligence.append(msg)
 
     prince_events = []
     for child in game_state.children:
@@ -3872,6 +4188,107 @@ def next_period():
             new_concubine = {"names": new_names, "is_daxuan": False}
             game_state.add_memory(f"{len(new_names)}位新人入宫")
 
+    # ===== 皇帝健康衰退与驾崩/继承判定 =====
+    emperor = game_state.emperor or {}
+    emperor_health = emperor.get("health", 80)
+    emperor_age = emperor.get("age", 35)
+    emperor_illness = emperor.get("illness_stage", "安康")
+    succession_pressure = emperor.get("succession_pressure", 0)
+    emperor_death_msg = None
+    emperor_abdicate_msg = None
+
+    # 皇帝健康自然衰减（年龄越大衰减越快）
+    decay_base = 0.3 if emperor_age < 40 else (0.6 if emperor_age < 50 else (1.2 if emperor_age < 60 else 2.0))
+    if emperor_illness == "微恙":
+        decay_base *= 2.0
+    elif emperor_illness == "沉疴":
+        decay_base *= 4.0
+    if random.random() < decay_base / 10:  # 每旬约 decay_base/10 概率扣 1 点
+        emperor_health = max(0, emperor_health - 1)
+        emperor["health"] = emperor_health
+
+    # 病情演变
+    if emperor_health < 60 and emperor_illness == "安康" and random.random() < 0.05:
+        emperor["illness_stage"] = "微恙"
+        emperor_illness = "微恙"
+        intelligence.append("🏥 皇帝偶感风寒，太医署已开方调理。")
+    elif emperor_health < 40 and emperor_illness == "微恙" and random.random() < 0.08:
+        emperor["illness_stage"] = "沉疴"
+        emperor_illness = "沉疴"
+        intelligence.append("🏥 皇帝病势加重，已卧床不起，太医院上下束手无策。")
+    elif emperor_health < 20 and emperor_illness == "沉疴" and random.random() < 0.15:
+        emperor["illness_stage"] = "弥留"
+        emperor_illness = "弥留"
+        intelligence.append("🕯️ 皇帝已至弥留之际，召宗室大臣入宫，恐时日无多。")
+
+    # 立储压力累积
+    if emperor_health < 50:
+        pressure_gain = 1 if emperor_health >= 30 else 3
+        succession_pressure += pressure_gain
+        emperor["succession_pressure"] = succession_pressure
+
+    # 驾崩判定
+    heir_id = (game_state.heir_status or {}).get("heir_id")
+    if emperor_health <= 0 or emperor_illness == "弥留":
+        if emperor_health <= 0 or random.random() < 0.4:  # 弥留每旬 40% 概率驾崩
+            # 皇帝驾崩
+            emperor["health"] = 0
+            emperor["alive"] = False
+            emperor_death_msg = "🕯️ 皇帝驾崩，天下缟素！"
+            intelligence.append(emperor_death_msg)
+            game_state.add_memory(emperor_death_msg)
+
+            if heir_id:
+                heir_child = get_heir_child(game_state)
+                if heir_child:
+                    heir_mother = heir_child.get("adoptive_mother") or heir_child.get("birth_mother") or ""
+                    if heir_mother == game_state.name:
+                        # 你的子嗣继位 → 太后结局
+                        ending = trigger_ending(game_state, "母仪天下",
+                            f"皇帝驾崩，你的子嗣{heir_child.get('name','皇嗣')}继位为帝，尊你为太后")
+                        intelligence.append(f"👑 新帝登基，尊你为太后，母仪天下！")
+                        game_state.add_memory(f"👑 你的子嗣{heir_child.get('name','皇嗣')}登基为帝")
+                    else:
+                        # 他人子嗣继位 → 无依靠结局
+                        intelligence.append(f"👑 新帝登基，但与你并无血缘，你在宫中再无依靠。")
+                        game_state.add_memory("👑 新帝登基，你在宫中再无依靠")
+                        # 若无子嗣，可能触发迟暮结局
+                        if not game_state.children:
+                            ending = trigger_ending(game_state, "迟暮宫墙",
+                                "皇帝驾崩，你无子嗣倚靠，被移居别宫终老")
+                else:
+                    # 储君记录有但找不到子嗣，视为无储
+                    intelligence.append("👑 新帝登基，但与你并无关联。")
+                    game_state.add_memory("👑 新帝登基")
+            else:
+                # 无储君 → 新帝登基，玩家境遇下降
+                intelligence.append("👑 国不可一日无君，宗室拥立新帝登基，但你未能在权力更迭中获利。")
+                game_state.add_memory("👑 新帝登基，宫中格局大变")
+                if not game_state.children:
+                    # 无子嗣则威望暴跌，可能触发结局
+                    game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - 30)
+                    if game_state.attributes.get("威望", 0) < 10:
+                        ending = trigger_ending(game_state, "冷宫幽闭",
+                            "先帝驾崩，新帝登基，你无宠无嗣无威望，被迁入冷宫")
+
+    # 皇帝退位（健康极低且储君已立，低概率禅位）
+    if not emperor.get("alive", True) is False and emperor_health < 25 and heir_id and random.random() < 0.05:
+        emperor["alive"] = False
+        emperor_abdicate_msg = "📜 皇帝以龙体欠安为由，下诏禅位于储君，自居太上皇。"
+        intelligence.append(emperor_abdicate_msg)
+        game_state.add_memory(emperor_abdicate_msg)
+        heir_child = get_heir_child(game_state)
+        if heir_child:
+            heir_mother = heir_child.get("adoptive_mother") or heir_child.get("birth_mother") or ""
+            if heir_mother == game_state.name:
+                ending = trigger_ending(game_state, "母仪天下",
+                    f"皇帝禅位，你的子嗣{heir_child.get('name','皇嗣')}登基为帝，尊你为太后")
+                intelligence.append("👑 新帝登基，尊你为太后！")
+            else:
+                intelligence.append("👑 新帝登基，但与你并无血缘。")
+                if not game_state.children:
+                    game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - 20)
+
     # ===== 终局判定（放在本旬所有结算之后，保证依据的是最终状态） =====
     ending = player_death_ending
     ending_warnings = []
@@ -3943,6 +4360,9 @@ def next_period():
         "ending": ending,
         "game_over": bool(ending),
         "ending_warnings": ending_warnings,
+        "heir_status": game_state.heir_status,
+        "palaces": PALACE_LIST,
+        "emperor": game_state.emperor,
     })
 
 @app.route('/api/intrigue/targets', methods=['GET'])
@@ -4200,6 +4620,16 @@ def start_game():
     player_attributes = data.get('attributes', None)
     emperor_data = data.get('emperor', None)
     character = data.get('character', {})
+    raw_age = character.get('age')
+    if raw_age is not None and str(raw_age).strip() != "":
+        try:
+            requested_age = int(raw_age)
+        except (TypeError, ValueError):
+            return jsonify({"error": "年龄格式有误"}), 400
+        if requested_age < PLAYER_MIN_AGE:
+            return jsonify({"error": f"入宫年龄须满 {PLAYER_MIN_AGE} 岁"}), 400
+        if requested_age > PLAYER_MAX_CREATE_AGE:
+            return jsonify({"error": f"入宫年龄不得超过 {PLAYER_MAX_CREATE_AGE} 岁"}), 400
     api_config = get_user_api_config(request)
     client_id = extract_client_id(request, data)
     player_id = str(uuid.uuid4())
@@ -4212,7 +4642,7 @@ def start_game():
     game_state.background_desc = character.get('background_desc', '')
     game_state.traits = character.get('traits', [])
     game_state.custom_story = character.get('custom_story', '')
-    game_state.age = clamp_age(character.get('age'), random.randint(14, 22), 12, 40)
+    game_state.age = clamp_age(character.get('age'), random.randint(PLAYER_MIN_AGE, 22), PLAYER_MIN_AGE, PLAYER_MAX_CREATE_AGE)
     
     if background_data:
         game_state.family_background = background_data.get('label', '未知')
@@ -4260,7 +4690,7 @@ def start_game():
     game_state.attributes["宠爱"] = 10
     first_impression = apply_emperor_first_impression(game_state)
     
-    game_state.npcs = generate_all_npcs(10)
+    game_state.npcs = generate_all_npcs(10, surname=royal_surname(game_state))
     if "太后" not in game_state.npcs:
         game_state.npcs["太后"] = {"name": "太后", "rank": "太后", "age": random.randint(45, 65), "personality": "威严慈祥", "personality_desc": "历经三朝，深谙宫闱之道", "icon": "👑", "attributes": {"威望":90,"心计":80,"健康":60,"宠爱":0,"容貌":70}, "relationship": {"好感":25,"印象":"和善","互动次数":0}, "is_active": True, "alive": True}
         game_state.relationships["太后"] = {"好感": 25, "印象": "和善", "互动次数": 0}
@@ -4324,7 +4754,10 @@ def player_action():
     # 晋升不再是选择事件，故移除 promotion_event
     rivalry_event = None
     if random.random() < 0.15 and game_state.npcs:
-        npc_names = list(game_state.npcs.keys())
+        npc_names = [
+            n for n, npc in game_state.npcs.items()
+            if npc.get("alive", True) and npc.get("is_active", True) and n != "太后" and n != game_state.name
+        ]
         if npc_names:
             rival = random.choice(npc_names)
             if random.random() < 0.5:
@@ -4377,7 +4810,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -4532,7 +4965,7 @@ def load_game():
         game_state = GameState.from_save_data(save_data)
         ensure_game_state_client_id(game_state, client_id)
         if not hasattr(game_state, 'npcs') or not game_state.npcs:
-            game_state.npcs = generate_all_npcs(10)
+            game_state.npcs = generate_all_npcs(10, surname=royal_surname(game_state))
             for name, npc in game_state.npcs.items():
                 if name not in game_state.relationships:
                     game_state.relationships[name] = npc.get("relationship", {"好感":0,"印象":"陌生","互动次数":0})
@@ -5136,6 +5569,69 @@ def child_interact():
     })
 
 # ============================================================
+#  子嗣命名 / 改名
+# ============================================================
+
+@app.route('/api/child/rename', methods=['POST'])
+def child_rename():
+    """为自己的子嗣命名或改名。
+
+    mode = 'custom' 时使用 name 字段（1-6 个汉字，自动补国姓、检查重名）；
+    mode = 'random' 时按国姓随机取名，且不与宫中现有皇嗣重名。
+    仅限玩家亲生或收养在膝下的子嗣，不消耗行动点。
+    """
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_index = data.get('child_index', 0)
+    mode = (data.get('mode') or 'custom').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+
+    children = game_state.children
+    try:
+        child_index = int(child_index)
+    except (TypeError, ValueError):
+        return jsonify({"error": "子嗣序号有误", "success": False}), 400
+    if child_index < 0 or child_index >= len(children):
+        return jsonify({"error": "子嗣不存在", "success": False}), 404
+
+    child = children[child_index]
+    ensure_child_fields(child)
+    old_name = child.get("name", "")
+
+    if mode == 'random':
+        new_name = new_child_name(
+            child.get("gender", "皇子"),
+            game_state,
+            extra_used=None,
+        )
+    else:
+        raw = data.get('name')
+        new_name, err_msg = validate_child_name(raw, game_state, current_name=old_name)
+        if err_msg:
+            return jsonify({"error": err_msg, "success": False}), 400
+
+    if new_name == old_name:
+        return jsonify({"error": "新名与原名相同", "success": False}), 400
+
+    child["name"] = new_name
+    child["named_by_player"] = True
+    narration = f"你为{'皇子' if child.get('gender') == '皇子' else '公主'}定名「{new_name}」" if not old_name else f"你将{old_name}更名为「{new_name}」"
+    add_child_event(child, f"📜 {narration}")
+    game_state.add_memory(narration)
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "narration": narration,
+        "name": new_name,
+        "old_name": old_name,
+        "child": child,
+        "children": game_state.children,
+    })
+
+
+# ============================================================
 #  子嗣过继系统
 # ============================================================
 
@@ -5453,6 +5949,272 @@ def child_adopt():
         "silver": game_state.silver,
         "remaining_actions": game_state.remaining_actions,
         "max_actions": game_state.max_actions,
+    })
+
+# ============================================================
+#  立储/废储、徽号、宫殿分配 API
+# ============================================================
+
+@app.route('/api/heir', methods=['POST'])
+def set_heir():
+    """立储/废储。action: 'set' 立储 / 'clear' 废储。child_uid 指定子嗣。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    action = data.get('action', 'set')
+    child_uid = data.get('child_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+
+    if not isinstance(game_state.heir_status, dict):
+        game_state.heir_status = default_heir_status()
+
+    if action == 'clear':
+        old = get_heir_child(game_state)
+        game_state.heir_status = default_heir_status()
+        message = "📜 皇帝降旨废储，储君之位悬空。" if old else "储君之位本为空悬，无需废立。"
+        if old:
+            game_state.add_memory(f"📜 {old.get('name','皇子')}被废黜储君之位")
+            for c in game_state.children:
+                if c.get("name") == old.get("name"):
+                    c["mood"] = "低落"
+        return jsonify({"success": True, "narration": message, "heir_status": game_state.heir_status})
+
+    if not child_uid:
+        return jsonify({"error": "缺少子嗣标识 child_uid", "success": False}), 400
+
+    # 查找子嗣
+    child = None
+    child_mother = ""
+    for c in game_state.children:
+        if str(c.get("uid")) == str(child_uid) or c.get("name") == child_uid:
+            child = c
+            child_mother = game_state.name
+            break
+    if child is None:
+        for name, npc in game_state.npcs.items():
+            for c in npc.get("children", []):
+                if str(c.get("uid")) == str(child_uid) or c.get("name") == child_uid:
+                    child = c
+                    child_mother = name
+                    break
+            if child is not None:
+                break
+    if child is None:
+        return jsonify({"error": "子嗣不存在", "success": False}), 404
+    ensure_child_fields(child)
+
+    # 校验：仅限皇子
+    if child.get("gender") != "皇子":
+        return jsonify({"error": "只有皇子方可立为储君", "success": False}), 400
+    if not child.get("alive", True):
+        return jsonify({"error": "此子已不在人世，无法立储", "success": False}), 400
+    # 校验：玩家需位份与宠爱
+    rank_idx = RANK_LEVELS.get(game_state.rank.name, 0)
+    if rank_idx < RANK_LEVELS.get("嫔", 0):
+        return jsonify({"error": "位份不足，须嫔及以上方可奏请立储", "success": False}), 400
+    favor = game_state.attributes.get("宠爱", 0)
+    if favor < 40:
+        return jsonify({"error": "圣宠不足（需宠爱≥40），皇帝对储君人选另有考量", "success": False}), 400
+    # 校验：储君是否已存在
+    if (game_state.heir_status or {}).get("heir_id"):
+        return jsonify({"error": "已有储君在册，废立乃国之大事，不宜轻动", "success": False}), 400
+    # 皇帝在世才可立储
+    if not (game_state.emperor or {}).get("alive", True):
+        return jsonify({"error": "先帝已崩，无需再立储君", "success": False}), 400
+
+    # 立储成功
+    child_uid_str = str(child.get("uid") or child.get("name") or "")
+    game_state.heir_status = {
+        "heir_id": child_uid_str,
+        "heir_name": child.get("name", "皇子"),
+        "heir_mother": child_mother,
+        "regent": "",
+        "regent_title": "",
+        "established_at": f"建元{game_state.year}年{game_state.month}月",
+        "last_event": "册立太子",
+        "deposed": (game_state.heir_status or {}).get("deposed", []) if isinstance((game_state.heir_status or {}).get("deposed", []), list) else [],
+        "regent_active": False,
+    }
+    child["is_heir"] = True
+    child["mood"] = "意气风发"
+    # 威望与宠爱变化
+    game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 10)
+    if child_mother in game_state.relationships and child_mother != game_state.name:
+        game_state.relationships[child_mother]["好感"] = min(100, game_state.relationships[child_mother].get("好感", 0) + 20)
+        game_state.relationships[child_mother]["印象"] = "感激"
+    message = f"👑 皇帝御笔亲书，册立皇子{child.get('name','')}为太子！你母凭子贵，威望+10"
+    if child_mother == game_state.name:
+        message += "，阖宫侧目"
+    game_state.add_memory(message)
+    return jsonify({
+        "success": True,
+        "narration": message,
+        "heir_status": game_state.heir_status,
+        "child": child,
+        "attributes": game_state.attributes,
+    })
+
+@app.route('/api/honor', methods=['POST'])
+def grant_honor():
+    """赐徽号/撤徽号。action: 'grant' 赐 / 'revoke' 撤。child_uid + honor_title。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    action = data.get('action', 'grant')
+    child_uid = data.get('child_uid')
+    honor_title = (data.get('honor_title') or '').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+
+    child = None
+    for c in game_state.children:
+        if str(c.get("uid")) == str(child_uid) or c.get("name") == child_uid:
+            child = c
+            break
+    if child is None:
+        for name, npc in game_state.npcs.items():
+            for c in npc.get("children", []):
+                if str(c.get("uid")) == str(child_uid) or c.get("name") == child_uid:
+                    child = c
+                    break
+            if child is not None:
+                break
+    if child is None:
+        return jsonify({"error": "子嗣不存在", "success": False}), 404
+    ensure_child_fields(child)
+
+    if action == 'revoke':
+        old_title = child.get("honorary_title")
+        if not old_title:
+            return jsonify({"error": "此子并无徽号", "success": False}), 400
+        child["honorary_title"] = None
+        message = f"📜 皇帝收回了{child.get('name','皇子')}的徽号「{old_title}」。"
+        game_state.add_memory(message)
+        return jsonify({"success": True, "narration": message, "child": child})
+
+    # 赐徽号
+    if not honor_title or len(honor_title) > 3:
+        return jsonify({"error": "徽号须为1~3个字", "success": False}), 400
+    # 皇帝在世才可赐徽号
+    if not (game_state.emperor or {}).get("alive", True):
+        return jsonify({"error": "先帝已崩，新朝自有新徽号", "success": False}), 400
+    rank_idx = RANK_LEVELS.get(game_state.rank.name, 0)
+    if rank_idx < RANK_LEVELS.get("嫔", 0):
+        return jsonify({"error": "位份不足，须嫔及以上方可奏请徽号", "success": False}), 400
+    if game_state.silver < 20:
+        return jsonify({"error": "银两不足，请封徽号需20两", "success": False}), 400
+    game_state.silver -= 20
+    child["honorary_title"] = honor_title
+    child["mood"] = "得意"
+    # 若是储君，威望提升更多
+    wei_gain = 8 if child.get("is_heir") or (game_state.heir_status or {}).get("heir_id") == str(child.get("uid")) else 4
+    game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + wei_gain)
+    message = f"🏮 你奏请皇帝为皇子{child.get('name','')}赐徽号「{honor_title}」，皇帝欣然应允，耗费20两，威望+{wei_gain}"
+    game_state.add_memory(message)
+    return jsonify({
+        "success": True,
+        "narration": message,
+        "child": child,
+        "attributes": game_state.attributes,
+        "silver": game_state.silver,
+    })
+
+@app.route('/api/palace', methods=['POST'])
+def assign_palace():
+    """宫殿分配。action: 'assign' 分配 / 'vacate' 迁出。child_uid + palace_name。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    action = data.get('action', 'assign')
+    child_uid = data.get('child_uid')
+    palace_name = (data.get('palace_name') or '').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+
+    child = None
+    for c in game_state.children:
+        if str(c.get("uid")) == str(child_uid) or c.get("name") == child_uid:
+            child = c
+            break
+    if child is None:
+        for name, npc in game_state.npcs.items():
+            for c in npc.get("children", []):
+                if str(c.get("uid")) == str(child_uid) or c.get("name") == child_uid:
+                    child = c
+                    break
+            if child is not None:
+                break
+    if child is None:
+        return jsonify({"error": "子嗣不存在", "success": False}), 404
+    ensure_child_fields(child)
+
+    if action == 'vacate':
+        old_palace = child.get("palace")
+        if not old_palace:
+            return jsonify({"error": "此子并无宫殿居所", "success": False}), 400
+        child["palace"] = ""
+        message = f"🏛️ 你为皇子{child.get('name','')}奏请迁出{old_palace}。"
+        game_state.add_memory(message)
+        return jsonify({"success": True, "narration": message, "child": child})
+
+    # 分配宫殿
+    if not palace_name or palace_name not in PALACE_LIST:
+        return jsonify({"error": "宫殿不在可选之列", "success": False}), 400
+    if not (game_state.emperor or {}).get("alive", True):
+        return jsonify({"error": "先帝已崩，宫殿由新朝另行安排", "success": False}), 400
+    rank_idx = RANK_LEVELS.get(game_state.rank.name, 0)
+    if rank_idx < RANK_LEVELS.get("嫔", 0):
+        return jsonify({"error": "位份不足，须嫔及以上方可奏请宫殿", "success": False}), 400
+    if game_state.silver < 15:
+        return jsonify({"error": "银两不足，修缮宫殿需15两", "success": False}), 400
+    # 检查宫殿是否已被他人占用
+    occupied_by = None
+    for c in game_state.children:
+        if c.get("palace") == palace_name and str(c.get("uid")) != str(child.get("uid")):
+            occupied_by = c.get("name")
+            break
+    if occupied_by is None:
+        for name, npc in game_state.npcs.items():
+            for c in npc.get("children", []):
+                if c.get("palace") == palace_name and str(c.get("uid")) != str(child.get("uid")):
+                    occupied_by = c.get("name")
+                    break
+            if occupied_by is not None:
+                break
+    if occupied_by:
+        return jsonify({"error": f"{palace_name}已有主（{occupied_by}），不可再分配", "success": False}), 400
+
+    game_state.silver -= 15
+    old_palace = child.get("palace")
+    child["palace"] = palace_name
+    child["mood"] = "安稳"
+    wei_gain = 5 if child.get("is_heir") or (game_state.heir_status or {}).get("heir_id") == str(child.get("uid")) else 2
+    game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + wei_gain)
+    moved = f"自{old_palace}迁入" if old_palace else "入住"
+    message = f"🏛️ 你奏请为皇子{child.get('name','')}安排{palace_name}，皇帝允准，{moved}，耗费15两，威望+{wei_gain}"
+    game_state.add_memory(message)
+    return jsonify({
+        "success": True,
+        "narration": message,
+        "child": child,
+        "attributes": game_state.attributes,
+        "silver": game_state.silver,
     })
 
 @app.route('/api/abort', methods=['POST'])

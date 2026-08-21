@@ -67,13 +67,28 @@ NOBLETITLES = [
     "良", "懿", "敏", "慧", "安", "宁", "禧", "纯", "瑾", "瑜"
 ]
 
+
+def default_heir_status():
+    return {
+        "heir_id": None,
+        "heir_name": "",
+        "heir_mother": "",
+        "regent": "",
+        "regent_title": "",
+        "established_at": "",
+        "last_event": "",
+        "deposed": [],
+        "regent_active": False,
+    }
+
+
 class Servant:
     def __init__(self, name, type_, loyalty=50, skill=30, age=None):
         self.name = name
         self.type = type_
         self.loyalty = loyalty
         self.skill = skill
-        self.age = age if age is not None else random.randint(14, 28)
+        self.age = age if age is not None else random.randint(16, 28)
         self.is_active = True
         self.hire_day = 0
     def to_dict(self):
@@ -167,10 +182,16 @@ class GameState:
         self.queen_authority_uses = 0
         self.queen_assistance_count = 0
         self.six_palace_assistant = None
+        self.honorary_title = None
+        self.child_uid_seq = 1
+        self.heir_status = default_heir_status()
         self.emperor = {
             "name": "萧景琰",
             "personality": random.choice([p.value for p in EmperorPersonality]),
             "age": random.randint(25, 55),
+            "health": random.randint(76, 94),
+            "succession_pressure": 0,
+            "illness_stage": "安康",
             "stats": {"威严": random.randint(40, 90), "仁德": random.randint(30, 85), "勤政": random.randint(30, 85), "好色": random.randint(10, 80)},
             "favor_factors": {"明君": {"容貌": 0.2, "才情": 0.5, "心计": 0.3}, "昏君": {"容貌": 0.8, "才情": 0.1, "心计": 0.1}, "痴情": {"容貌": 0.3, "才情": 0.3, "心计": 0.4}, "多疑": {"容貌": 0.2, "才情": 0.2, "心计": 0.6}}
         }
@@ -186,6 +207,21 @@ class GameState:
         self.last_duel_period = None
         self._active_duel = None
         self.client_id = None
+        # 太后掌权线
+        self.dowager_mode = False          # 是否进入太后模式
+        self.regency_authority = 0         # 摄政权威 0-100
+        self.court_power = 50              # 朝堂控制力 0-100
+        self.dowager_periods = 0           # 太后掌权已历旬数
+        self.new_emperor = {               # 新帝（你的子嗣）
+            "name": "",
+            "age": 1,
+            "personality": "仁厚",
+            "health": 80,
+            "stats": {"威严": 40, "仁德": 60, "勤政": 50, "好色": 20},
+            "alive": True,
+        }
+        self.last_court_event = ""
+        self.dowager_ending_triggered = False
 
     def get_attr_max(self, attr_name):
         return self.ATTR_MAX.get(attr_name, 100)
@@ -236,6 +272,8 @@ class GameState:
         return self.emperor["favor_factors"].get(personality, self.emperor["favor_factors"]["明君"])
 
     def get_display_rank(self):
+        if getattr(self, "honorary_title", None):
+            return self.honorary_title
         if self.nobletitle:
             return f"{self.nobletitle}{self.rank.name}"
         return self.rank.name
@@ -301,6 +339,7 @@ class GameState:
             "player_id": self.player_id,
             "rank": self.rank.name,
             "nobletitle": self.nobletitle,
+            "honorary_title": getattr(self, "honorary_title", None),
             "display_rank": self.get_display_rank(),
             "name": self.name,
             "family_background": self.family_background,
@@ -347,6 +386,8 @@ class GameState:
             "queen_authority_uses": getattr(self, "queen_authority_uses", 0),
             "queen_assistance_count": getattr(self, "queen_assistance_count", 0),
             "six_palace_assistant": getattr(self, "six_palace_assistant", None),
+            "child_uid_seq": getattr(self, "child_uid_seq", 1),
+            "heir_status": getattr(self, "heir_status", default_heir_status()),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -354,6 +395,13 @@ class GameState:
             "scandal_strikes": getattr(self, "scandal_strikes", 0),
             "rank_periods": getattr(self, "rank_periods", 0),
             "client_id": getattr(self, "client_id", None),
+            "dowager_mode": getattr(self, "dowager_mode", False),
+            "regency_authority": getattr(self, "regency_authority", 0),
+            "court_power": getattr(self, "court_power", 50),
+            "dowager_periods": getattr(self, "dowager_periods", 0),
+            "new_emperor": getattr(self, "new_emperor", None),
+            "last_court_event": getattr(self, "last_court_event", ""),
+            "dowager_ending_triggered": getattr(self, "dowager_ending_triggered", False),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -391,6 +439,7 @@ class GameState:
             game_state.month = data.get("month", 1)
             game_state.year = data.get("year", 1)
             game_state.nobletitle = data.get("nobletitle")
+            game_state.honorary_title = data.get("honorary_title")
             game_state.romance_mode = data.get("romance_mode", False)
             game_state.custom_prompt = data.get("custom_prompt", "")
             saved_attrs = data.get("attributes", {})
@@ -434,6 +483,15 @@ class GameState:
             game_state.queen_authority_uses = data.get("queen_authority_uses", 0)
             game_state.queen_assistance_count = data.get("queen_assistance_count", 0)
             game_state.six_palace_assistant = data.get("six_palace_assistant")
+            try:
+                game_state.child_uid_seq = max(1, int(data.get("child_uid_seq", 1) or 1))
+            except (TypeError, ValueError):
+                game_state.child_uid_seq = 1
+            heir_status = data.get("heir_status") if isinstance(data.get("heir_status"), dict) else default_heir_status()
+            merged_heir_status = default_heir_status()
+            merged_heir_status.update(heir_status)
+            merged_heir_status["deposed"] = merged_heir_status.get("deposed", []) if isinstance(merged_heir_status.get("deposed", []), list) else []
+            game_state.heir_status = merged_heir_status
             game_state.created_at = data.get("created_at", datetime.now().isoformat())
             game_state.updated_at = datetime.now().isoformat()
             game_state.max_actions = data.get("max_actions", 7)
@@ -444,6 +502,16 @@ class GameState:
             game_state._promotion_done = data.get("_promotion_done", False)
             game_state.scandal_strikes = data.get("scandal_strikes", 0)
             game_state.rank_periods = data.get("rank_periods", 0)
+            game_state.dowager_mode = bool(data.get("dowager_mode", False))
+            game_state.regency_authority = int(data.get("regency_authority", 0) or 0)
+            game_state.court_power = int(data.get("court_power", 50) or 50)
+            game_state.dowager_periods = int(data.get("dowager_periods", 0) or 0)
+            game_state.new_emperor = data.get("new_emperor") if isinstance(data.get("new_emperor"), dict) else {
+                "name": "", "age": 1, "personality": "仁厚", "health": 80,
+                "stats": {"威严": 40, "仁德": 60, "勤政": 50, "好色": 20}, "alive": True
+            }
+            game_state.last_court_event = str(data.get("last_court_event", ""))
+            game_state.dowager_ending_triggered = bool(data.get("dowager_ending_triggered", False))
             ending = data.get("ending")
             game_state.ending = ending if isinstance(ending, dict) else None
             game_state.ending_unlocked = data.get("ending_unlocked")

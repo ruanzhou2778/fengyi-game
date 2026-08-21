@@ -517,21 +517,31 @@ def try_conflict_death(game_state, target, initiator, conflict_type, initiator_w
 
 
 def try_duel_death(game_state, target, margin):
-    """争锋大胜后对方压力过高，偶发身亡。"""
+    """争锋大胜后对方身亡：仅在压力已被长期压垮时才可能发生，概率很低。
+
+    单次争锋不应致死——需同时满足「压力≥75」与「碾压式大胜（margin≥60）」，
+    且最高概率封顶 10%，避免一次争锋就把妃嫔逼死。
+    """
     npc = game_state.npcs.get(target)
     if not npc or not npc.get("alive", True):
         return None
     if is_death_protected(target, npc, game_state.name):
         return None
-    if margin < 35:
-        return None
     press = npc.get("压力", 0)
-    chance = 0.05 + (margin - 35) / 200
-    if press >= 80:
-        chance += 0.08
+    if press < 75:
+        return None
+    if margin < 60:
+        return None
+    health = npc.get("attributes", {}).get("健康", 60)
+    if health > 25 and press < 95:
+        return None
+    chance = 0.02 + (margin - 60) / 600.0
+    if press >= 95:
+        chance += 0.04
+    chance = min(0.10, chance)
     if random.random() >= chance:
         return None
-    cause = "自尽" if press >= 90 else "暴毙"
+    cause = "自尽" if press >= 95 else "暴毙"
     return kill_consort(game_state, target, cause, killer=game_state.name)
 
 

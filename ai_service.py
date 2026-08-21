@@ -390,16 +390,21 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
                 max_attr = game_state.get_attr_max(attr)
                 game_state.attributes[attr] = max(0, min(max_attr, game_state.attributes[attr] - delta))
     
-    if initiator_win:
-        if target in game_state.rivalries:
-            game_state.rivalries[target] += 10
-        else:
-            game_state.rivalries[target] = 15
+    # 仇恨归属：仅玩家参与时才记入玩家仇敌表，NPC 之间的争斗记在各自 npc_rivals
+    player = game_state.name
+    if player in (initiator, target):
+        opponent = target if initiator == player else initiator
+        if opponent and opponent != player:
+            game_state.rivalries[opponent] = game_state.rivalries.get(opponent, 0) + (10 if opponent in game_state.rivalries else 15)
     else:
-        if initiator in game_state.rivalries:
-            game_state.rivalries[initiator] += 10
-        else:
-            game_state.rivalries[initiator] = 15
+        loser = target if initiator_win else initiator
+        winner = initiator if initiator_win else target
+        for owner, foe, amount in ((loser, winner, 15), (winner, loser, 8)):
+            npc = game_state.npcs.get(owner)
+            if not isinstance(npc, dict) or not foe or foe == owner:
+                continue
+            rivals = npc.setdefault("npc_rivals", {})
+            rivals[foe] = min(100, rivals.get(foe, 0) + amount)
     
     return {
         "type": conflict_type,

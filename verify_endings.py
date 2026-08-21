@@ -21,6 +21,7 @@ from endings import (
     check_player_childbirth_death, check_player_poison_death,
     NEGLECT_LIMIT, SCANDAL_DEATH_LIMIT, AGE_TWILIGHT,
     ENDING_CATEGORY_DEATH, ENDING_CATEGORY_FALL, ENDING_CATEGORY_TWILIGHT,
+    ENDING_CATEGORY_TRIUMPH,
 )
 
 PASS = 0
@@ -54,13 +55,16 @@ def section(title):
 # ------------------------------------------------------------
 section("1. 结局配置表")
 # ------------------------------------------------------------
-expected_keys = {"冷宫幽闭", "药石无医", "白绫赐死", "血溅椒房", "鹤顶红", "迟暮宫墙"}
-check("六种失败结局齐备", set(ENDINGS) == expected_keys, f"实际 {set(ENDINGS)}")
+FAIL_ENDING_KEYS = {"冷宫幽闭", "药石无医", "白绫赐死", "血溅椒房", "鹤顶红", "迟暮宫墙"}
+TRIUMPH_ENDING_KEYS = {"母仪天下"}
+expected_keys = FAIL_ENDING_KEYS | TRIUMPH_ENDING_KEYS
+check("结局配置齐备", set(ENDINGS) == expected_keys, f"实际 {set(ENDINGS)}")
 for key, meta in ENDINGS.items():
     check(f"{key} 字段完整",
           all(meta.get(f) for f in ("icon", "category", "headline", "default_reason", "narration", "epitaph")))
 categories = {m["category"] for m in ENDINGS.values()}
-check("覆盖三类结局", categories == {ENDING_CATEGORY_DEATH, ENDING_CATEGORY_FALL, ENDING_CATEGORY_TWILIGHT},
+check("覆盖失势/身殒/迟暮/登顶四类结局",
+      categories == {ENDING_CATEGORY_DEATH, ENDING_CATEGORY_FALL, ENDING_CATEGORY_TWILIGHT, ENDING_CATEGORY_TRIUMPH},
       f"实际 {categories}")
 
 # ------------------------------------------------------------
@@ -311,7 +315,7 @@ with srv.app.test_client() as c:
     check("/api/ending 可用", r.status_code == 200, r.status_code)
     check("未终局 game_over 为 false", e.get("game_over") is False, e.get("game_over"))
     check("未终局仍返回 summary", isinstance(e.get("summary"), dict))
-    check("返回结局图鉴 6 条", len(e.get("catalog") or []) == 6, len(e.get("catalog") or []))
+    check("返回结局图鉴齐备", len(e.get("catalog") or []) == len(expected_keys), len(e.get("catalog") or []))
 
     # 手动落定结局，验证行动类路由被锁
     srv.ensure_ending_fields(live)

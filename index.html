@@ -48,6 +48,7 @@
         .log-entry.birth { background: linear-gradient(90deg, #fff8e1, #ffecb3); border-left: 4px solid #f9a825; border-radius: 4px; padding: 4px 8px; margin: 2px 0; font-weight: 500; color: #3a2a1a; }
         .log-entry.prince { background: linear-gradient(90deg, #e8eaf6, #c5cae9); border-left: 4px solid #3f51b5; border-radius: 4px; padding: 4px 8px; margin: 2px 0; font-weight: 500; color: #1a1a3a; }
         .log-entry.intel { background: linear-gradient(90deg, #f5f0ea, #ede5dc); border-left: 4px solid #8a7a6a; border-radius: 4px; padding: 3px 8px; margin: 1px 0; font-size: 10px; color: var(--text-mid); }
+        .log-entry.ally { background: linear-gradient(90deg, #e6f0ec, #cfe3da); border-left: 4px solid #2a7a5a; border-radius: 4px; padding: 4px 8px; margin: 2px 0; font-weight: 500; color: #14372b; }
         .log-entry.promotion { background: linear-gradient(90deg, #fff8e1, #ffecb3); border-left: 4px solid #b8945a; border-radius: 4px; padding: 4px 8px; margin: 2px 0; font-weight: 600; color: #5a3a1a; }
         .log-entry.demotion { background: linear-gradient(90deg, #f0d5d0, #e8c4bc); border-left: 4px solid #c0392b; border-radius: 4px; padding: 4px 8px; margin: 2px 0; font-weight: 600; color: #5a1a1a; }
         .input-area { display: flex; gap: 4px; padding: 3px 0; flex-shrink: 0; }
@@ -784,6 +785,7 @@
                 </div>
                 <div class="stat-block"><div class="block-title">📊 属 性</div><div id="attrBars"></div></div>
                 <div class="stat-block"><div class="block-title">👶 子 嗣</div><div id="childrenGrid" class="child-grid"><span style="color:var(--text-light);font-size:8px;grid-column:1/3;text-align:center;padding:6px 0;">🌸 暂无子嗣，静待天恩</span></div></div>
+                <div class="stat-block"><div class="block-title">🏛️ 储君与宫殿</div><div id="heirPalacePanel" style="font-size:8px;color:var(--text-mid);line-height:1.4;"></div></div>
                 <div class="stat-block"><div class="block-title">📜 近 期 记 忆</div><div id="memoriesList" style="font-size:9px;color:var(--text-mid);line-height:1.3;"></div></div>
                 <div class="stat-block"><div class="block-title">📈 属 性 变 化 日 志</div><div id="changeLog" style="max-height:50px;overflow-y:auto;font-size:8px;color:var(--text-mid);line-height:1.3;"></div></div>
                 <div class="stat-block"><div class="block-title">👤 宫 女 太 监</div>
@@ -1582,7 +1584,7 @@ try{let saves=[];if(playerId){const r=await myFetch(appendClientQuery(`${API_BAS
 if(saves.length===0){body.innerHTML='<div style="text-align:center;color:var(--text-light);padding:8px;">📭 暂无存档</div>';return;}
 let html='';saves.forEach(s=>{const pid=s.player_id||playerId;html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;border-bottom:1px solid var(--border-light);gap:2px;"><div style="font-size:8px;"><strong>${s.player_name}</strong><span style="color:var(--gold);margin-left:2px;">${s.rank}</span><span style="color:var(--text-light);font-size:6px;margin-left:2px;">📅 ${s.day||1}天</span><div style="font-size:6px;color:var(--text-light);">${new Date(s.save_time).toLocaleString()}</div></div><div style="display:flex;gap:2px;flex-shrink:0;"><button onclick="loadGameFromModal('${pid}','${s.slot}')" style="padding:1px 5px;border:1px solid var(--border-light);border-radius:3px;background:var(--bg-card);cursor:pointer;font-size:7px;font-family:inherit;">读取</button><button onclick="deleteSaveFromModal('${pid}','${s.slot}')" style="padding:1px 5px;border:1px solid #d48c7a;border-radius:3px;background:transparent;color:#8a3a2a;cursor:pointer;font-size:7px;font-family:inherit;">删除</button></div></div>`;});body.innerHTML=html;}catch(e){body.innerHTML='<div style="text-align:center;color:var(--text-light);padding:8px;">❌ 加载失败</div>';}}
 
-async function loadGameFromModal(pid,slot){closeSaveListModal();showToast('📂 读取中...');try{const r=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){playerId=pid;localStorage.setItem('gongdou_playerId',pid);trackKnownPlayerId(pid);await syncConfigToBackend(playerId);const gs=d.game_state;eventLogs=[];flipTriggeredThisRound=false;gameOverEnding=null;closeEndingOverlay();if(gs.memories)gs.memories.forEach(m=>addLogEntry(m,'system'));updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',age:gs.age||16,appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,children:gs.children||[],has_children:gs.has_children||false,nobletitle:gs.nobletitle||null,rivalries:gs.rivalries||{},alliances:gs.alliances||{},npcs:gs.npcs||{},emperor:gs.emperor||{},dowager:gs.dowager||(gs.npcs||{})['太后'],remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,inventory:gs.inventory||[],ending:gs.ending||null,game_over:!!gs.ending,player_id:pid});document.getElementById('scenarioOverlayContainer').innerHTML='';showToast('✅ 读取成功');}else showToast('❌ '+(d.error||'读取失败'));}catch(e){showToast('❌ 读取失败');}}
+async function loadGameFromModal(pid,slot){closeSaveListModal();showToast('📂 读取中...');try{const r=await myFetch(`${API_BASE}/api/load`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){playerId=pid;localStorage.setItem('gongdou_playerId',pid);trackKnownPlayerId(pid);await syncConfigToBackend(playerId);const gs=d.game_state;eventLogs=[];flipTriggeredThisRound=false;gameOverEnding=null;closeEndingOverlay();if(gs.memories)gs.memories.forEach(m=>addLogEntry(m,'system'));updateUI({rank:gs.rank||'秀女',display_rank:gs.display_rank||gs.rank||'秀女',attributes:gs.attributes||{},attr_max:gs.attr_max||{宠爱:999,威望:3000},relationships:gs.relationships||{},day:gs.day||1,month:gs.month||1,year:gs.year||1,calendar_str:gs.calendar_str||'建元元年一月上旬',silver:gs.silver||100,family_background:gs.family_background||'未知',player_name:gs.name||'未命名',age:gs.age||16,appearance:gs.appearance||'',talent:gs.talent||'',personality:gs.personality||'',traits:gs.traits||[],custom_story:gs.custom_story||'',is_pregnant:gs.is_pregnant||false,pregnancy_month:gs.pregnancy_month||0,children:gs.children||[],has_children:gs.has_children||false,heir_status:gs.heir_status||{},palaces:gs.palaces||[],nobletitle:gs.nobletitle||null,rivalries:gs.rivalries||{},alliances:gs.alliances||{},npcs:gs.npcs||{},emperor:gs.emperor||{},dowager:gs.dowager||(gs.npcs||{})['太后'],remaining_actions:gs.remaining_actions!==undefined?gs.remaining_actions:7,max_actions:gs.max_actions||7,inventory:gs.inventory||[],ending:gs.ending||null,game_over:!!gs.ending,player_id:pid});document.getElementById('scenarioOverlayContainer').innerHTML='';showToast('✅ 读取成功');}else showToast('❌ '+(d.error||'读取失败'));}catch(e){showToast('❌ 读取失败');}}
 
 async function deleteSaveFromModal(pid,slot){if(!confirm(`删除存档「${slot}」？`))return;try{const r=await myFetch(`${API_BASE}/api/save/delete`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid,slot_name:slot})});const d=await r.json();if(d.success){showToast('🗑️ 已删除');renderSaveListModal();}}catch(e){showToast('删除失败');}}
 
@@ -1728,7 +1730,7 @@ else{if(currentCharData.traits.length>=5){showToast('最多选择5个特质');re
 }
 
 function showPreview(){
-const box=document.getElementById('previewBox');const name=document.getElementById('playerName').value.trim()||'未命名';const age=Math.max(12, Math.min(40, Number(document.getElementById('playerAgeInput')?.value||16) || 16));const bg=currentCharData.background;const bgDesc=document.getElementById('bgDescInput').value||'未知';const app=document.getElementById('appearanceInput').value||'未描述';const talent=document.getElementById('talentSelect').value||'未选择';const pers=document.getElementById('personalitySelect').value||'未选择';const traits=currentCharData.traits.length?currentCharData.traits.map(t=>`${t}（${TRAIT_HINTS[t]||'加成'}）`).join('、'):'无';const story=document.getElementById('customStoryInput').value||'未填写';const attrsText=CREATION_ATTR_KEYS.map(k=>`${k} ${currentCharData.attrs[k]||0}`).join(' | ')+'（宠爱、威望入宫后由皇帝初印象决定）';
+const box=document.getElementById('previewBox');const name=document.getElementById('playerName').value.trim()||'未命名';const age=Math.max(16, Math.min(40, Number(document.getElementById('playerAgeInput')?.value||16) || 16));const bg=currentCharData.background;const bgDesc=document.getElementById('bgDescInput').value||'未知';const app=document.getElementById('appearanceInput').value||'未描述';const talent=document.getElementById('talentSelect').value||'未选择';const pers=document.getElementById('personalitySelect').value||'未选择';const traits=currentCharData.traits.length?currentCharData.traits.map(t=>`${t}（${TRAIT_HINTS[t]||'加成'}）`).join('、'):'无';const story=document.getElementById('customStoryInput').value||'未填写';const attrsText=CREATION_ATTR_KEYS.map(k=>`${k} ${currentCharData.attrs[k]||0}`).join(' | ')+'（宠爱、威望入宫后由皇帝初印象决定）';
 box.innerHTML=`<div class="preview-title">📜 完整人设档案</div>
 <div><strong>姓名：</strong>${name}</div>
 <div><strong>年龄：</strong>${age}岁</div>
@@ -2052,6 +2054,178 @@ function updateConflictAssistHint() {
     hint.textContent = `已选 ${selectedNames.length} 人，预计助力 +${bonus}，意外翻盘概率降低约 ${flipReduce}%`;
 }
 
+function renderHeirPalaceUI(data) {
+    const panel = document.getElementById('heirPalacePanel');
+    if (!panel) return;
+    const heir = data.heir_status || {};
+    const palaces = data.palaces || [];
+    const children = data.children || [];
+    const emperorAlive = !data.emperor || data.emperor.alive !== false;
+    const rank = (data.display_rank || data.rank || '秀女');
+    const rankIdx = ['更衣','官女子','答应','常在','贵人','才人','美人','婕妤','嫔','妃','淑妃','德妃','贤妃','宸妃','贵妃','皇贵妃','皇后'].indexOf(rank);
+    const canCourt = emperorAlive && rankIdx >= 8;
+    const canSpend = (data.silver || 0) >= 20;
+    const canSpendPalace = (data.silver || 0) >= 15;
+    let html = '';
+
+    // 储君状态
+    if (heir.heir_id) {
+        html += `<div style="background:#f8f0e0;border:1px solid #d8c090;border-radius:6px;padding:4px 6px;margin-bottom:4px;">
+            <div style="font-weight:600;color:#8a5a20;">👑 储君：${heir.heir_name || '皇子'}</div>
+            <div style="font-size:7px;color:var(--text-light);">${heir.established_at || ''} · 生母${heir.heir_mother || '不详'}</div>
+            ${heir.regent_active ? `<div style="font-size:7px;color:#8a3a2a;">⚡ 摄政：${heir.regent || ''}</div>` : ''}
+        </div>`;
+    } else {
+        html += `<div style="background:var(--bg-card);border:1px dashed var(--border-light);border-radius:6px;padding:4px 6px;margin-bottom:4px;">
+            <span style="color:var(--text-light);">储君之位空悬</span>
+        </div>`;
+    }
+
+    // 立储/废储按钮
+    const princeCandidates = children.filter(c => c.alive !== false && c.gender === '皇子');
+    if (!heir.heir_id && princeCandidates.length > 0 && canCourt) {
+        html += `<div style="margin-bottom:4px;font-size:7px;color:var(--text-light);">⚜️ 立储人选：</div><div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;">`;
+        princeCandidates.forEach((c, idx) => {
+            html += `<button onclick="confirmSetHeir(${idx})" style="padding:2px 6px;border:1px solid #d8b070;border-radius:5px;background:#fdf6e8;color:#7a5a20;font-size:7px;cursor:pointer;font-family:inherit;">👑 ${c.name}（${Math.floor(c.age || 0)}岁）</button>`;
+        });
+        html += `</div>`;
+    }
+    if (heir.heir_id && canCourt) {
+        html += `<button onclick="confirmClearHeir()" style="padding:2px 6px;border:1px solid #d48c7a;border-radius:5px;background:transparent;color:#8a3a2a;font-size:7px;cursor:pointer;font-family:inherit;margin-bottom:4px;">📜 废储</button>`;
+    }
+
+    // 徽号管理
+    const titledChildren = children.filter(c => c.alive !== false && c.honorary_title);
+    if (titledChildren.length > 0) {
+        html += `<div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">🏮 徽号：${titledChildren.map(c => `${c.name}「${c.honorary_title}」`).join('、')}</div>`;
+    }
+    if (children.length > 0 && canCourt) {
+        const untitled = children.filter(c => c.alive !== false && !c.honorary_title);
+        if (untitled.length > 0) {
+            html += `<div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
+                <span style="font-size:7px;color:var(--text-light);">🏮 赐徽号：</span>
+                <select id="honorChildSelect" style="font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">${untitled.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}</select>
+                <input id="honorTitleInput" maxlength="3" placeholder="1~3字" style="width:44px;font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">
+                <button onclick="confirmGrantHonor()" ${canSpend ? '' : 'disabled'} style="padding:2px 6px;border:1px solid #d8b070;border-radius:5px;background:${canSpend ? '#fdf6e8' : '#eee'};color:${canSpend ? '#7a5a20' : '#aaa'};font-size:7px;cursor:${canSpend ? 'pointer' : 'not-allowed'};font-family:inherit;">赐（20两）</button>
+            </div>`;
+        }
+    }
+
+    // 宫殿分配
+    html += `<div style="border-top:1px dashed var(--border-light);padding-top:4px;margin-top:2px;"><div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">🏛️ 宫殿（${palaces.length}座）</div>`;
+    const aliveChildren = children.filter(c => c.alive !== false);
+    if (aliveChildren.length > 0 && canCourt) {
+        html += `<div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
+            <span style="font-size:7px;color:var(--text-light);">分配：</span>
+            <select id="palaceChildSelect" style="font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">${aliveChildren.map(c => `<option value="${c.name}">${c.name}${c.palace ? `（${c.palace}）` : ''}</option>`).join('')}</select>
+            <select id="palaceNameSelect" style="font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">${palaces.map(p => `<option value="${p}">${p}</option>`).join('')}</select>
+            <button onclick="confirmAssignPalace()" ${canSpendPalace ? '' : 'disabled'} style="padding:2px 6px;border:1px solid #d8b070;border-radius:5px;background:${canSpendPalace ? '#fdf6e8' : '#eee'};color:${canSpendPalace ? '#7a5a20' : '#aaa'};font-size:7px;cursor:${canSpendPalace ? 'pointer' : 'not-allowed'};font-family:inherit;">分配（15两）</button>
+        </div>`;
+    }
+    const housed = aliveChildren.filter(c => c.palace);
+    if (housed.length > 0) {
+        html += `<div style="font-size:7px;color:var(--text-light);margin-top:2px;">已居：${housed.map(c => `${c.name}·${c.palace}`).join('、')}</div>`;
+    }
+    html += `</div>`;
+
+    // 位份不足提示
+    if (!canCourt && emperorAlive) {
+        html += `<div style="font-size:7px;color:#b8945a;margin-top:3px;">🔒 位份须嫔及以上方可奏请立储、徽号、宫殿</div>`;
+    }
+    if (!emperorAlive) {
+        html += `<div style="font-size:7px;color:#8a3a2a;margin-top:3px;">🕯️ 先帝已崩，新朝自有安排</div>`;
+    }
+
+    panel.innerHTML = html;
+}
+
+async function confirmSetHeir(childIdx) {
+    const d = window._lastGameData || {};
+    const children = d.children || [];
+    const child = children[childIdx];
+    if (!child) return;
+    const childId = child.uid !== undefined && child.uid !== null ? child.uid : child.name;
+    if (!confirm(`立皇子${child.name}为储君？此乃国本之重，立后不可轻废。`)) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/heir`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId, action: 'set', child_uid: childId })
+        });
+        const res = await r.json();
+        if (!res.success) { showToast(`❌ ${res.error || '立储失败'}`, 'error'); return; }
+        showToast('👑 ' + res.narration);
+        addLogEntry(res.narration, 'promotion');
+        if (res.attributes) d.attributes = res.attributes;
+        if (res.heir_status) d.heir_status = res.heir_status;
+        updateUI(d);
+    } catch (e) { showToast('❌ 立储失败', 'error'); console.error(e); }
+}
+
+async function confirmClearHeir() {
+    if (!confirm('废黜储君？将动摇国本，请三思。')) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/heir`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId, action: 'clear' })
+        });
+        const res = await r.json();
+        if (!res.success) { showToast(`❌ ${res.error || '废储失败'}`, 'error'); return; }
+        showToast('📜 ' + res.narration);
+        addLogEntry(res.narration, 'demotion');
+        if (res.heir_status) window._lastGameData.heir_status = res.heir_status;
+        updateUI(window._lastGameData);
+    } catch (e) { showToast('❌ 废储失败', 'error'); console.error(e); }
+}
+
+async function confirmGrantHonor() {
+    const d = window._lastGameData || {};
+    const select = document.getElementById('honorChildSelect');
+    const input = document.getElementById('honorTitleInput');
+    if (!select || !input) return;
+    const childName = select.value;
+    const title = input.value.trim();
+    if (!title) { showToast('❌ 请输入徽号（1~3字）', 'error'); return; }
+    try {
+        const r = await myFetch(`${API_BASE}/api/honor`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId, action: 'grant', child_uid: childName, honor_title: title })
+        });
+        const res = await r.json();
+        if (!res.success) { showToast(`❌ ${res.error || '赐徽号失败'}`, 'error'); return; }
+        showToast('🏮 ' + res.narration);
+        addLogEntry(res.narration, 'promotion');
+        if (res.attributes) d.attributes = res.attributes;
+        if (res.silver !== undefined) d.silver = res.silver;
+        updateUI(d);
+    } catch (e) { showToast('❌ 赐徽号失败', 'error'); console.error(e); }
+}
+
+async function confirmAssignPalace() {
+    const d = window._lastGameData || {};
+    const childSelect = document.getElementById('palaceChildSelect');
+    const palaceSelect = document.getElementById('palaceNameSelect');
+    if (!childSelect || !palaceSelect) return;
+    const childName = childSelect.value;
+    const palaceName = palaceSelect.value;
+    try {
+        const r = await myFetch(`${API_BASE}/api/palace`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId, action: 'assign', child_uid: childName, palace_name: palaceName })
+        });
+        const res = await r.json();
+        if (!res.success) { showToast(`❌ ${res.error || '分配失败'}`, 'error'); return; }
+        showToast('🏛️ ' + res.narration);
+        addLogEntry(res.narration, 'promotion');
+        if (res.attributes) d.attributes = res.attributes;
+        if (res.silver !== undefined) d.silver = res.silver;
+        updateUI(d);
+    } catch (e) { showToast('❌ 宫殿分配失败', 'error'); console.error(e); }
+}
+
 function updateChildrenUI(data) {
     const grid = document.getElementById('childrenGrid');
     if (!grid) return;
@@ -2170,7 +2344,7 @@ if(data.death_message){
 }
 
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
-updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);loadQueenAuthority();
+updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);loadQueenAuthority();
 const disabled=rem<=0;
 document.querySelectorAll('.action-btn, .interact-btn, #sendBtn, [onclick*="hireServant"], [onclick*="trainServant"], [onclick*="dowagerInteract"], [onclick*="emperorInteract"], [onclick*="interactAction"]').forEach(btn=>{btn.disabled=disabled;btn.style.opacity=disabled?'0.4':'1';btn.style.cursor=disabled?'not-allowed':'pointer';});
 userInput.disabled=disabled;userInput.placeholder=disabled?'行动点已用完，请转旬':'输入你想做的事...';
@@ -2662,6 +2836,7 @@ function renderChildDetailHtml(child, motherName) {
                 ${age >= 4 ? `<button onclick="childInteract('${safeMother}', ${child._index}, '教导')" class="interact-btn">✏️ 教导</button>` : ''}
                 ${age >= 3 ? `<button onclick="childInteract('${safeMother}', ${child._index}, '请安')" class="interact-btn">🙇 请安</button>` : ''}
                 ${child.given_name ? '' : `<button onclick="openGivenNamePicker('${safeMother}', ${child._index})" class="interact-btn">📜 赐字</button>`}
+                ${isPlayerChild ? `<button onclick="openChildRenamePicker(${child._index})" class="interact-btn">✒️ 命名</button>` : ''}
                 <button onclick="childInteract('${safeMother}', ${child._index}, '祈福')" class="interact-btn">🙏 祈福</button>
                 <button onclick="childInteract('${safeMother}', ${child._index}, '延师')" class="interact-btn">📚 延师</button>
                 ${isPrince && age >= 6 ? `<button onclick="childInteract('${safeMother}', ${child._index}, '习武')" class="interact-btn">⚔️ 习武</button>` : ''}
@@ -2746,6 +2921,69 @@ async function openGivenNamePicker(motherName, childIndex) {
 function confirmGivenName(motherName, childIndex, char) {
     closeModal();
     childInteract(motherName, childIndex, '赐字', char);
+}
+
+function openChildRenamePicker(childIndex) {
+    const d = window._lastGameData || {};
+    const child = (d.children || [])[childIndex];
+    if (!child) { showToast('❌ 子嗣信息不存在', 'error'); return; }
+    const current = child.name || '未命名';
+    const html = `
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:9px;color:var(--text-mid);">
+            <div>当前名讳：<strong style="color:var(--text-dark);">${current}</strong></div>
+            <div style="font-size:8px;color:var(--text-light);">可只填名，系统会自动冠以国姓；1-6 个汉字，不可与宫中现有皇嗣同名。</div>
+            <input type="text" id="childRenameInput" maxlength="8" placeholder="请输入名字" style="font-size:10px;padding:3px 5px;font-family:inherit;">
+            <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                <button type="button" class="interact-btn" onclick="submitChildRename(${childIndex},'custom')">✒️ 确认命名</button>
+                <button type="button" class="interact-btn" onclick="submitChildRename(${childIndex},'random')">🎲 随机赐名</button>
+            </div>
+        </div>`;
+    openModal('✒️ 为皇嗣命名', html, '取消', null, true);
+    setTimeout(() => {
+        const el = document.getElementById('childRenameInput');
+        if (el) {
+            el.focus();
+            el.addEventListener('keydown', ev => {
+                if (ev.key === 'Enter') { ev.preventDefault(); submitChildRename(childIndex, 'custom'); }
+            });
+        }
+    }, 60);
+}
+
+async function submitChildRename(childIndex, mode) {
+    if (!playerId) return;
+    const payload = { player_id: playerId, child_index: childIndex, mode: mode };
+    if (mode !== 'random') {
+        const el = document.getElementById('childRenameInput');
+        const val = (el ? el.value : '').trim();
+        if (!val) { showToast('⚠️ 请先输入名字', 'error'); return; }
+        payload.name = val;
+    }
+    try {
+        const r = await myFetch(`${API_BASE}/api/child/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const res = await r.json();
+        if (!res.success) {
+            showToast(`❌ ${res.error || '命名失败'}`, 'error');
+            return;
+        }
+        closeModal();
+        showToast(`✅ ${res.narration}`);
+        addLogEntry(`📜 ${res.narration}`, 'prince');
+        if (res.children) window._lastGameData.children = res.children;
+        updateUI(window._lastGameData);
+        if (res.child) {
+            res.child._index = childIndex;
+            const mother = (window._lastGameData || {}).player_name || (window._lastGameData || {}).name || '你';
+            openModal(`👶 ${res.child.name}`, renderChildDetailHtml(res.child, mother), '关闭', null, true);
+        }
+    } catch (e) {
+        showToast('❌ 命名失败：' + e.message, 'error');
+        console.error(e);
+    }
 }
 
 function openChildDetail(motherName, childIndex) {
@@ -2945,7 +3183,8 @@ async function interactAction(name, action) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ player_id: playerId, npc_name: name, action: 'clear_rival' })
             }).catch(()=>{});
-            showToast('✅ 已结盟（仇敌关系已清除）');
+            addLogEntry(narration, 'ally');
+            showToast(d.alliance_level ? `🤝 结为${d.alliance_level}盟友` : '✅ 已结盟（仇敌关系已清除）');
         } else if (action === 'rival') {
             await myFetch(`${API_BASE}/api/interact`, {
                 method: 'POST',
@@ -2976,11 +3215,17 @@ function openRivalList(){
     const html=Object.entries(rivals).map(([n,v])=>`<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border-light);"><span>${n}</span><span style="color:#8a3a2a;">仇恨值 ${v}</span></div>`).join('');
     openModal('⚔️ 仇敌列表','<div style="font-size:9px;color:var(--text-mid);">'+html+'</div>','关闭',null,true);
 }
+function allianceTierLabel(v){
+    if(v>=55)return '金石之交';
+    if(v>=42)return '深交';
+    if(v>=32)return '互助';
+    return '泛交';
+}
 function openAllianceList(){
     const d=window._lastGameData;
     const allies={}; if(d&&d.alliances){for(let k in d.alliances){if(d.alliances[k]>0) allies[k]=d.alliances[k];}}
     if(Object.keys(allies).length===0){showToast('暂无盟友');return;}
-    const html=Object.entries(allies).map(([n,v])=>`<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border-light);"><span>${n}</span><span style="color:#2a5a4a;">盟友值 ${v}</span></div>`).join('');
+    const html=Object.entries(allies).sort((a,b)=>b[1]-a[1]).map(([n,v])=>`<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid var(--border-light);"><span>${n}</span><span style="color:#2a5a4a;">${allianceTierLabel(v)} · 盟友值 ${v}</span></div>`).join('');
     openModal('🤝 盟友列表','<div style="font-size:9px;color:var(--text-mid);">'+html+'</div>','关闭',null,true);
 }
 
@@ -3103,7 +3348,7 @@ renderLogs();
 function renderLogs(){
 if(eventLogs.length===0){logContent.innerHTML='<div style="color:var(--text-light);text-align:center;padding:14px;">暂无事件，开始你的宫斗之旅吧。</div>';return;}
 let html='';
-for(let i=eventLogs.length-1;i>=0;i--){const e=eventLogs[i];let cls='log-entry';if(e.type==='flip')cls+=' flip';else if(e.type==='other-promotion')cls+=' other-promotion';else if(e.type==='new-concubine')cls+=' new-concubine';else if(e.type==='pregnancy')cls+=' pregnancy';else if(e.type==='birth')cls+=' birth';else if(e.type==='prince')cls+=' prince';else if(e.type==='intel')cls+=' intel';else if(e.type==='promotion')cls+=' promotion';else if(e.type==='demotion')cls+=' demotion';html+=`<div class="${cls}"><span class="calendar-tag">${e.calendar}</span>${e.text}</div>`;}
+for(let i=eventLogs.length-1;i>=0;i--){const e=eventLogs[i];let cls='log-entry';if(e.type==='flip')cls+=' flip';else if(e.type==='other-promotion')cls+=' other-promotion';else if(e.type==='new-concubine')cls+=' new-concubine';else if(e.type==='pregnancy')cls+=' pregnancy';else if(e.type==='birth')cls+=' birth';else if(e.type==='prince')cls+=' prince';else if(e.type==='intel')cls+=' intel';else if(e.type==='ally')cls+=' ally';else if(e.type==='promotion')cls+=' promotion';else if(e.type==='demotion')cls+=' demotion';html+=`<div class="${cls}"><span class="calendar-tag">${e.calendar}</span>${e.text}</div>`;}
 logContent.innerHTML=html;logArea.scrollTop=0;
 }
 
@@ -3310,7 +3555,7 @@ container.innerHTML=`<div class="scenario-overlay" id="scenarioOverlay"><div cla
 <span style="font-size:6px;margin-left:2px;">（每项最小值~最大值）</span></div>
 <div id="attrAllocContainer">${CREATION_ATTR_KEYS.map(key=>`<div class="attr-alloc-row"><span class="attr-name">${key}</span><button class="attr-btn" id="attrDec_${key}" onclick="adjustAttr('${key}',-1)">−</button><div class="bar-track"><div class="bar-fill" id="attrFill_${key}" style="width:50%;"></div></div><span class="attr-value" id="attrVal_${key}">11</span><button class="attr-btn" id="attrInc_${key}" onclick="adjustAttr('${key}',1)">+</button></div>`).join('')}</div>
 <div class="total-points"><span id="totalPointsDisplay">已分配 100/100 点</span><span id="totalPointsRemain" style="margin-left:8px;color:#2a5a4a;">剩余 0 点</span></div>
-<div class="card-row" style="margin-top:4px;"><span class="label">年龄</span><input type="number" id="playerAgeInput" min="12" max="40" value="16" style="font-size:8px;flex:1;"><span style="font-size:7px;color:var(--text-light);">建议 12-40 岁</span></div>
+<div class="card-row" style="margin-top:4px;"><span class="label">年龄</span><input type="number" id="playerAgeInput" min="16" max="40" value="16" style="font-size:8px;flex:1;"><span style="font-size:7px;color:var(--text-light);">须满 16 岁方可入宫（16-40）</span></div>
 <div style="display:flex;gap:3px;justify-content:center;padding-top:3px;border-top:1px solid var(--border-light);margin-top:3px;flex-wrap:wrap;">
 <button class="btn" onclick="randomizeAttrs()" style="font-size:7px;padding:1px 8px;">🎲 随机分配</button>
 <button class="preview-btn" onclick="showPreview()">👁 预览人设</button>
@@ -3388,7 +3633,9 @@ updateStoryCharCount();
 async function startGame(){
 saveConfigFromInputs('scenario', true);
 const name=document.getElementById('playerName').value.trim()||'未命名';
-const playerAge=Math.max(12, Math.min(40, Number(document.getElementById('playerAgeInput')?.value||16) || 16));
+const rawAge=Number(document.getElementById('playerAgeInput')?.value||16);
+if(!Number.isFinite(rawAge)||rawAge<16){showToast('⚠️ 入宫年龄须满 16 岁');return;}
+const playerAge=Math.max(16, Math.min(40, Math.floor(rawAge)));
 let bg=currentCharData.background;
 if(!bg){showToast('⚠️ 请先掷骰生成官家出身');return;}
 const nameSurname=extractSurname(name);

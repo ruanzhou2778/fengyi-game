@@ -110,11 +110,30 @@ def generate_emperor_name_local():
     return surname + random_given(EMPEROR_GIVEN, 0.65)
 
 
-def generate_child_name(gender, used=None):
-    used = used or set()
+def generate_child_name(gender, used=None, surname=None):
+    """生成皇嗣名。
+
+    surname 为国姓（皇帝姓氏），非空时返回「国姓+名」。
+    used 可传入已占用的名字集合（含姓或不含姓皆可），保证不重名；
+    预设名库耗尽时用单字池随机组合出新名。
+    """
+    used = {str(n) for n in (used or set()) if n}
+    prefix = (surname or "").strip()
     pool = PRINCE_NAMES if gender == "皇子" else PRINCESS_NAMES
-    available = [n for n in pool if n not in used]
-    return random.choice(available or pool)
+
+    def taken(given):
+        return given in used or (prefix + given) in used
+
+    available = [n for n in pool if not taken(n)]
+    if available:
+        return prefix + random.choice(available)
+
+    char_pool = EMPEROR_GIVEN if gender == "皇子" else FEMALE_GIVEN
+    for _ in range(200):
+        given = random_given(char_pool, 1.0)
+        if not taken(given):
+            return prefix + given
+    return prefix + random_given(char_pool, 1.0)
 
 
 def generate_servant_name(type_):
