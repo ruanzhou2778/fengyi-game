@@ -1966,10 +1966,6 @@ function updateHaremPage(data){
     }
     const names = Object.keys(npcs);
     const grid = document.getElementById('npcGrid');
-    // 重华宫入口
-    if(grid){
-        grid.insertAdjacentHTML('afterbegin', `<div style="grid-column:1/-1;margin-bottom:6px;"><button onclick="openChonghuaPanel()" class="interact-btn" style="background:#f0e8d8;">🏛️ 重华宫</button></div>`);
-    }
     let queen = null, others = [];
     names.forEach(n => {
         if (npcs[n]?.rank === '皇后') queen = n;
@@ -1981,10 +1977,19 @@ function updateHaremPage(data){
     const deadList = sorted.filter(n => npcs[n]?.alive === false);
     const livingList = sorted.filter(n => npcs[n]?.alive !== false);
     if (livingList.length === 0 && deadList.length === 0) {
-        grid.innerHTML = '<div style="color:var(--text-light);text-align:center;padding:8px;font-size:9px;grid-column:1/3;">暂无妃嫔</div>';
+        grid.innerHTML = '';
+        // 重华宫入口
+        if(grid){
+            grid.insertAdjacentHTML('afterbegin', `<div style="grid-column:1/-1;margin-bottom:6px;"><button onclick="openChonghuaPanel()" class="interact-btn" style="background:#f0e8d8;">🏛️ 重华宫</button></div>`);
+        }
+        grid.innerHTML += '<div style="color:var(--text-light);text-align:center;padding:8px;font-size:9px;grid-column:1/3;">暂无妃嫔</div>';
         return;
     }
     grid.innerHTML = '';
+    // 重华宫入口
+    if(grid){
+        grid.insertAdjacentHTML('afterbegin', `<div style="grid-column:1/-1;margin-bottom:6px;"><button onclick="openChonghuaPanel()" class="interact-btn" style="background:#f0e8d8;">🏛️ 重华宫</button></div>`);
+    }
     livingList.forEach(name => {
         const npc = npcs[name];
         const displayName = npc.is_player ? playerName : name;
