@@ -6255,6 +6255,129 @@ def abort_pregnancy():
         "remaining_actions": game_state.remaining_actions,
         "max_actions": game_state.max_actions
     })
+@app.route('/api/chonghua', methods=['GET'])
+def get_chonghua():
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ch = game_state.chonghua or {"founded": False, "level": 1, "budget": 0, "children": [], "log": []}
+    children = []
+    for c in getattr(game_state, 'children', []):
+        if not c.get('alive', True):
+            continue
+        uid = c.get('uid') or c.get('name')
+        children.append({
+            'uid': uid,
+            'name': c.get('name'),
+            'age': c.get('age', 0),
+            'gender': c.get('gender', ''),
+            'in_chonghua': bool(c.get('in_chonghua', False)),
+            'palace': c.get('palace', '')
+        })
+    ch_copy = dict(ch)
+    ch_copy['children'] = children
+    info = {
+        'manage_ranks': ['皇后', '皇贵妃', '贵妃'],
+        'min_prestige': 80,
+        'found_cost': 200
+    }
+    return jsonify({'chonghua': ch_copy, 'info': info})
+
+@app.route('/api/chonghua/action', methods=['POST'])
+def chonghua_action():
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    action = data.get('action')
+    uid = data.get('uid')
+    amount = data.get('amount', 0)
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    ch = game_state.chonghua or {"founded": False, "level": 1, "budget": 0, "children": [], "log": []}
+    game_state.chonghua = ch
+    def add_log(msg):
+        ch.setdefault('log', []).append({'msg': msg, 'time': getattr(game_state, 'day', 0)})
+        if len(ch['log']) > 50:
+            ch['log'] = ch['log'][-50:]
+    if action == 'found':
+        if ch.get('founded'):
+            return jsonify({'success': False, 'error': '重华宫已开设'}), 400
+        if game_state.attributes.get('威望', 0) < 80:
+            return jsonify({'success': False, 'error': '威望不足'}), 400
+        if game_state.silver < 200:
+            return jsonify({'success': False, 'error': '银两不足'}), 400
+        game_state.silver -= 200
+        ch['founded'] = True
+        ch['level'] = 1
+        ch['budget'] = 0
+        add_log('重华宫开设成功')
+        return jsonify({'success': True, 'message': '重华宫开设成功，耗费200两', 'silver': game_state.silver, 'chonghua': ch})
+    if action == 'upgrade':
+        if not ch.get('founded'):
+            return jsonify({'success': False, 'error': '未开设'}), 400
+        cost = 300 * ch.get('level', 1)
+        if game_state.silver < cost:
+            return jsonify({'success': False, 'error': '银两不足'}), 400
+        game_state.silver -= cost
+        ch['level'] = ch.get('level', 1) + 1
+        add_log(f'重华宫扩建至等级{ch["level"]}')
+        return jsonify({'success': True, 'message': f'扩建成功，等级提升至{ch["level"]}，耗费{cost}两', 'silver': game_state.silver, 'chonghua': ch})
+    if action == 'patronize':
+        if not ch.get('founded'):
+            return jsonify({'success': False, 'error': '未开设'}), 400
+        amt = int(amount or 0)
+        if amt <= 0:
+            return jsonify({'success': False, 'error': '金额无效'}), 400
+        if game_state.silver < amt:
+            return jsonify({'success': False, 'error': '银两不足'}), 400
+        game_state.silver -= amt
+        ch['budget'] = ch.get('budget', 0) + amt
+        add_log(f'拨用度{amt}两')
+        return jsonify({'success': True, 'message': f'拨用度{amt}两成功', 'silver': game_state.silver, 'chonghua': ch})
+    # child operations
+    if action in ('admit', 'tutor', 'adopt', 'release'):
+        if not ch.get('founded'):
+            return jsonify({'success': False, 'error': '未开设'}), 400
+        child = None
+        for c in getattr(game_state, 'children', []):
+            if c.get('name') == uid or str(c.get('uid')) == str(uid):
+                child = c
+                break
+        if not child:
+            return jsonify({'success': False, 'error': '子嗣不存在'}), 404
+        if action == 'admit':
+            if child.get('in_chonghua'):
+                return jsonify({'success': False, 'error': '已在馆'}), 400
+            capacity = ch.get('level', 1) * 2
+            inside = sum(1 for c in getattr(game_state, 'children', []) if c.get('in_chonghua'))
+            if inside >= capacity:
+                return jsonify({'success': False, 'error': '容量已满'}), 400
+            child['in_chonghua'] = True
+            child['chonghua_since'] = f'{getattr(game_state, "year", 0)}年{getattr(game_state, "month", 0)}月'
+            add_log(f'{child.get("name")}入馆')
+            return jsonify({'success': True, 'message': f'{child.get("name")}已收容至重华宫', 'chonghua': ch})
+        if action == 'release':
+            if not child.get('in_chonghua'):
+                return jsonify({'success': False, 'error': '不在馆'}), 400
+            child['in_chonghua'] = False
+            child.pop('chonghua_since', None)
+            add_log(f'{child.get("name")}迁出')
+            return jsonify({'success': True, 'message': f'{child.get("name")}已迁出', 'chonghua': ch})
+        if action == 'tutor':
+            if not child.get('in_chonghua'):
+                return jsonify({'success': False, 'error': '不在馆'}), 400
+            add_log(f'{child.get("name")}授业')
+            return jsonify({'success': True, 'message': f'为{child.get("name")}授业', 'chonghua': ch})
+        if action == 'adopt':
+            child['adoptive_mother'] = game_state.name
+            add_log(f'{child.get("name")}过继')
+            return jsonify({'success': True, 'message': f'{child.get("name")}过继归名', 'chonghua': ch})
+    return jsonify({'success': False, 'error': '未知操作'}), 400
+
 
 @app.route('/')
 def serve_index():
