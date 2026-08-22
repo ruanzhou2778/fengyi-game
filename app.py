@@ -56,7 +56,7 @@ CORS(app, resources={r"/api/*": {
     "origins": ["http://localhost:8000", "http://127.0.0.1:8000", "http://localhost:5000", "http://127.0.0.1:5000", "null", "*"],
     "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization", "X-API-Base", "X-API-Key", "X-API-Model"],
-    "supports_credentials": True
+    "supports_credentials": False
 }})
 
 @app.after_request
@@ -3350,9 +3350,11 @@ def get_user_api_config(request, player_id=None):
         config['api_base'] = os.getenv('OPENAI_BASE_URL', 'https://cn.jixiangai.xyz/v1')
     return config
 
-@app.route('/api/models', methods=['GET'])
+@app.route('/api/models', methods=['GET', 'OPTIONS'])
 def proxy_models():
     """Proxy an OpenAI-compatible model list to avoid browser CORS restrictions."""
+    if request.method == 'OPTIONS':
+        return '', 200
     api_base = (request.headers.get('X-API-Base') or '').strip().rstrip('/')
     api_key = (request.headers.get('Authorization') or '').strip()
     parsed = urlparse(api_base)
