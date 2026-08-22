@@ -1966,6 +1966,10 @@ function updateHaremPage(data){
     }
     const names = Object.keys(npcs);
     const grid = document.getElementById('npcGrid');
+    // 重华宫入口
+    if(grid){
+        grid.insertAdjacentHTML('afterbegin', `<div style="grid-column:1/-1;margin-bottom:6px;"><button onclick="openChonghuaPanel()" class="interact-btn" style="background:#f0e8d8;">🏛️ 重华宫</button></div>`);
+    }
     let queen = null, others = [];
     names.forEach(n => {
         if (npcs[n]?.rank === '皇后') queen = n;
