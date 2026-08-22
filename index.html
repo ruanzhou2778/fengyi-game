@@ -889,12 +889,21 @@
                 <div class="stat-block"><div class="block-title">🏛️ 储君与宫殿</div><div id="heirPalacePanel" style="font-size:8px;color:var(--text-mid);line-height:1.4;"></div></div>
                 <div class="stat-block"><div class="block-title">📜 近 期 记 忆</div><div id="memoriesList" style="font-size:9px;color:var(--text-mid);line-height:1.3;"></div></div>
                 <div class="stat-block"><div class="block-title">📈 属 性 变 化 日 志</div><div id="changeLog" style="max-height:50px;overflow-y:auto;font-size:8px;color:var(--text-mid);line-height:1.3;"></div></div>
-                <div class="stat-block"><div class="block-title">👤 宫 女 太 监</div>
+                                <div class="stat-block"><div class="block-title">👤 宫 女 太 监</div>
                     <div id="servantList" style="display:flex;flex-wrap:wrap;gap:1px;margin-bottom:1px;"></div>
                     <div id="servantCount" style="font-size:8px;color:var(--text-light);margin-bottom:1px;">0人</div>
                     <div style="display:flex;gap:2px;flex-wrap:wrap;">
                         <button onclick="hireServant('宫女')" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;color:var(--text-dark);font-size:8px;cursor:pointer;font-family:inherit;">招募宫女 (30两)</button>
                         <button onclick="hireServant('太监')" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;color:var(--text-dark);font-size:8px;cursor:pointer;font-family:inherit;">招募太监 (20两)</button>
+                    </div>
+                </div>
+                <div class="stat-block">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="block-title">🏛️ 重 华 宫</span>
+                        <button class="config-toggle-btn" id="chonghuaToggleBtn" style="margin-top:0;">展开</button>
+                    </div>
+                    <div id="chonghuaPanel" style="display:none;margin-top:2px;padding-top:2px;border-top:1px solid var(--border-light);font-size:8px;color:var(--text-mid);">
+                        <span style="color:var(--text-light);font-size:7px;">加载中…</span>
                     </div>
                 </div>
                 <div class="stat-block" id="factionBlock"><div class="block-title">🤝 阵 营 关 系</div><div id="factionContent"><span style="color:var(--text-light);font-size:8px;">加载中...</span></div></div>
@@ -1978,18 +1987,10 @@ function updateHaremPage(data){
     const livingList = sorted.filter(n => npcs[n]?.alive !== false);
     if (livingList.length === 0 && deadList.length === 0) {
         grid.innerHTML = '';
-        // 重华宫入口
-        if(grid){
-            grid.insertAdjacentHTML('afterbegin', `<div style="grid-column:1/-1;margin-bottom:6px;"><button onclick="openChonghuaPanel()" class="interact-btn" style="background:#f0e8d8;">🏛️ 重华宫</button></div>`);
-        }
         grid.innerHTML += '<div style="color:var(--text-light);text-align:center;padding:8px;font-size:9px;grid-column:1/3;">暂无妃嫔</div>';
         return;
     }
     grid.innerHTML = '';
-    // 重华宫入口
-    if(grid){
-        grid.insertAdjacentHTML('afterbegin', `<div style="grid-column:1/-1;margin-bottom:6px;"><button onclick="openChonghuaPanel()" class="interact-btn" style="background:#f0e8d8;">🏛️ 重华宫</button></div>`);
-    }
     livingList.forEach(name => {
         const npc = npcs[name];
         const displayName = npc.is_player ? playerName : name;
@@ -4387,20 +4388,21 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) resumeFromBackgrou
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'){closeModal();closeSaveListModal();}if(e.key==='s'||e.key==='S'){if(playerId)saveGame('default');}});
 console.log('🌸 凤仪天下 · 完整修复版');
 // ---------- 重华宫 ----------
-async function openChonghuaPanel(){
+async function renderChonghuaInline(){
     if(!playerId) return;
+    const panel = document.getElementById('chonghuaPanel');
+    if(!panel) return;
     try{
         const r = await myFetch(`${API_BASE}/api/chonghua?player_id=${playerId}`);
         const d = await r.json();
         const c = d.chonghua || {founded:false};
+        const info = d.info || {};
         let html = `<div style="font-size:9px;color:var(--text-mid);max-width:100%;display:flex;flex-direction:column;gap:6px;">`;
         if(!c.founded){
-            const info = d.info || {};
             html += `<div style="font-size:8px;color:var(--text-light);">🏛️ 重华宫尚未开设（需${(info.manage_ranks||[]).join('/')}或协理六宫，威望≥${info.min_prestige||0}，${info.found_cost||0}两）</div>`;
             html += `<button onclick="chonghuaAction('found')" class="interact-btn" style="margin-top:4px;">🏛️ 开设（${info.found_cost||0}两）</button>`;
         }else{
             html += `<div style="font-size:8px;">🏛️ 重华宫已开设 · 等级${c.level||1} · 预算${c.budget||0}两 · 容量${(c.level||1)*2}</div>`;
-            // 简易操作面板
             const children = c.children || [];
             const inside = children.filter(ch=>ch.in_chonghua);
             const candidates = children.filter(ch=>!ch.in_chonghua);
@@ -4422,9 +4424,19 @@ async function openChonghuaPanel(){
             }
         }
         html += `</div>`;
-        openModal('🏛️ 重华宫', html, '关闭', null, true);
-    }catch(e){showToast('❌ 加载重华宫失败');}
+        panel.innerHTML = html;
+    }catch(e){
+        panel.innerHTML = '<span style="color:#8a3a2a;font-size:7px;">❌ 加载重华宫失败</span>';
+    }
 }
+let chonghuaVisible=false;
+document.getElementById('chonghuaToggleBtn')?.addEventListener('click',function(){
+    const p=document.getElementById('chonghuaPanel');
+    chonghuaVisible=!chonghuaVisible;
+    p.style.display=chonghuaVisible?'block':'none';
+    this.textContent=chonghuaVisible?'收起':'展开';
+    if(chonghuaVisible){renderChonghuaInline();}
+});
 async function chonghuaAction(action){
     if(!playerId) return;
     const sel = document.getElementById('chonghuaChildSelect');
@@ -4435,10 +4447,13 @@ async function chonghuaAction(action){
     if(amt) payload.amount = Number(amt);
     try{
         const r = await myFetch(`${API_BASE}/api/chonghua/action`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-        const res = await r.json();
+                const res = await r.json();
         if(!res.success){showToast('❌ '+ (res.error||'操作失败'), 'error'); return;}
         showToast(res.message || '操作成功');
-        openChonghuaPanel();
+        const p=document.getElementById('chonghuaPanel');
+        if(p){p.style.display='block';chonghuaVisible=true;}
+        document.getElementById('chonghuaToggleBtn')?.textContent='收起';
+        renderChonghuaInline();
         loadGamePage(); // 刷新数据
     }catch(e){showToast('❌ 操作失败');}
 }
