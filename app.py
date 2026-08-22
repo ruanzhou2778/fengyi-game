@@ -3356,7 +3356,13 @@ def proxy_models():
     if request.method == 'OPTIONS':
         return '', 200
     api_base = (request.headers.get('X-API-Base') or '').strip().rstrip('/')
-    api_key = (request.headers.get('Authorization') or '').strip()
+    api_key_raw = (request.headers.get('Authorization') or request.headers.get('X-API-Key') or '').strip()
+    # 统一为 Bearer 格式转发给上游
+    if api_key_raw.lower().startswith('bearer '):
+        api_key = api_key_raw[7:].strip()
+    else:
+        api_key = api_key_raw
+    api_key = f'Bearer {api_key}' if api_key else ''
     parsed = urlparse(api_base)
     if parsed.scheme not in ('http', 'https') or not parsed.netloc:
         return jsonify({"error": "API 地址必须是有效的 http/https URL"}), 400
