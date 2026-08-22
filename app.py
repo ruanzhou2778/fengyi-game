@@ -6314,9 +6314,7 @@ def chonghua_action():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    ok, err = guard_action(game_state)
-    if not ok:
-        return err
+    # chonghua 操作不消耗行动点
     ch = game_state.chonghua or {"founded": False, "level": 1, "budget": 0, "children": [], "log": []}
     game_state.chonghua = ch
     def add_log(msg):
