@@ -4377,6 +4377,56 @@ window.addEventListener('pagehide', () => flushSaveOnBackground());
 window.addEventListener('pageshow', (e) => { if (e.persisted) resumeFromBackground(); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'){closeModal();closeSaveListModal();}if(e.key==='s'||e.key==='S'){if(playerId)saveGame('default');}});
 console.log('🌸 凤仪天下 · 完整修复版');
+// ---------- 重华宫 ----------
+async function openChonghuaPanel(){
+    if(!playerId) return;
+    try{
+        const r = await myFetch(`${API_BASE}/api/chonghua?player_id=${playerId}`);
+        const d = await r.json();
+        const c = d.chonghua || {founded:false};
+        let html = `<div style="font-size:9px;color:var(--text-mid);max-width:100%;display:flex;flex-direction:column;gap:6px;">`;
+        if(!c.founded){
+            const info = d.info || {};
+            html += `<div style="font-size:8px;color:var(--text-light);">🏛️ 重华宫尚未开设（需${(info.manage_ranks||[]).join('/')}或协理六宫，威望≥${info.min_prestige||0}，${info.found_cost||0}两）</div>`;
+            html += `<button onclick="chonghuaAction('found')" class="interact-btn" style="margin-top:4px;">🏛️ 开设（${info.found_cost||0}两）</button>`;
+        }else{
+            html += `<div style="font-size:8px;">🏛️ 重华宫已开设 · 等级${c.level||1} · 预算${c.budget||0}两</div>`;
+            // 简易操作面板
+            const children = c.children || [];
+            const opts = children.map(ch=>`<option value="${ch.uid||ch.name}">${ch.name}</option>`).join('');
+            html += `<div style="display:flex;gap:4px;flex-wrap:wrap;">
+                <select id="chonghuaChildSelect" style="font-size:7px;">${opts||'<option>无候选</option>'}</select>
+                <button onclick="chonghuaAction('admit')" class="interact-btn">收容</button>
+                <button onclick="chonghuaAction('tutor')" class="interact-btn">授业</button>
+                <button onclick="chonghuaAction('adopt')" class="interact-btn">亲养</button>
+                <button onclick="chonghuaAction('release')" class="interact-btn">迁出</button>
+                <button onclick="chonghuaAction('upgrade')" class="interact-btn">扩建</button>
+                <input id="chonghuaBudget" type="number" placeholder="拨用度" style="width:60px;font-size:7px;">
+                <button onclick="chonghuaAction('patronize')" class="interact-btn">拨用度</button>
+            </div>`;
+        }
+        html += `</div>`;
+        openModal('🏛️ 重华宫', html, '关闭', null, true);
+    }catch(e){showToast('❌ 加载重华宫失败');}
+}
+async function chonghuaAction(action){
+    if(!playerId) return;
+    const sel = document.getElementById('chonghuaChildSelect');
+    const uid = sel?.value;
+    const amt = document.getElementById('chonghuaBudget')?.value;
+    const payload = {player_id:playerId, action};
+    if(uid) payload.uid = uid;
+    if(amt) payload.amount = Number(amt);
+    try{
+        const r = await myFetch(`${API_BASE}/api/chonghua/action`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+        const res = await r.json();
+        if(!res.success){showToast('❌ '+ (res.error||'操作失败'), 'error'); return;}
+        showToast(res.message || '操作成功');
+        openChonghuaPanel();
+        loadGamePage(); // 刷新数据
+    }catch(e){showToast('❌ 操作失败');}
+}
+
 </script>
 </body>
 </html>
