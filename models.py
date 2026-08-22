@@ -185,6 +185,9 @@ class GameState:
         self.honorary_title = None
         self.child_uid_seq = 1
         self.heir_status = default_heir_status()
+        # 重华宫与陷害系统新属性
+        self.chonghua = {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}
+        self.frameups = {"seq": 1, "cases": [], "log": []}
         self.emperor = {
             "name": "萧景琰",
             "personality": random.choice([p.value for p in EmperorPersonality]),
@@ -388,6 +391,8 @@ class GameState:
             "six_palace_assistant": getattr(self, "six_palace_assistant", None),
             "child_uid_seq": getattr(self, "child_uid_seq", 1),
             "heir_status": getattr(self, "heir_status", default_heir_status()),
+            "chonghua": getattr(self, "chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
+            "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -483,6 +488,8 @@ class GameState:
             game_state.queen_authority_uses = data.get("queen_authority_uses", 0)
             game_state.queen_assistance_count = data.get("queen_assistance_count", 0)
             game_state.six_palace_assistant = data.get("six_palace_assistant")
+            game_state.chonghua = data.get("chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []})
+            game_state.frameups = data.get("frameups", {"seq": 1, "cases": [], "log": []})
             try:
                 game_state.child_uid_seq = max(1, int(data.get("child_uid_seq", 1) or 1))
             except (TypeError, ValueError):
