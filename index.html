@@ -4453,8 +4453,7 @@ async function chonghuaAction(action){
         const p=document.getElementById('chonghuaPanel');
         if(p){p.style.display='block';chonghuaVisible=true;}
         document.getElementById('chonghuaToggleBtn')?.textContent='收起';
-        renderChonghuaInline();
-        loadGamePage(); // 刷新数据
+        renderChonghuaInline(); // 刷新内联内容
     }catch(e){showToast('❌ 操作失败');}
 }
 
