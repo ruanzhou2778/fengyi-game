@@ -1066,7 +1066,7 @@ def _apply_npc_conflict_effects(npc, effects, winner):
 
 QUEEN_AUTHORITY_MAX_USES = 3
 QUEEN_AUTHORITY_MIN_PRESTIGE = 80
-QUEEN_MANAGEABLE_MIN_RANK = "答应"
+QUEEN_MANAGEABLE_MIN_RANK = "更衣"
 
 
 def _queen_authority_period_state(game_state):
