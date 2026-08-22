@@ -6035,7 +6035,7 @@ def set_heir():
     game_state.heir_status = {
         "heir_id": child_uid_str,
         "heir_name": child.get("name", "皇子"),
-        "heir_mother": child_mother,
+        "heir_mother": child.get("birth_mother") or child_mother,
         "regent": "",
         "regent_title": "",
         "established_at": f"建元{game_state.year}年{game_state.month}月",

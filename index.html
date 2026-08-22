@@ -2175,7 +2175,15 @@ function renderHeirPalaceUI(data) {
     if (heir.heir_id) {
         html += `<div style="background:#f8f0e0;border:1px solid #d8c090;border-radius:6px;padding:4px 6px;margin-bottom:4px;">
             <div style="font-weight:600;color:#8a5a20;">👑 储君：${heir.heir_name || '皇子'}</div>
-            <div style="font-size:7px;color:var(--text-light);">${heir.established_at || ''} · 生母${heir.heir_mother || '不详'}</div>
+            <div style="font-size:7px;color:var(--text-light);">${(() => {
+    const child = (data.children || []).find(c => c.name === heir.heir_name || c.uid === heir.heir_id);
+    const birth = child?.birth_mother;
+    const adoptive = heir.heir_mother;
+    if (birth && adoptive && birth !== adoptive) {
+        return `${heir.established_at || ''} · 生母${birth}（养母${adoptive}）`;
+    }
+    return `${heir.established_at || ''} · 生母${heir.heir_mother || '不详'}`;
+})()}</div>
             ${heir.regent_active ? `<div style="font-size:7px;color:#8a3a2a;">⚡ 摄政：${heir.regent || ''}</div>` : ''}
         </div>`;
     } else {
@@ -2836,7 +2844,10 @@ function childStatBar(label, value, color) {
 
 function renderChildDetailHtml(child, motherName) {
     const age = Math.floor(child.age || 0);
-    const title = child.title || (child.gender === '皇子' ? '皇子' : '公主');
+    let title = child.title || (child.gender === '皇子' ? '皇子' : '公主');
+    if (child.is_heir) {
+        title = '太子';
+    }
     const trait = child.trait || (age > 5 ? '聪慧过人' : (age > 3 ? '伶俐可爱' : newbornTrait(child.gender)));
     const icon = child.gender === '皇子' ? '👑' : '🌸';
     const birthInfo = (child.birth_year && child.birth_month) ? `建元${child.birth_year}年${child.birth_month}月` : '不详';
