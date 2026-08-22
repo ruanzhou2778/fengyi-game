@@ -3372,7 +3372,7 @@ def proxy_models():
     try:
         response = httpx.get(
             api_base + '/models',
-            headers={"Authorization": api_key, "Accept": "application/json"},
+            headers={"Authorization": api_key, "Accept": "application/json", "User-Agent": "Mozilla/5.0"},
             timeout=15.0,
             follow_redirects=True,
         )
