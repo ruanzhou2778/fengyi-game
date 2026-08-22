@@ -1269,6 +1269,8 @@ def process_rank_petition(game_state, action, target_name=None, candidate_name=N
     if action == "向皇上请晋":
         return _promotion_roll(game_state, "皇帝", target_name, 0.42, "皇上")
     if action == "向皇后请晋":
+        if game_state.rank.name == "皇后":
+            return None, "你自己就是皇后，无法请皇后出面"
         queen_name = get_queen_name(game_state)
         if not queen_name:
             return None, "宫中尚无皇后，无法请皇后出面"

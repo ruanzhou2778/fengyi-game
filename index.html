@@ -2164,7 +2164,7 @@ function renderHeirPalaceUI(data) {
     const palaces = data.palaces || [];
     const children = data.children || [];
     const emperorAlive = !data.emperor || data.emperor.alive !== false;
-    const rank = (data.display_rank || data.rank || '秀女');
+    const rank = data.rank || '秀女';
     const rankIdx = ['更衣','官女子','答应','常在','贵人','才人','美人','婕妤','嫔','妃','淑妃','德妃','贤妃','宸妃','贵妃','皇贵妃','皇后'].indexOf(rank);
     const canCourt = emperorAlive && rankIdx >= 8;
     const canSpend = (data.silver || 0) >= 20;
@@ -2495,6 +2495,7 @@ async function openInteract(type, name) {
         if (!r.ok) throw new Error('获取NPC信息失败');
         const d = await r.json();
         const isQueen = d.rank === '皇后';
+        const isPlayerQueen = window._lastGameData?.rank === '皇后';
         const attrs = d.attributes || {};
         const children = d.children || [];
         const rel = d.relationship || {好感: 0, 印象: '陌生'};
@@ -2564,7 +2565,7 @@ async function openInteract(type, name) {
                     <button onclick="interactAction('${d.name}','rival')" class="interact-btn">⚔️ 陷害</button>
                     <button onclick="closeModal();startDuelFromPage('${d.name}')" class="interact-btn">🗡️ 争锋</button>
                     <button onclick="openChildTransferMenu('${d.name}')" class="interact-btn" style="background:#f5ede5;">📜 子嗣过继</button>
-                    <button onclick="petitionRankAction('向皇后请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="background:#f9f1e8;">🌸 向皇后请晋</button>
+                    <button onclick="petitionRankAction('向皇后请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="background:#f9f1e8;${isPlayerQueen ? 'display:none;' : ''}">🌸 向皇后请晋</button>
                     <button onclick="petitionRankAction('向皇上请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="background:#efe8dc;">👑 向皇上请晋</button>
                     <button onclick="petitionRankAction('向太后请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="background:#eee7ea;">👵 向太后请晋</button>
                 </div>
