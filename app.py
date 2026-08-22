@@ -6268,6 +6268,20 @@ def get_chonghua():
     if err:
         return err
     ch = game_state.chonghua or {"founded": False, "level": 1, "budget": 0, "children": [], "log": []}
+    game_state.chonghua = ch
+    # 自动收容：重华宫已开设且子嗣年幼则自动入馆
+    if ch.get('founded'):
+        for c in getattr(game_state, 'children', []):
+            if not c.get('alive', True):
+                continue
+            if c.get('in_chonghua'):
+                continue
+            # 仅玩家自有子嗣，年龄≤3岁自动入馆
+            age = int(c.get('age', 0) or 0)
+            if age <= 3:
+                c['in_chonghua'] = True
+                c['chonghua_since'] = f'{getattr(game_state, "year", 0)}年{getattr(game_state, "month", 0)}月'
+                ch.setdefault('log', []).append({'msg': f'{c.get("name")}自动入馆', 'time': getattr(game_state, 'day', 0)})
     children = []
     for c in getattr(game_state, 'children', []):
         if not c.get('alive', True):
