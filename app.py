@@ -6269,38 +6269,67 @@ def get_chonghua():
         return err
     ch = game_state.chonghua or {"founded": False, "level": 1, "budget": 0, "children": [], "log": []}
     game_state.chonghua = ch
+    # 权限判断：皇后/皇贵妃/贵妃 或 协理六宫 可管理全部子嗣
+    rank_name = ''
+    try:
+        rank_name = game_state.rank.name if hasattr(game_state.rank, 'name') else str(game_state.rank)
+    except:
+        rank_name = ''
+    manage_ranks = ['皇后', '皇贵妃', '贵妃']
+    has_permission = rank_name in manage_ranks or bool(getattr(game_state, 'manage_six_palaces', False))
     # 自动收容：重华宫已开设且子嗣年幼则自动入馆
     if ch.get('founded'):
-        for c in getattr(game_state, 'children', []):
+        # 遍历范围依据权限
+        pools = [getattr(game_state, 'children', [])]
+        if has_permission:
+            for npc in getattr(game_state, 'npcs', {}).values():
+                children = npc.get('children', []) if isinstance(npc, dict) else []
+                if children:
+                    pools.append(children)
+        for pool in pools:
+            for c in pool:
+                if not c.get('alive', True):
+                    continue
+                if c.get('in_chonghua'):
+                    continue
+                age = int(c.get('age', 0) or 0)
+                if age <= 3:
+                    c['in_chonghua'] = True
+                    c['chonghua_since'] = f'{getattr(game_state, "year", 0)}年{getattr(game_state, "month", 0)}月'
+                    ch.setdefault('log', []).append({'msg': f'{c.get("name")}自动入馆', 'time': getattr(game_state, 'day', 0)})
+    # 汇总子嗣列表
+    children = []
+    seen = set()
+    def add_child_from_pool(pool):
+        for c in pool:
             if not c.get('alive', True):
                 continue
-            if c.get('in_chonghua'):
+            uid = c.get('uid') or c.get('name')
+            key = (uid, c.get('name'))
+            if key in seen:
                 continue
-            # 仅玩家自有子嗣，年龄≤3岁自动入馆
-            age = int(c.get('age', 0) or 0)
-            if age <= 3:
-                c['in_chonghua'] = True
-                c['chonghua_since'] = f'{getattr(game_state, "year", 0)}年{getattr(game_state, "month", 0)}月'
-                ch.setdefault('log', []).append({'msg': f'{c.get("name")}自动入馆', 'time': getattr(game_state, 'day', 0)})
-    children = []
-    for c in getattr(game_state, 'children', []):
-        if not c.get('alive', True):
-            continue
-        uid = c.get('uid') or c.get('name')
-        children.append({
-            'uid': uid,
-            'name': c.get('name'),
-            'age': c.get('age', 0),
-            'gender': c.get('gender', ''),
-            'in_chonghua': bool(c.get('in_chonghua', False)),
-            'palace': c.get('palace', '')
-        })
+            seen.add(key)
+            children.append({
+                'uid': uid,
+                'name': c.get('name'),
+                'age': c.get('age', 0),
+                'gender': c.get('gender', ''),
+                'in_chonghua': bool(c.get('in_chonghua', False)),
+                'palace': c.get('palace', ''),
+                'mother': c.get('mother', '')
+            })
+    add_child_from_pool(getattr(game_state, 'children', []))
+    if has_permission:
+        for npc in getattr(game_state, 'npcs', {}).values():
+            children_pool = npc.get('children', []) if isinstance(npc, dict) else []
+            add_child_from_pool(children_pool)
     ch_copy = dict(ch)
     ch_copy['children'] = children
     info = {
-        'manage_ranks': ['皇后', '皇贵妃', '贵妃'],
+        'manage_ranks': manage_ranks,
         'min_prestige': 80,
-        'found_cost': 200
+        'found_cost': 200,
+        'has_permission': has_permission
     }
     return jsonify({'chonghua': ch_copy, 'info': info})
 
@@ -6360,18 +6389,47 @@ def chonghua_action():
     if action in ('admit', 'tutor', 'adopt', 'release'):
         if not ch.get('founded'):
             return jsonify({'success': False, 'error': '未开设'}), 400
+        # 权限判断
+        rank_name = ''
+        try:
+            rank_name = game_state.rank.name if hasattr(game_state.rank, 'name') else str(game_state.rank)
+        except:
+            rank_name = ''
+        manage_ranks = ['皇后', '皇贵妃', '贵妃']
+        has_permission = rank_name in manage_ranks or bool(getattr(game_state, 'manage_six_palaces', False))
+        # 查找目标子嗣
         child = None
-        for c in getattr(game_state, 'children', []):
-            if c.get('name') == uid or str(c.get('uid')) == str(uid):
-                child = c
-                break
+        def find_child(uid):
+            # 先找玩家自有
+            for c in getattr(game_state, 'children', []):
+                if c.get('name') == uid or str(c.get('uid')) == str(uid):
+                    return c
+            if has_permission:
+                for npc in getattr(game_state, 'npcs', {}).values():
+                    for c in npc.get('children', []) if isinstance(npc, dict) else []:
+                        if c.get('name') == uid or str(c.get('uid')) == str(uid):
+                            return c
+            return None
+        child = find_child(uid)
         if not child:
             return jsonify({'success': False, 'error': '子嗣不存在'}), 404
+        # 计算在馆人数
+        def count_inside():
+            cnt = 0
+            for c in getattr(game_state, 'children', []):
+                if c.get('in_chonghua'):
+                    cnt += 1
+            if has_permission:
+                for npc in getattr(game_state, 'npcs', {}).values():
+                    for c in npc.get('children', []) if isinstance(npc, dict) else []:
+                        if c.get('in_chonghua'):
+                            cnt += 1
+            return cnt
         if action == 'admit':
             if child.get('in_chonghua'):
                 return jsonify({'success': False, 'error': '已在馆'}), 400
             capacity = ch.get('level', 1) * 2
-            inside = sum(1 for c in getattr(game_state, 'children', []) if c.get('in_chonghua'))
+            inside = count_inside()
             if inside >= capacity:
                 return jsonify({'success': False, 'error': '容量已满'}), 400
             child['in_chonghua'] = True
