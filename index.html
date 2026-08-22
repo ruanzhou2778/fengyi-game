@@ -4452,7 +4452,8 @@ async function chonghuaAction(action){
         showToast(res.message || '操作成功');
         const p=document.getElementById('chonghuaPanel');
         if(p){p.style.display='block';chonghuaVisible=true;}
-        document.getElementById('chonghuaToggleBtn')?.textContent='收起';
+        const btn = document.getElementById('chonghuaToggleBtn');
+        if (btn) btn.textContent = '收起';
         renderChonghuaInline(); // 刷新内联内容
     }catch(e){showToast('❌ 操作失败');}
 }
