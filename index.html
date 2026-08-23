@@ -896,7 +896,6 @@
                 </div>
                 <div class="stat-block"><div class="block-title">📊 属 性</div><div id="attrBars"></div></div>
                 <div class="stat-block"><div class="block-title">👶 子 嗣</div><div id="childrenGrid" class="child-grid"><span style="color:var(--text-light);font-size:8px;grid-column:1/3;text-align:center;padding:6px 0;">🌸 暂无子嗣，静待天恩</span></div></div>
-                <div class="stat-block"><div class="block-title">🏛️ 储君与宫殿</div><div id="heirPalacePanel" style="font-size:8px;color:var(--text-mid);line-height:1.4;"></div></div>
                 <div class="stat-block"><div class="block-title">📜 近 期 记 忆</div><div id="memoriesList" style="font-size:9px;color:var(--text-mid);line-height:1.3;"></div></div>
                 <div class="stat-block"><div class="block-title">📈 属 性 变 化 日 志</div><div id="changeLog" style="max-height:50px;overflow-y:auto;font-size:8px;color:var(--text-mid);line-height:1.3;"></div></div>
                                 <div class="stat-block"><div class="block-title">👤 宫 女 太 监</div>
@@ -957,6 +956,10 @@
         <div class="page" id="pageChonghua">
             <div style="display:flex;flex-direction:column;gap:3px;padding-bottom:2px;">
                 <div class="stat-block">
+                    <div class="block-title">🏛️ 储 君</div>
+                    <div id="heirPalacePanel" style="font-size:8px;color:var(--text-mid);line-height:1.4;"></div>
+                </div>
+                <div class="stat-block">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span class="block-title">🏛️ 重 华 宫</span>
                         <button class="config-toggle-btn" id="chonghuaToggleBtn" style="margin-top:0;" onclick="chonghuaToggle()">收起</button>
@@ -984,6 +987,10 @@
         <div class="page" id="pageConflict">
             <div style="display:flex;flex-direction:column;gap:4px;padding-bottom:2px;">
                 <div style="font-size:10px;color:var(--text-mid);border-bottom:1px solid var(--border-light);padding-bottom:2px;">⚔️ 宫 斗 事 件</div>
+                <div class="stat-block" id="heirRaceBlock" style="display:none;">
+                    <div class="block-title">👑 夺 嫡 风 云</div>
+                    <div id="heirRacePanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;padding:3px 0;"></div>
+                </div>
                 <div class="stat-block">
                     <div class="block-title">🎯 主动宫斗</div>
                     <div style="display:flex;flex-direction:column;gap:3px;padding:4px 0;">
@@ -2202,18 +2209,109 @@ function updateConflictAssistHint() {
     hint.textContent = `已选 ${selectedNames.length} 人，预计助力 +${bonus}，意外翻盘概率降低约 ${flipReduce}%`;
 }
 
+function renderHeirRaceUI(data) {
+    const block = document.getElementById('heirRaceBlock');
+    const panel = document.getElementById('heirRacePanel');
+    if (!block || !panel) return;
+    const race = data.heir_race || {};
+    const children = data.children || [];
+    // 夺嫡未激活则隐藏面板
+    if (!race.active) {
+        block.style.display = 'none';
+        return;
+    }
+    block.style.display = 'block';
+
+    const momentum = race.momentum || {};
+    const candidates = race.candidates || [];
+
+    // 汇总候选皇子信息（含玩家亲子标识）
+    const npcs = data.npcs || {};
+    const playerName = data.player_name || data.name || '';
+    const rows = [];
+    candidates.forEach(uid => {
+        const key = String(uid);
+        // 先在玩家子嗣中查找
+        let child = children.find(c => String(c.uid) === key || c.name === key);
+        let motherOwner = playerName;
+        let isPlayerChild = !!child;
+        // 再在 NPC 子嗣中查找
+        if (!child) {
+            for (const [nName, nData] of Object.entries(npcs)) {
+                const arr = (nData && nData.children) || [];
+                const found = arr.find(c => String(c.uid) === key || c.name === key);
+                if (found) { child = found; motherOwner = nName; break; }
+            }
+        }
+        if (!child) return;
+        rows.push({
+            uid: key,
+            name: child.name || '皇子',
+            age: Math.floor(child.age || 0),
+            mother: child.birth_mother || motherOwner,
+            momentum: momentum[key] || 0,
+            isPlayerChild,
+        });
+    });
+    rows.sort((a, b) => b.momentum - a.momentum);
+
+    let html = '';
+    html += `<div style="font-size:7px;color:var(--text-light);margin-bottom:4px;">⚜️ 储位空悬，诸皇子暗中角力。势头越高，越有望问鼎东宫。</div>`;
+    if (rows.length === 0) {
+        html += `<div style="color:var(--text-light);">暂无适龄皇子（须年满8岁）参与夺嫡。</div>`;
+    }
+    rows.forEach((r, i) => {
+        const pct = Math.max(0, Math.min(100, r.momentum));
+        // 势头条颜色：金（领先）/ 红（玩家亲子）/ 灰（其余）
+        let barColor = '#9a9a9a';
+        if (i === 0) barColor = '#d4a017';
+        if (r.isPlayerChild) barColor = '#b8443a';
+        const crown = i === 0 ? '👑 ' : '';
+        const mine = r.isPlayerChild ? ' <span style="color:#b8443a;">（亲子）</span>' : '';
+        html += `<div style="margin-bottom:5px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:7px;margin-bottom:1px;">
+                <span>${crown}${escapeHtmlText(r.name)}（${r.age}岁·${escapeHtmlText(r.mother)}）${mine}</span>
+                <span style="color:${barColor};font-weight:600;">${pct}</span>
+            </div>
+            <div style="height:6px;background:var(--bg-card);border-radius:3px;overflow:hidden;border:1px solid var(--border-light);">
+                <div style="height:100%;width:${pct}%;background:${barColor};transition:width .3s;"></div>
+            </div>`;
+        // 造势/打压按钮：亲子只显示造势
+        html += `<div style="display:flex;gap:3px;margin-top:2px;">`;
+        html += `<button onclick="heirRaceAction('boost_heir','${r.uid}','${escapeHtmlText(r.name)}')" style="padding:1px 5px;border:1px solid #d8b070;border-radius:4px;background:#fdf6e8;color:#7a5a20;font-size:7px;cursor:pointer;font-family:inherit;">🎋 造势(50两)</button>`;
+        if (!r.isPlayerChild) {
+            html += `<button onclick="heirRaceAction('undermine_heir','${r.uid}','${escapeHtmlText(r.name)}')" style="padding:1px 5px;border:1px solid #d48c7a;border-radius:4px;background:transparent;color:#8a3a2a;font-size:7px;cursor:pointer;font-family:inherit;">🗡️ 打压(30两·心计≥50)</button>`;
+        }
+        html += `</div></div>`;
+    });
+
+    // 本旬夺嫡事件
+    const events = race.events || [];
+    if (events.length) {
+        html += `<div style="border-top:1px dashed var(--border-light);margin-top:4px;padding-top:3px;font-size:7px;color:var(--text-mid);line-height:1.5;">`;
+        events.forEach(e => { html += `<div>${escapeHtmlText(e)}</div>`; });
+        html += `</div>`;
+    }
+
+    panel.innerHTML = html;
+}
+
+// 找到某皇子在玩家子嗣数组中的索引（用于 /api/child/interact 的 child_index）
+function findPlayerChildIndex(uid) {
+    const children = (window._lastGameData?.children) || [];
+    const key = String(uid);
+    return children.findIndex(c => String(c.uid) === key || c.name === key);
+}
+
 function renderHeirPalaceUI(data) {
     const panel = document.getElementById('heirPalacePanel');
     if (!panel) return;
     const heir = data.heir_status || {};
-    const palaces = data.palaces || [];
     const children = data.children || [];
     const emperorAlive = !data.emperor || data.emperor.alive !== false;
     const rank = data.rank || '秀女';
     const rankIdx = ['更衣','官女子','答应','常在','贵人','才人','美人','婕妤','嫔','妃','淑妃','德妃','贤妃','宸妃','贵妃','皇贵妃','皇后'].indexOf(rank);
     const canCourt = emperorAlive && rankIdx >= 8;
-    const canSpend = (data.silver || 0) >= 20;
-    const canSpendPalace = (data.silver || 0) >= 15;
     let html = '';
 
     // 储君状态
@@ -2251,49 +2349,51 @@ function renderHeirPalaceUI(data) {
         html += `<button onclick="confirmClearHeir()" style="padding:2px 6px;border:1px solid #d48c7a;border-radius:5px;background:transparent;color:#8a3a2a;font-size:7px;cursor:pointer;font-family:inherit;margin-bottom:4px;">📜 废储</button>`;
     }
 
-    // 徽号管理
-    const titledChildren = children.filter(c => c.alive !== false && c.honorary_title);
-    if (titledChildren.length > 0) {
-        html += `<div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">🏮 徽号：${titledChildren.map(c => `${c.name}「${c.honorary_title}」`).join('、')}</div>`;
-    }
-    if (children.length > 0 && canCourt) {
-        const untitled = children.filter(c => c.alive !== false && !c.honorary_title);
-        if (untitled.length > 0) {
-            html += `<div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
-                <span style="font-size:7px;color:var(--text-light);">🏮 赐徽号：</span>
-                <select id="honorChildSelect" style="font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">${untitled.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}</select>
-                <input id="honorTitleInput" maxlength="3" placeholder="1~3字" style="width:44px;font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">
-                <button onclick="confirmGrantHonor()" ${canSpend ? '' : 'disabled'} style="padding:2px 6px;border:1px solid #d8b070;border-radius:5px;background:${canSpend ? '#fdf6e8' : '#eee'};color:${canSpend ? '#7a5a20' : '#aaa'};font-size:7px;cursor:${canSpend ? 'pointer' : 'not-allowed'};font-family:inherit;">赐（20两）</button>
-            </div>`;
-        }
-    }
-
-    // 宫殿分配
-    html += `<div style="border-top:1px dashed var(--border-light);padding-top:4px;margin-top:2px;"><div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">🏛️ 宫殿（${palaces.length}座）</div>`;
-    const aliveChildren = children.filter(c => c.alive !== false);
-    if (aliveChildren.length > 0 && canCourt) {
-        html += `<div style="display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
-            <span style="font-size:7px;color:var(--text-light);">分配：</span>
-            <select id="palaceChildSelect" style="font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">${aliveChildren.map(c => `<option value="${c.name}">${c.name}${c.palace ? `（${c.palace}）` : ''}</option>`).join('')}</select>
-            <select id="palaceNameSelect" style="font-size:7px;font-family:inherit;padding:1px 3px;border:1px solid var(--border-light);border-radius:4px;background:var(--bg-card);">${palaces.map(p => `<option value="${p}">${p}</option>`).join('')}</select>
-            <button onclick="confirmAssignPalace()" ${canSpendPalace ? '' : 'disabled'} style="padding:2px 6px;border:1px solid #d8b070;border-radius:5px;background:${canSpendPalace ? '#fdf6e8' : '#eee'};color:${canSpendPalace ? '#7a5a20' : '#aaa'};font-size:7px;cursor:${canSpendPalace ? 'pointer' : 'not-allowed'};font-family:inherit;">分配（15两）</button>
-        </div>`;
-    }
-    const housed = aliveChildren.filter(c => c.palace);
-    if (housed.length > 0) {
-        html += `<div style="font-size:7px;color:var(--text-light);margin-top:2px;">已居：${housed.map(c => `${c.name}·${c.palace}`).join('、')}</div>`;
-    }
-    html += `</div>`;
-
     // 位份不足提示
     if (!canCourt && emperorAlive) {
-        html += `<div style="font-size:7px;color:#b8945a;margin-top:3px;">🔒 位份须嫔及以上方可奏请立储、徽号、宫殿</div>`;
+        html += `<div style="font-size:7px;color:#b8945a;margin-top:3px;">🔒 位份须嫔及以上方可奏请立储</div>`;
     }
     if (!emperorAlive) {
         html += `<div style="font-size:7px;color:#8a3a2a;margin-top:3px;">🕯️ 先帝已崩，新朝自有安排</div>`;
     }
 
     panel.innerHTML = html;
+}
+
+async function heirRaceAction(action, uid, name) {
+    const childIndex = findPlayerChildIndex(uid);
+    const body = { player_id: playerId, action };
+    // 玩家亲子用 child_index 定位；非亲子用 child_uid 定位
+    if (childIndex >= 0) body.child_index = childIndex;
+    else body.child_uid = uid;
+    try {
+        const r = await myFetch(`${API_BASE}/api/child/interact`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const res = await r.json();
+        handleHeirRaceResult(res, action, name);
+    } catch (e) { showToast('❌ 操作失败', 'error'); console.error(e); }
+}
+
+function handleHeirRaceResult(res, action, name) {
+    if (!res || !res.success) {
+        showToast(`❌ ${(res && res.error) || '操作失败'}`, 'error');
+        return;
+    }
+    const d = window._lastGameData || {};
+    const icon = action === 'boost_heir' ? '🎋' : '🗡️';
+    showToast(`${icon} ${res.narration}`);
+    addConflictLog(`【夺嫡】${res.narration}`);
+    addLogEntry(`${icon} ${res.narration}`, action === 'boost_heir' ? 'promotion' : 'intel');
+    if (res.attributes) d.attributes = res.attributes;
+    if (res.silver !== undefined) d.silver = res.silver;
+    if (res.heir_race) d.heir_race = res.heir_race;
+    if (res.rivalries) d.rivalries = res.rivalries;
+    if (res.remaining_actions !== undefined) d.remaining_actions = res.remaining_actions;
+    if (res.children) d.children = res.children;
+    updateUI(d);
 }
 
 async function confirmSetHeir(childIdx) {
@@ -2337,50 +2437,11 @@ async function confirmClearHeir() {
 }
 
 async function confirmGrantHonor() {
-    const d = window._lastGameData || {};
-    const select = document.getElementById('honorChildSelect');
-    const input = document.getElementById('honorTitleInput');
-    if (!select || !input) return;
-    const childName = select.value;
-    const title = input.value.trim();
-    if (!title) { showToast('❌ 请输入徽号（1~3字）', 'error'); return; }
-    try {
-        const r = await myFetch(`${API_BASE}/api/honor`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ player_id: playerId, action: 'grant', child_uid: childName, honor_title: title })
-        });
-        const res = await r.json();
-        if (!res.success) { showToast(`❌ ${res.error || '赐徽号失败'}`, 'error'); return; }
-        showToast('🏮 ' + res.narration);
-        addLogEntry(res.narration, 'promotion');
-        if (res.attributes) d.attributes = res.attributes;
-        if (res.silver !== undefined) d.silver = res.silver;
-        updateUI(d);
-    } catch (e) { showToast('❌ 赐徽号失败', 'error'); console.error(e); }
+    // 徽号功能已废弃（迁移中删除），保留空实现以防旧引用报错
 }
 
 async function confirmAssignPalace() {
-    const d = window._lastGameData || {};
-    const childSelect = document.getElementById('palaceChildSelect');
-    const palaceSelect = document.getElementById('palaceNameSelect');
-    if (!childSelect || !palaceSelect) return;
-    const childName = childSelect.value;
-    const palaceName = palaceSelect.value;
-    try {
-        const r = await myFetch(`${API_BASE}/api/palace`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ player_id: playerId, action: 'assign', child_uid: childName, palace_name: palaceName })
-        });
-        const res = await r.json();
-        if (!res.success) { showToast(`❌ ${res.error || '分配失败'}`, 'error'); return; }
-        showToast('🏛️ ' + res.narration);
-        addLogEntry(res.narration, 'promotion');
-        if (res.attributes) d.attributes = res.attributes;
-        if (res.silver !== undefined) d.silver = res.silver;
-        updateUI(d);
-    } catch (e) { showToast('❌ 宫殿分配失败', 'error'); console.error(e); }
+    // 分配宫殿功能已废弃（迁移中删除），保留空实现以防旧引用报错
 }
 
 function updateChildrenUI(data) {
@@ -2501,7 +2562,7 @@ if(data.death_message){
 }
 
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
-updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);loadQueenAuthority();
+updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);renderHeirRaceUI(data);loadQueenAuthority();
 const disabled=rem<=0;
 document.querySelectorAll('.action-btn, .interact-btn, #sendBtn, [onclick*="hireServant"], [onclick*="trainServant"], [onclick*="dowagerInteract"], [onclick*="emperorInteract"], [onclick*="interactAction"]').forEach(btn=>{btn.disabled=disabled;btn.style.opacity=disabled?'0.4':'1';btn.style.cursor=disabled?'not-allowed':'pointer';});
 userInput.disabled=disabled;userInput.placeholder=disabled?'行动点已用完，请转旬':'输入你想做的事...';

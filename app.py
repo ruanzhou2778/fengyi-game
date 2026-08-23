@@ -18,7 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 load_dotenv()
-from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor
+from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor, default_heir_race, normalize_heir_race
 from scenarios import START_SCENARIOS, apply_scenario
 from events import get_daily_actions, apply_daily_action
 from names import (
@@ -2872,6 +2872,199 @@ def find_child_by_uid(game_state, uid):
                 return c, name, i
     return None, None, None
 
+
+# ============================================================
+#  夺嫡暗流（储君空悬时的多方博弈）
+# ============================================================
+
+HEIR_RACE_MIN_AGE = 8          # 参与夺嫡的最低年龄
+HEIR_RACE_MOTHER_WEIGHT = {    # 生母位份权重
+    "皇后": 20, "皇贵妃": 15, "贵妃": 10,
+    "妃": 5, "淑妃": 5, "德妃": 5, "贤妃": 5, "宸妃": 5,
+}
+
+
+def _iter_all_princes(game_state):
+    """遍历后宫所有皇子，返回 (uid, child, mother_name, is_player_child)。"""
+    for c in game_state.children:
+        if c.get("gender") == "皇子":
+            uid = ensure_child_uid(game_state, c)
+            yield uid, c, game_state.name, True
+    for name, npc in game_state.npcs.items():
+        if name == "太后":
+            continue
+        for c in npc.get("children", []):
+            if c.get("gender") == "皇子":
+                uid = ensure_child_uid(game_state, c)
+                yield uid, c, name, False
+
+
+def _prince_mother_rank_weight(game_state, mother_name):
+    """按生母位份返回夺嫡权重。"""
+    if mother_name == getattr(game_state, "name", ""):
+        rank_name = game_state.rank.name
+    else:
+        npc = (getattr(game_state, "npcs", {}) or {}).get(mother_name)
+        rank_name = normalize_rank_name(npc.get("rank", "答应")) if isinstance(npc, dict) else "答应"
+    return HEIR_RACE_MOTHER_WEIGHT.get(rank_name, 0)
+
+
+def _find_prince_by_uid(game_state, uid):
+    """按 uid 找皇子，返回 (child, mother_name) 或 (None, None)。"""
+    for u, c, mother, _is_player in _iter_all_princes(game_state):
+        if str(u) == str(uid):
+            return c, mother
+    return None, None
+
+
+def compute_heir_momentum_base(game_state, child, mother_name):
+    """夺嫡势头基础值：圣宠 + 生母位份 + 年龄权重。"""
+    favor = int(child.get("emperor_favor", 30) or 30)
+    age = float(child.get("age", 0) or 0)
+    base = favor * 0.4 + _prince_mother_rank_weight(game_state, mother_name)
+    if age >= 15:
+        base += 10
+    elif age >= 10:
+        base += 5
+    return base
+
+
+def _heir_race_settle(game_state, uid, child, mother_name):
+    """夺嫡结果落定：写入 heir_status。"""
+    ensure_child_fields(child)
+    if not isinstance(game_state.heir_status, dict):
+        game_state.heir_status = default_heir_status()
+    child["is_heir"] = True
+    child["mood"] = "意气风发"
+    game_state.heir_status = {
+        "heir_id": str(uid),
+        "heir_name": child.get("name", "皇子"),
+        "heir_mother": child.get("birth_mother") or mother_name,
+        "regent": "",
+        "regent_title": "",
+        "established_at": f"建元{game_state.year}年{game_state.month}月",
+        "last_event": "夺嫡定储",
+        "deposed": (game_state.heir_status or {}).get("deposed", []) if isinstance((game_state.heir_status or {}).get("deposed", []), list) else [],
+        "regent_active": False,
+    }
+    if mother_name == game_state.name:
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 15)
+
+
+def process_heir_race(game_state):
+    """夺嫡暗流转旬结算：储君空悬时激活，逐旬更新皇子势头并可能触发立储。
+
+    返回情报消息列表（写入 intelligence_list）。
+    """
+    events = []
+    if not isinstance(getattr(game_state, "heir_race", None), dict):
+        game_state.heir_race = default_heir_race()
+    race = game_state.heir_race
+    race["events"] = []  # 本旬事件流水，每旬重置
+
+    heir_id = (game_state.heir_status or {}).get("heir_id")
+    emperor = game_state.emperor or {}
+    emperor_alive = emperor.get("alive", True)
+
+    # 储君已立或皇帝不在，夺嫡休眠
+    if heir_id or not emperor_alive:
+        race["active"] = False
+        if heir_id:
+            race["outcome"] = "settled"
+        return events
+
+    # 收集候选皇子（≥8 岁、在世）
+    princes = []
+    for uid, child, mother, is_player in _iter_all_princes(game_state):
+        if child.get("alive", True) and float(child.get("age", 0) or 0) >= HEIR_RACE_MIN_AGE:
+            princes.append((uid, child, mother, is_player))
+
+    if len(princes) < 1:
+        race["active"] = False
+        race["candidates"] = []
+        return events
+
+    # 激活夺嫡期
+    was_active = race.get("active", False)
+    race["active"] = True
+    race["outcome"] = None
+    race["candidates"] = [uid for uid, _c, _m, _p in princes]
+    if not was_active:
+        msg = "⚜️ 储君之位空悬，诸皇子渐长，朝野暗流涌动，夺嫡之争已然开启。"
+        events.append(msg)
+        race["events"].append(msg)
+        game_state.add_memory(msg)
+
+    momentum = race.get("momentum", {})
+    if not isinstance(momentum, dict):
+        momentum = {}
+
+    # 逐旬更新每位候选皇子势头
+    valid_uids = set(race["candidates"])
+    for uid, child, mother, is_player in princes:
+        base = compute_heir_momentum_base(game_state, child, mother)
+        prev = momentum.get(uid)
+        if prev is None:
+            cur = base + random.randint(-3, 3)
+        else:
+            drift = (base - prev) * 0.25
+            cur = prev + drift + random.choice([-1, -1, 0, 1, 1]) * random.randint(1, 5)
+        momentum[uid] = max(0, min(100, int(round(cur))))
+    # 清理已出局（非候选）的旧记录
+    for uid in list(momentum.keys()):
+        if uid not in valid_uids:
+            momentum.pop(uid, None)
+    race["momentum"] = momentum
+
+    # 随机叙事事件（边疆捷报 / 失仪等），影响个别皇子势头
+    if princes and random.random() < 0.5:
+        uid, child, mother, is_player = random.choice(princes)
+        name = child.get("name", "皇子")
+        good = random.random() < 0.55
+        delta = random.randint(3, 9)
+        if good:
+            momentum[uid] = max(0, min(100, momentum.get(uid, 0) + delta))
+            flavor = random.choice([
+                f"👑 {name}获边疆捷报，势头大涨（+{delta}）",
+                f"📜 {name}朝会奏对得体，颇得群臣称许（+{delta}）",
+                f"🎋 {name}贤名远播，宗室多有附议（+{delta}）",
+            ])
+        else:
+            momentum[uid] = max(0, min(100, momentum.get(uid, 0) - delta))
+            flavor = random.choice([
+                f"⚠️ {name}朝仪失措，被御史弹劾，声望受损（-{delta}）",
+                f"🕯️ {name}行事乖张，皇帝闻之不悦（-{delta}）",
+                f"📉 {name}结党之嫌被议，势头受挫（-{delta}）",
+            ])
+        events.append(flavor)
+        race["events"].append(flavor)
+
+    # 储君呼声与皇帝议储
+    ranked = sorted(princes, key=lambda t: momentum.get(t[0], 0), reverse=True)
+    if ranked:
+        top_uid, top_child, top_mother, _tp = ranked[0]
+        top_m = momentum.get(top_uid, 0)
+        second_m = momentum.get(ranked[1][0], 0) if len(ranked) > 1 else 0
+        top_name = top_child.get("name", "皇子")
+        if top_m >= 80 and (top_m - second_m) >= 30:
+            msg = f"📣 朝野呼声高涨，{top_name}势倾诸皇子，储位之相已现！"
+            events.append(msg)
+            race["events"].append(msg)
+            game_state.add_memory(msg)
+
+        emperor_health = int(emperor.get("health", 80) or 80)
+        if top_m >= 95 and emperor_health < 50 and random.random() < 0.5:
+            _heir_race_settle(game_state, top_uid, top_child, top_mother)
+            msg = f"👑 皇帝召宗室大臣入宫议储，当廷册立{top_name}为太子！夺嫡尘埃落定。"
+            events.append(msg)
+            race["events"].append(msg)
+            game_state.add_memory(msg)
+            race["active"] = False
+            race["outcome"] = "settled"
+
+    return events
+
+
 def serialize_npcs_for_client(game_state):
     result = {}
     for name, npc in game_state.npcs.items():
@@ -4416,6 +4609,10 @@ def next_period():
         prince_events.extend(process_child_milestones(child, "你的", game_state))
     child_life_events = process_player_child_events(game_state)
     prince_events.extend(child_life_events)
+    # ---- 夺嫡暗流：储君空悬时逐旬更新皇子势头 ----
+    heir_race_events = process_heir_race(game_state)
+    for evt in heir_race_events:
+        intelligence.append(evt)
     if prince_events:
         for evt in prince_events:
             game_state.add_memory(evt)
@@ -4777,6 +4974,7 @@ def next_period():
         "heir_status": game_state.heir_status,
         "palaces": PALACE_LIST,
         "emperor": game_state.emperor,
+        "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)),
     })
 
 @app.route('/api/intrigue/targets', methods=['GET'])
@@ -5224,7 +5422,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None))})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None))})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -5776,6 +5974,7 @@ def child_interact():
     player_id = data.get('player_id')
     action = data.get('action')
     child_index = data.get('child_index', 0)
+    child_uid = data.get('child_uid')
     mother_name = data.get('mother_name')
     game_state, err = session_or_404(player_id)
     if err:
@@ -5784,16 +5983,24 @@ def child_interact():
     if not ok:
         return err
 
-    if mother_name and mother_name != game_state.name:
-        if mother_name not in game_state.npcs:
-            return jsonify({"error": "目标不存在"}), 404
-        children = game_state.npcs[mother_name].get("children", [])
+    # 夺嫡造势/打压可作用于任意皇子（含非玩家亲子），优先按 child_uid 定位
+    if child_uid is not None and action in ("boost_heir", "undermine_heir"):
+        child, resolved_mother = _find_prince_by_uid(game_state, child_uid)
+        if child is None:
+            return jsonify({"error": "子嗣不存在", "success": False}), 404
+        if mother_name is None:
+            mother_name = resolved_mother
     else:
-        children = game_state.children
+        if mother_name and mother_name != game_state.name:
+            if mother_name not in game_state.npcs:
+                return jsonify({"error": "目标不存在"}), 404
+            children = game_state.npcs[mother_name].get("children", [])
+        else:
+            children = game_state.children
 
-    if child_index < 0 or child_index >= len(children):
-        return jsonify({"error": "子嗣不存在"}), 404
-    child = children[child_index]
+        if child_index < 0 or child_index >= len(children):
+            return jsonify({"error": "子嗣不存在"}), 404
+        child = children[child_index]
     ensure_child_fields(child)
     child_name = child.get("name", "未命名")
     age = int(child.get("age", 0))
@@ -5961,6 +6168,61 @@ def child_interact():
         craft = random.choice(["绣花手帕", "香囊", "团扇", "荷包"])
         narration = f"你教{child_name}绣{craft}，针脚渐巧，天资+{talent_gain}，亲密度+{aff_gain}"
         effects = {"talent": talent_gain, "affection": aff_gain}
+    elif action == "boost_heir":
+        # 为某皇子造势：消耗银两50 + 行动点1（行动点已由 guard_action 扣除）
+        if child.get("gender") != "皇子":
+            return jsonify({"error": "只可为皇子造势", "success": False}), 400
+        if not child.get("alive", True):
+            return jsonify({"error": "此子已不在人世", "success": False}), 400
+        if game_state.silver < 50:
+            return jsonify({"error": "银两不足，造势需50两", "success": False}), 400
+        race = getattr(game_state, "heir_race", None)
+        if not (isinstance(race, dict) and race.get("active")):
+            return jsonify({"error": "当前并非夺嫡之期，无从造势", "success": False}), 400
+        uid = ensure_child_uid(game_state, child)
+        if uid not in (race.get("candidates") or []):
+            return jsonify({"error": "此皇子尚未参与夺嫡（须年满8岁）", "success": False}), 400
+        game_state.silver -= 50
+        momentum = race.setdefault("momentum", {})
+        momentum[uid] = max(0, min(100, momentum.get(uid, 0) + 5))
+        effects = {"silver": -50, "momentum": 5}
+        # 造势者非其生母/养母时，被其生母记恨
+        target_mother = child.get("adoptive_mother") or child.get("birth_mother") or mother_name or ""
+        narration = f"你为皇子{child_name}暗中造势，其夺嫡势头+5"
+        if target_mother and target_mother != game_state.name:
+            game_state.rivalries[target_mother] = game_state.rivalries.get(target_mother, 0) + 15
+            if target_mother in game_state.relationships:
+                game_state.relationships[target_mother]["好感"] = max(-100, game_state.relationships[target_mother].get("好感", 0) - 8)
+            narration += f"。{target_mother}察觉你插手其子储位，心生记恨（摩擦+15）"
+            effects["rivalry"] = 15
+    elif action == "undermine_heir":
+        # 打压某皇子：消耗银两30 + 行动点1，需心计≥50
+        if child.get("gender") != "皇子":
+            return jsonify({"error": "只可打压皇子", "success": False}), 400
+        if not child.get("alive", True):
+            return jsonify({"error": "此子已不在人世", "success": False}), 400
+        if game_state.attributes.get("心计", 0) < 50:
+            return jsonify({"error": "心计不足（需≥50），暗中构陷力有不逮", "success": False}), 400
+        if game_state.silver < 30:
+            return jsonify({"error": "银两不足，打压需30两", "success": False}), 400
+        race = getattr(game_state, "heir_race", None)
+        if not (isinstance(race, dict) and race.get("active")):
+            return jsonify({"error": "当前并非夺嫡之期，无从打压", "success": False}), 400
+        uid = ensure_child_uid(game_state, child)
+        if uid not in (race.get("candidates") or []):
+            return jsonify({"error": "此皇子尚未参与夺嫡（须年满8岁）", "success": False}), 400
+        game_state.silver -= 30
+        momentum = race.setdefault("momentum", {})
+        if random.random() < 0.30:
+            # 阴谋败露
+            game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - 10)
+            game_state.attributes["宠爱"] = max(0, game_state.attributes.get("宠爱", 0) - 5)
+            effects = {"silver": -30, "威望": -10, "宠爱": -5}
+            narration = f"你暗中打压皇子{child_name}，不料阴谋败露！威望-10，宠爱-5"
+        else:
+            momentum[uid] = max(0, min(100, momentum.get(uid, 0) - 4))
+            effects = {"silver": -30, "momentum": -4}
+            narration = f"你暗中构陷皇子{child_name}，其夺嫡势头-4，无人察觉"
     else:
         return jsonify({"error": "未知互动"}), 400
 
@@ -5980,6 +6242,8 @@ def child_interact():
         "silver": game_state.silver,
         "remaining_actions": game_state.remaining_actions,
         "max_actions": game_state.max_actions,
+        "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)),
+        "rivalries": game_state.rivalries,
     })
 
 # ============================================================

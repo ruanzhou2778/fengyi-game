@@ -108,6 +108,40 @@ def default_heir_status():
     }
 
 
+def default_heir_race():
+    """夺嫡暗流默认状态：未激活、无候选、无势头。"""
+    return {
+        "active": False,
+        "candidates": [],
+        "momentum": {},
+        "events": [],
+        "outcome": None,
+    }
+
+
+def normalize_heir_race(data):
+    """归一化夺嫡状态字典，兼容旧存档缺字段。"""
+    base = default_heir_race()
+    if isinstance(data, dict):
+        base["active"] = bool(data.get("active", False))
+        cand = data.get("candidates", [])
+        base["candidates"] = [str(x) for x in cand] if isinstance(cand, list) else []
+        mo = data.get("momentum", {})
+        if isinstance(mo, dict):
+            clean = {}
+            for k, v in mo.items():
+                try:
+                    clean[str(k)] = max(0, min(100, int(v)))
+                except (TypeError, ValueError):
+                    continue
+            base["momentum"] = clean
+        ev = data.get("events", [])
+        base["events"] = list(ev) if isinstance(ev, list) else []
+        outcome = data.get("outcome")
+        base["outcome"] = outcome if outcome in (None, "settled") else None
+    return base
+
+
 class Servant:
     def __init__(self, name, type_, loyalty=50, skill=30, age=None):
         self.name = name
@@ -217,6 +251,8 @@ class GameState:
         self.frameups = {"seq": 1, "cases": [], "log": []}
         # 公主择婿——三大朝堂势力好感度（默认各 50）
         self.court_faction_favor = default_court_faction_favor()
+        # 夺嫡暗流——储君空悬时的多方博弈
+        self.heir_race = default_heir_race()
         self.emperor = {
             "name": "萧景琰",
             "personality": random.choice([p.value for p in EmperorPersonality]),
@@ -423,6 +459,7 @@ class GameState:
             "chonghua": getattr(self, "chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
             "court_faction_favor": normalize_court_faction_favor(getattr(self, "court_faction_favor", None)),
+            "heir_race": normalize_heir_race(getattr(self, "heir_race", None)),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -521,6 +558,7 @@ class GameState:
             game_state.chonghua = data.get("chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []})
             game_state.frameups = data.get("frameups", {"seq": 1, "cases": [], "log": []})
             game_state.court_faction_favor = normalize_court_faction_favor(data.get("court_faction_favor"))
+            game_state.heir_race = normalize_heir_race(data.get("heir_race"))
             try:
                 game_state.child_uid_seq = max(1, int(data.get("child_uid_seq", 1) or 1))
             except (TypeError, ValueError):
