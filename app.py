@@ -18,7 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 load_dotenv()
-from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, default_heir_status
+from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor
 from scenarios import START_SCENARIOS, apply_scenario
 from events import get_daily_actions, apply_daily_action
 from names import (
@@ -32,7 +32,10 @@ from family_backgrounds import (
     generate_official_background,
     generate_official_background_for_name,
     get_family_score,
+    _pick_official_title,
+    GRADE_BASE_SCORE,
 )
+from names import random_given, random_surname, EMPEROR_GIVEN, EMPEROR_SURNAMES
 from player_traits import apply_trait_bonuses, get_trait_catalog, suggest_traits
 from palace_extra import (
     start_duel, play_duel_skill, resolve_duel, chat_probe, pray_or_curse,
@@ -1914,6 +1917,50 @@ CHILD_MOOD_EMOJI = {"开心": "😊", "平静": "😌", "思念": "🥺", "兴�
 STORY_THEMES = ["嫦娥奔月", "武松打虎", "孔融让梨", "司马光砸缸", "精卫填海", "牛郎织女"]
 GRAB_ITEMS = ["书卷", "金印", "弓箭", "凤钗", "算盘", "绣球"]
 
+# ============================================================
+#  公主择婿与省亲 · 配置常量
+# ============================================================
+PRINCESS_MARRY_MIN_AGE = 15          # 及笄可议婚年龄
+PRINCESS_SUITOR_MIN = 3              # 每次相看候选驸马下限
+PRINCESS_SUITOR_MAX = 5              # 每次相看候选驸马上限
+BETROTH_COST = 60                   # 定亲纳采礼（银两）
+MARRY_COST = 150                    # 出降 / 和亲大典（银两）
+INSPECT_COST_ACTION = 1             # 细察候选人耗行动点
+PRINCESS_VISIT_INTERVAL = 6         # 出嫁后省亲最短间隔（旬）
+MANSION_MAX_LEVEL = 5               # 公主府规模上限
+MANSION_UPGRADE_BASE = 120          # 公主府扩建基数（×等级）
+
+# 公主隐藏择偶偏好（情感锚点）；与候选人 hidden_tags / 明属性挂钩
+PRINCESS_PREFERENCES = ["文雅清流", "英武豪迈", "温厚持重", "俊逸风流", "务实干练"]
+
+# 候选驸马隐藏标签（细察后揭示）：好坏参半，制造张力
+SUITOR_HIDDEN_TAGS = [
+    {"key": "情深义重", "good": True, "desc": "对公主一往情深，婚后琴瑟和谐"},
+    {"key": "文采斐然", "good": True, "desc": "才名远播，清流敬重"},
+    {"key": "少年英才", "good": True, "desc": "年少有为，前途无量"},
+    {"key": "家风清正", "good": True, "desc": "门风严谨，无骄纵之气"},
+    {"key": "外戚之相", "good": False, "desc": "家族权重，恐成外戚坐大之患"},
+    {"key": "风流成性", "good": False, "desc": "素有薄幸之名，恐负公主"},
+    {"key": "志大才疏", "good": False, "desc": "眼高手低，难担大任"},
+    {"key": "党争漩涡", "good": False, "desc": "身陷派系倾轧，祸福难料"},
+]
+
+# 皇帝人格 → 择婿决策类型映射（作为「皇帝亲裁」时的权重）
+EMPEROR_DECISION_TYPE = {
+    "明君": "平衡型",
+    "痴情": "慈父型",
+    "昏君": "功利型",
+    "多疑": "功利型",
+}
+
+# 决策类型 → 各维度权重（用于评估候选人「圣意契合度」，供玩家参考）
+DECISION_WEIGHTS = {
+    "慈父型": {"looks": 0.20, "talent": 0.20, "family": 0.15, "ambition": 0.15, "preference_match": 0.30},
+    "功利型": {"family": 0.45, "ambition": 0.25, "talent": 0.20, "preference_match": 0.10},
+    "平衡型": {"family": 0.30, "talent": 0.30, "looks": 0.20, "preference_match": 0.20},
+}
+
+
 # —— 子嗣过继配置 ——
 ADOPT_MIN_RANK = "贵人"              # 收养他人子嗣所需最低位份
 ADOPT_TARGET_MIN_RANK = "嫔"         # 接受送养（被托付）所需最低位份
@@ -2080,6 +2127,16 @@ def ensure_child_fields(child):
     child.setdefault("guardian", "")           # 监护人（空表示由重华宫统一抚养）
     child.setdefault("in_chonghua", False)     # 是否在重华宫在馆
     child.setdefault("uid", None)              # 唯一标识
+    # ---- 公主择婿与省亲（仅对 gender=="公主" 有实际意义，字段对所有子嗣安全存在） ----
+    child.setdefault("marriage_status", "未议")   # 未议 → 议婚中 → 已定 → 已嫁 → 和亲 / 守寡
+    child.setdefault("suitors", [])               # 当前候选驸马列表（每旬缓存）
+    child.setdefault("suitors_period", None)       # 候选人生成于哪一旬（防重复刷新）
+    child.setdefault("consort", None)              # 已定 / 已嫁后的驸马对象
+    child.setdefault("mansion", None)              # 公主府经营对象（出嫁后建立）
+    child.setdefault("marriage_events", [])        # 婚后事件流水
+    child.setdefault("preference", None)           # 公主本人隐藏择偶偏好（情感锚点）
+    child.setdefault("marriage_authority", None)   # 婚事决策权归属（皇帝下放给生母/皇后时为其名）
+    child.setdefault("last_visit_period", None)    # 上次省亲的旬标记
     return child
 
 def ensure_child_uid(game_state, child):
@@ -2274,6 +2331,9 @@ def process_child_milestones(child, prefix, game_state=None):
         else:
             events.append(f"🌸 {prefix}公主 {child_name} 十岁及笄预备，宫中瞩目。")
             child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + random.randint(3, 8))
+            # 生成公主隐藏择偶偏好（情感锚点），十岁初显性情
+            if not child.get("preference"):
+                child["preference"] = random.choice(PRINCESS_PREFERENCES)
         if game_state:
             game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes["宠爱"] + 5)
     elif age_years == 12 and not child.get("twelve_years", False):
@@ -2286,6 +2346,18 @@ def process_child_milestones(child, prefix, game_state=None):
                 game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes["威望"] + 12)
         else:
             events.append(f"✨ {prefix}{gender} {child_name} 十二岁才名初显，学识精进！")
+    elif age_years == 15 and not child.get("fifteen_years", False):
+        child["fifteen_years"] = True
+        if gender == "公主":
+            # 及笄礼：解锁择婿。marriage_status 若仍是「未议」则不改，仅点亮入口叙事
+            if not child.get("preference"):
+                child["preference"] = random.choice(PRINCESS_PREFERENCES)
+            events.append(f"🌺 {prefix}公主 {child_name} 已及笄，可议婚论嫁，宫中始为其相看驸马。")
+            if game_state:
+                game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 3)
+        else:
+            child["wit"] = min(100, child.get("wit", 40) + random.randint(4, 10))
+            events.append(f"🎓 {prefix}皇子 {child_name} 年已十五，学问渐成，可参赞政务。")
     return events
 
 def process_player_child_events(game_state):
@@ -2395,7 +2467,307 @@ def process_player_child_events(game_state):
             msg = f"🌟 {name} 展露{child_talent_label(child['talent'])}之姿"
             events.append(msg)
             add_child_event(child, msg)
+
+    # ---- 已出嫁公主：省亲与公主府随机事件 ----
+    events.extend(process_princess_marriage_events(game_state))
     return events
+
+
+# ============================================================
+#  公主择婿与省亲 · 核心逻辑
+# ============================================================
+
+def period_stamp(game_state):
+    """当前一旬的唯一标记，用于「每旬限一次」与省亲间隔计算。"""
+    return f'{getattr(game_state, "year", 0)}-{getattr(game_state, "month", 0)}-{getattr(game_state, "day", 0)}'
+
+
+def is_princess(child):
+    return isinstance(child, dict) and child.get("gender") == "公主"
+
+
+def princess_prestige_tier(game_state, child):
+    """公主体面度：由生母位份 + 公主圣宠 + 记名嫡出综合，得出 low/mid/high。"""
+    favor = int(child.get("emperor_favor", 30) or 30)
+    mother_name = child.get("adoptive_mother") or child.get("birth_mother") or ""
+    mother_power = 0
+    if mother_name and mother_name == getattr(game_state, "name", ""):
+        mother_power = get_rank_power(game_state.rank.name, getattr(game_state, "nobletitle", None))
+    else:
+        npc = (getattr(game_state, "npcs", {}) or {}).get(mother_name)
+        if isinstance(npc, dict):
+            mother_power = get_rank_power(normalize_rank_name(npc.get("rank", "答应")), npc.get("nobletitle"))
+        else:
+            mother_power = get_rank_power(game_state.rank.name, getattr(game_state, "nobletitle", None))
+    is_heir_line = bool(child.get("is_heir"))
+    score = mother_power * 3 + favor * 0.5 + (20 if is_heir_line else 0)
+    if score >= 70:
+        return "high"
+    if score >= 40:
+        return "mid"
+    return "low"
+
+
+def suitor_grade_weights(tier):
+    """体面度→候选门第权重（grade 1..9，权重越大越常见）。"""
+    return {
+        "low":  [1, 2, 4, 8, 14, 18, 20, 16, 10],
+        "mid":  [3, 6, 10, 16, 20, 16, 12, 7, 4],
+        "high": [16, 20, 18, 14, 10, 7, 4, 2, 1],
+    }.get(tier, [3, 6, 10, 16, 20, 16, 12, 7, 4])
+
+
+def roll_hidden_tags(grade):
+    """按门第抽取隐藏标签：高门更易「外戚之相」，寒门更易「志大才疏」。"""
+    tags = []
+    pool = list(SUITOR_HIDDEN_TAGS)
+    n = random.randint(1, 2)
+    picks = random.sample(pool, min(n, len(pool)))
+    for t in picks:
+        if t["key"] == "外戚之相" and grade > 3 and random.random() < 0.6:
+            continue
+        if t["key"] == "少年英才" and grade > 6 and random.random() < 0.5:
+            continue
+        tags.append(t["key"])
+    return tags
+
+
+def suitor_male_name():
+    """生成驸马姓名：官宦子弟多用清朗男名，姓氏取民间姓。"""
+    surname = random_surname(NPC_SURNAMES)
+    return surname + random_given(EMPEROR_GIVEN, 0.5)
+
+
+def next_suitor_uid(game_state):
+    seq = int(getattr(game_state, "child_uid_seq", 1) or 1)
+    game_state.child_uid_seq = seq + 1
+    return f"s{seq}"
+
+
+def generate_suitors(game_state, child):
+    """为公主生成一批候选驸马，返回列表。门第随体面度上移。"""
+    tier = princess_prestige_tier(game_state, child)
+    weights = suitor_grade_weights(tier)
+    grades = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    count = random.randint(PRINCESS_SUITOR_MIN, PRINCESS_SUITOR_MAX)
+    suitors = []
+    for _ in range(count):
+        grade = random.choices(grades, weights=weights)[0]
+        faction = random.choice(list(COURT_FACTIONS.keys()))
+        base = GRADE_BASE_SCORE.get(grade, 45)
+        suitor = {
+            "uid": next_suitor_uid(game_state),
+            "name": suitor_male_name(),
+            "father_title": _pick_official_title(grade),
+            "faction": faction,
+            "grade": grade,
+            "family_score": base,
+            "family": base,
+            "talent": random.randint(35, 95),
+            "looks": random.randint(35, 95),
+            "age": random.randint(16, 26),
+            "ambition": random.randint(20, 90),
+            "hidden_tags": roll_hidden_tags(grade),
+            "inspected": False,
+        }
+        suitors.append(suitor)
+    return suitors
+
+
+def suitor_public_view(suitor):
+    """候选人对玩家的呈现：未细察时隐藏野心与标签。"""
+    view = {
+        "uid": suitor.get("uid"),
+        "name": suitor.get("name"),
+        "father_title": suitor.get("father_title"),
+        "faction": suitor.get("faction"),
+        "family": suitor.get("family"),
+        "talent": suitor.get("talent"),
+        "looks": suitor.get("looks"),
+        "age": suitor.get("age"),
+        "inspected": bool(suitor.get("inspected")),
+    }
+    if suitor.get("inspected"):
+        view["ambition"] = suitor.get("ambition")
+        view["hidden_tags"] = suitor.get("hidden_tags", [])
+        view["hidden_tag_descs"] = [
+            next((t["desc"] for t in SUITOR_HIDDEN_TAGS if t["key"] == k), k)
+            for k in suitor.get("hidden_tags", [])
+        ]
+    else:
+        view["ambition"] = None
+        view["hidden_tags"] = []
+    return view
+
+
+def emperor_decision_type(game_state, child):
+    """当前婚事决策类型：决策权已下放给生母/皇后时用「慈父型」（重情）；否则由皇帝人格映射。"""
+    if child.get("marriage_authority"):
+        return "慈父型"
+    personality = ""
+    emp = getattr(game_state, "emperor", None)
+    if isinstance(emp, dict):
+        personality = emp.get("personality", "")
+    return EMPEROR_DECISION_TYPE.get(personality, "平衡型")
+
+
+def preference_match_score(child, suitor):
+    """公主偏好与候选人的契合度（0–100）。"""
+    pref = child.get("preference")
+    if not pref:
+        return 50
+    talent = suitor.get("talent", 50)
+    looks = suitor.get("looks", 50)
+    faction = suitor.get("faction", "")
+    tags = suitor.get("hidden_tags", [])
+    score = 50
+    if pref == "文雅清流":
+        score = talent * 0.7 + (20 if faction == "文官党" else 0)
+        if "文采斐然" in tags:
+            score += 15
+    elif pref == "英武豪迈":
+        score = (looks * 0.4 + talent * 0.3) + (25 if faction == "武官党" else 0)
+        if "少年英才" in tags:
+            score += 12
+    elif pref == "温厚持重":
+        score = 60 + (15 if "家风清正" in tags else 0) - (20 if "风流成性" in tags else 0)
+    elif pref == "俊逸风流":
+        score = looks * 0.85
+        if "风流成性" in tags:
+            score += 10
+    elif pref == "务实干练":
+        score = talent * 0.5 + suitor.get("ambition", 50) * 0.3 - (15 if "志大才疏" in tags else 0)
+    return max(0, min(100, int(score)))
+
+
+def suitor_court_favor_score(game_state, child, suitor):
+    """候选人「圣意契合度」：按当前决策类型加权各维度，供玩家参考。"""
+    dtype = emperor_decision_type(game_state, child)
+    weights = DECISION_WEIGHTS.get(dtype, DECISION_WEIGHTS["平衡型"])
+    dims = {
+        "looks": suitor.get("looks", 50),
+        "talent": suitor.get("talent", 50),
+        "family": suitor.get("family", 50),
+        "ambition": suitor.get("ambition", 50),
+        "preference_match": preference_match_score(child, suitor),
+    }
+    total = 0.0
+    for k, w in weights.items():
+        total += dims.get(k, 50) * w
+    return max(0, min(100, int(total)))
+
+
+def find_player_princess(game_state, child_uid):
+    """在玩家子嗣中按 uid 找到公主，返回 (index, child) 或 (-1, None)。"""
+    for idx, c in enumerate(getattr(game_state, "children", []) or []):
+        ensure_child_fields(c)
+        if str(c.get("uid")) == str(child_uid) and is_princess(c):
+            return idx, c
+    return -1, None
+
+
+def default_mansion():
+    return {"level": 1, "income": 0, "reputation": 50, "log": []}
+
+
+def apply_marriage_court_effect(game_state, child):
+    """公主出降后，驸马家族势力抬升其所属派系的朝堂好感度；命中外戚之相则埋隐患。"""
+    consort = child.get("consort") or {}
+    faction = consort.get("faction")
+    power = int(consort.get("family_score", 50) or 50)
+    favor = normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None))
+    if faction in favor:
+        favor[faction] = max(0, min(100, favor[faction] + round(power / 20)))
+    game_state.court_faction_favor = favor
+    notes = []
+    if "外戚之相" in consort.get("hidden_tags", []):
+        notes.append(f"⚠️ {consort.get('name','驸马')}出身权门，朝野已有『外戚坐大』之虑。")
+    return notes
+
+
+def process_princess_marriage_events(game_state):
+    """已出嫁公主的省亲与公主府随机事件（挂转旬 tick）。"""
+    events = []
+    stamp = period_stamp(game_state)
+    for child in getattr(game_state, "children", []) or []:
+        if not is_princess(child):
+            continue
+        ensure_child_fields(child)
+        if child.get("marriage_status") not in ("已嫁", "和亲"):
+            continue
+        mansion = child.get("mansion") or {}
+        if mansion:
+            income = int(mansion.get("income", 0) or 0)
+            if income:
+                game_state.silver = getattr(game_state, "silver", 0) + income
+        last = child.get("last_visit_period")
+        if last != stamp and random.random() < 0.28 and child.get("marriage_status") == "已嫁":
+            child["last_visit_period"] = stamp
+            events.append(_princess_visit_event(game_state, child))
+        if child.get("marriage_status") == "已嫁" and random.random() < 0.18:
+            events.append(_mansion_random_event(game_state, child))
+    return [e for e in events if e]
+
+
+def _princess_visit_event(game_state, child):
+    """按公主偏好与驸马隐藏标签生成省亲基调。"""
+    name = child.get("name", "公主")
+    consort = child.get("consort") or {}
+    match = preference_match_score(child, consort)
+    tags = consort.get("hidden_tags", [])
+    if match < 40 or "风流成性" in tags:
+        loss = random.randint(3, 7)
+        child["affection"] = max(0, child.get("affection", 30) - loss)
+        child["mood"] = "闷闷不乐"
+        game_state.attributes["宠爱"] = max(0, game_state.attributes.get("宠爱", 0) - 2)
+        msg = f"🥀 {name}回宫省亲，强颜欢笑，言语间难掩委屈，母女相对唏嘘（亲密-{loss}）"
+    else:
+        gain = random.randint(2, 6)
+        child["affection"] = min(100, child.get("affection", 30) + gain)
+        child["mood"] = "开心"
+        game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + 2)
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 2)
+        msg = f"🌸 {name}偕驸马回宫省亲，举止雍容，母女团聚其乐融融（亲密+{gain}）"
+    add_child_event(child, msg)
+    child.setdefault("marriage_events", []).insert(0, msg)
+    return msg
+
+
+def _mansion_random_event(game_state, child):
+    """公主府随机事件：产业增收 / 驸马纳妾 / 驸马升迁等。"""
+    name = child.get("name", "公主")
+    consort = child.get("consort") or {}
+    mansion = child.get("mansion")
+    if not isinstance(mansion, dict):
+        mansion = default_mansion()
+        child["mansion"] = mansion
+    roll = random.random()
+    if roll < 0.35:
+        inc = random.randint(3, 10)
+        mansion["income"] = int(mansion.get("income", 0) or 0) + inc
+        msg = f"🏯 {name}公主府名下田庄增收，岁入渐丰（每旬进项+{inc}两）"
+    elif roll < 0.6 and "风流成性" in consort.get("hidden_tags", []):
+        child["affection"] = max(0, child.get("affection", 30) - random.randint(2, 5))
+        child["mood"] = "闷闷不乐"
+        mansion["reputation"] = max(0, int(mansion.get("reputation", 50) or 50) - random.randint(3, 8))
+        msg = f"💔 {consort.get('name','驸马')}欲纳妾室，{name}心中郁郁，公主府声望受损"
+    elif roll < 0.8:
+        rep = random.randint(3, 8)
+        mansion["reputation"] = min(100, int(mansion.get("reputation", 50) or 50) + rep)
+        msg = f"🎊 {name}公主府大宴宾客，冠盖云集，府邸声望+{rep}"
+    else:
+        faction = consort.get("faction")
+        favor = normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None))
+        if faction in favor:
+            favor[faction] = min(100, favor[faction] + random.randint(1, 4))
+        game_state.court_faction_favor = favor
+        msg = f"📜 {consort.get('name','驸马')}获朝廷擢用，{faction or '其党'}声势更盛"
+    add_child_event(child, msg)
+    child.setdefault("marriage_events", []).insert(0, msg)
+    return msg
+
+
+
 
 def maybe_child_bonus_event(game_state, child, child_name):
     """互动时小概率触发额外事件，返回附加叙述或空串。"""
@@ -4852,7 +5224,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state)})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None))})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -6965,6 +7337,315 @@ def chonghua_action():
     return ok(f'{child_name}已归你抚养，威望+{gain}{tail}')
 
 
+# ============================================================
+#  公主择婿与省亲 · API 路由
+# ============================================================
+
+def princess_serialize(game_state, child):
+    """公主择婿/婚姻状态序列化，供前端渲染。"""
+    ensure_child_fields(child)
+    suitors = child.get("suitors") or []
+    suitor_views = []
+    for s in suitors:
+        v = suitor_public_view(s)
+        v["court_favor"] = suitor_court_favor_score(game_state, child, s)
+        suitor_views.append(v)
+    return {
+        "uid": child.get("uid"),
+        "name": child.get("name"),
+        "age": int(child.get("age", 0)),
+        "marriage_status": child.get("marriage_status", "未议"),
+        "preference": child.get("preference"),
+        "marriage_authority": child.get("marriage_authority"),
+        "decision_type": emperor_decision_type(game_state, child),
+        "suitors": suitor_views,
+        "consort": child.get("consort"),
+        "mansion": child.get("mansion"),
+        "marriage_events": (child.get("marriage_events") or [])[:8],
+        "prestige_tier": princess_prestige_tier(game_state, child),
+    }
+
+
+@app.route('/api/princess/list', methods=['GET'])
+def princess_list():
+    """列出玩家名下所有公主的婚姻信息。"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    princesses = []
+    for c in getattr(game_state, "children", []) or []:
+        if is_princess(c) and c.get("alive", True):
+            princesses.append(princess_serialize(game_state, c))
+    return jsonify({
+        "princesses": princesses,
+        "marry_min_age": PRINCESS_MARRY_MIN_AGE,
+        "betroth_cost": BETROTH_COST,
+        "marry_cost": MARRY_COST,
+        "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)),
+        "factions": COURT_FACTIONS,
+    })
+
+
+@app.route('/api/princess/suitors', methods=['POST'])
+def princess_suitors():
+    """生成/返回候选驸马（每旬缓存一次，重复请求返回缓存）。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    refresh = bool(data.get('refresh'))
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_princess(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该公主"}), 404
+    if int(child.get("age", 0)) < PRINCESS_MARRY_MIN_AGE:
+        return jsonify({"success": False, "error": f"公主尚未及笄（需满{PRINCESS_MARRY_MIN_AGE}岁）"}), 400
+    if child.get("marriage_status") in ("已定", "已嫁", "和亲"):
+        return jsonify({"success": False, "error": "公主婚事已定，不必再相看"}), 400
+    stamp = period_stamp(game_state)
+    if refresh or not child.get("suitors") or child.get("suitors_period") != stamp:
+        child["suitors"] = generate_suitors(game_state, child)
+        child["suitors_period"] = stamp
+    if child.get("marriage_status") == "未议":
+        child["marriage_status"] = "议婚中"
+    autosave_session(player_id)
+    return jsonify({"success": True, "princess": princess_serialize(game_state, child)})
+
+# @@PRINCESS_ROUTES_ANCHOR@@
+
+
+@app.route('/api/princess/inspect', methods=['POST'])
+def princess_inspect():
+    """细察某候选驸马，花行动点揭示其野心与隐藏标签。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    suitor_uid = data.get('suitor_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_princess(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该公主"}), 404
+    suitor = next((s for s in (child.get("suitors") or []) if str(s.get("uid")) == str(suitor_uid)), None)
+    if not suitor:
+        return jsonify({"success": False, "error": "候选人不存在或已更替"}), 404
+    if suitor.get("inspected"):
+        return jsonify({"success": True, "message": "已细察过此人", "princess": princess_serialize(game_state, child)})
+    if game_state.remaining_actions <= 0:
+        return jsonify({"success": False, "error": "行动点不足，请先转旬"}), 400
+    game_state.consume_action()
+    suitor["inspected"] = True
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "message": f"细察{suitor.get('name')}，其底细已然明了",
+        "remaining_actions": game_state.remaining_actions,
+        "princess": princess_serialize(game_state, child),
+    })
+
+
+@app.route('/api/princess/authority', methods=['POST'])
+def princess_authority():
+    """皇帝将某公主的婚事决策权下放给生母/皇后（依宠爱而定）。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_princess(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该公主"}), 404
+    if child.get("marriage_status") in ("已定", "已嫁", "和亲"):
+        return jsonify({"success": False, "error": "婚事已定，无需再请旨"}), 400
+    if child.get("marriage_authority"):
+        return jsonify({"success": False, "error": "婚事决策权已在你手中"}), 400
+    favor = game_state.attributes.get("宠爱", 0)
+    if favor < 60:
+        return jsonify({"success": False, "error": f"圣宠未浓（需宠爱≥60，当前{favor}），皇帝不愿假手于人"}), 400
+    child["marriage_authority"] = game_state.name
+    game_state.add_memory(f"👑 皇帝念你宠冠六宫，特许你亲裁{child.get('name')}的婚事")
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "message": f"皇帝已将{child.get('name')}的婚事交由你定夺",
+        "princess": princess_serialize(game_state, child),
+    })
+
+
+@app.route('/api/princess/betroth', methods=['POST'])
+def princess_betroth():
+    """定亲：选定一名候选驸马，写入 consort，marriage_status→已定。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    suitor_uid = data.get('suitor_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_princess(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该公主"}), 404
+    if int(child.get("age", 0)) < PRINCESS_MARRY_MIN_AGE:
+        return jsonify({"success": False, "error": f"公主尚未及笄（需满{PRINCESS_MARRY_MIN_AGE}岁）"}), 400
+    if child.get("marriage_status") in ("已定", "已嫁", "和亲"):
+        return jsonify({"success": False, "error": "公主婚事已定"}), 400
+    suitor = next((s for s in (child.get("suitors") or []) if str(s.get("uid")) == str(suitor_uid)), None)
+    if not suitor:
+        return jsonify({"success": False, "error": "候选人不存在或已更替"}), 404
+    if game_state.silver < BETROTH_COST:
+        return jsonify({"success": False, "error": f"银两不足，纳采需{BETROTH_COST}两"}), 400
+    game_state.silver -= BETROTH_COST
+    child["consort"] = dict(suitor)
+    child["marriage_status"] = "已定"
+    child["suitors"] = []
+    child["suitors_period"] = None
+    match = preference_match_score(child, suitor)
+    if match < 40:
+        child["affection"] = max(0, child.get("affection", 30) - random.randint(2, 6))
+        child["mood"] = "闷闷不乐"
+    msg = f"💐 你为{child.get('name')}定下驸马{suitor.get('name')}（{suitor.get('faction')}·{suitor.get('father_title')}之子），纳采礼成，耗银{BETROTH_COST}两"
+    game_state.add_memory(msg)
+    add_child_event(child, msg)
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "message": msg,
+        "silver": game_state.silver,
+        "princess": princess_serialize(game_state, child),
+    })
+
+# @@PRINCESS_ROUTES_ANCHOR2@@
+
+
+@app.route('/api/princess/marry', methods=['POST'])
+def princess_marry():
+    """出降：下赐婚圣旨，建立公主府，触发朝堂联动。mode=='和亲' 走番邦和亲分支。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    mode = data.get('mode', '出降')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_princess(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该公主"}), 404
+    if game_state.silver < MARRY_COST:
+        return jsonify({"success": False, "error": f"银两不足，大典需{MARRY_COST}两"}), 400
+
+    if mode == '和亲':
+        if child.get("marriage_status") in ("已嫁", "和亲"):
+            return jsonify({"success": False, "error": "公主已经出嫁"}), 400
+        if int(child.get("age", 0)) < PRINCESS_MARRY_MIN_AGE:
+            return jsonify({"success": False, "error": f"公主尚未及笄（需满{PRINCESS_MARRY_MIN_AGE}岁）"}), 400
+        game_state.silver -= MARRY_COST
+        realm = random.choice(["北狄", "西凉", "南诏", "东瀛", "吐蕃"])
+        child["consort"] = {
+            "name": f"{realm}王子",
+            "faction": "宗室党",
+            "father_title": f"{realm}可汗",
+            "family_score": random.randint(60, 85),
+            "hidden_tags": [],
+            "talent": random.randint(40, 80),
+            "looks": random.randint(40, 80),
+            "age": random.randint(18, 30),
+            "ambition": random.randint(40, 90),
+        }
+        child["marriage_status"] = "和亲"
+        child["mansion"] = None
+        child["suitors"] = []
+        child["suitors_period"] = None
+        game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + random.randint(10, 18))
+        child["affection"] = max(0, child.get("affection", 30) - random.randint(5, 12))
+        child["mood"] = "思念"
+        msg = f"🕊️ {child.get('name')}远嫁{realm}和亲，销烟止戈，社稷得安，然骨肉天各一方（威望大增）"
+        game_state.add_memory(msg)
+        add_child_event(child, msg)
+        child.setdefault("marriage_events", []).insert(0, msg)
+        autosave_session(player_id)
+        return jsonify({
+            "success": True, "message": msg,
+            "silver": game_state.silver,
+            "princess": princess_serialize(game_state, child),
+        })
+
+    if child.get("marriage_status") != "已定" or not child.get("consort"):
+        return jsonify({"success": False, "error": "尚未定亲，不能下赐婚圣旨"}), 400
+    game_state.silver -= MARRY_COST
+    child["marriage_status"] = "已嫁"
+    child["mansion"] = default_mansion()
+    consort = child.get("consort") or {}
+    court_notes = apply_marriage_court_effect(game_state, child)
+    game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + random.randint(5, 10))
+    msg = f"🎊 赐婚圣旨已下，{child.get('name')}出降驸马{consort.get('name')}，凤冠霞帔，十里红妆，耗银{MARRY_COST}两"
+    game_state.add_memory(msg)
+    add_child_event(child, msg)
+    child.setdefault("marriage_events", []).insert(0, msg)
+    for note in court_notes:
+        game_state.add_memory(note)
+    autosave_session(player_id)
+    return jsonify({
+        "success": True, "message": msg,
+        "court_notes": court_notes,
+        "silver": game_state.silver,
+        "princess": princess_serialize(game_state, child),
+    })
+
+
+@app.route('/api/princess/mansion', methods=['POST'])
+def princess_mansion():
+    """公主府经营：扩建府邸（数值经营）。op=='upgrade'。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    op = data.get('op', 'upgrade')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_princess(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该公主"}), 404
+    if child.get("marriage_status") != "已嫁":
+        return jsonify({"success": False, "error": "公主尚未出降，未立府邸"}), 400
+    mansion = child.get("mansion") or default_mansion()
+    child["mansion"] = mansion
+    if op == 'upgrade':
+        level = int(mansion.get("level", 1) or 1)
+        if level >= MANSION_MAX_LEVEL:
+            return jsonify({"success": False, "error": f"公主府已达最高规模（{MANSION_MAX_LEVEL}进）"}), 400
+        cost = MANSION_UPGRADE_BASE * level
+        if game_state.silver < cost:
+            return jsonify({"success": False, "error": f"银两不足，扩建需{cost}两"}), 400
+        game_state.silver -= cost
+        mansion["level"] = level + 1
+        mansion["income"] = int(mansion.get("income", 0) or 0) + random.randint(5, 12)
+        mansion["reputation"] = min(100, int(mansion.get("reputation", 50) or 50) + random.randint(4, 8))
+        msg = f"🏗️ {child.get('name')}公主府扩建至第{mansion['level']}进，进项与声望俱增，耗银{cost}两"
+        mansion.setdefault("log", []).insert(0, msg)
+        game_state.add_memory(msg)
+        autosave_session(player_id)
+        return jsonify({
+            "success": True, "message": msg,
+            "silver": game_state.silver,
+            "princess": princess_serialize(game_state, child),
+        })
+    return jsonify({"success": False, "error": "未知的公主府操作"}), 400
 
 
 @app.route('/')

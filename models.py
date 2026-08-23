@@ -13,6 +13,32 @@ RANK_POWER = {
     "贵妃": 17, "皇贵妃": 18, "皇后": 19,
 }
 
+# ---- 公主择婿 · 三大朝堂势力 ----
+# 复用现有「母家 / 官阶」观念，抽象为三派。驸马家族所属派系会影响朝堂好感度。
+COURT_FACTIONS = {
+    "文官党": {"desc": "科举清流、内阁六部，重礼法名分", "weight_attr": "才情"},
+    "武官党": {"desc": "边镇将门、京营勋卫，重军功实力", "weight_attr": "威望"},
+    "宗室党": {"desc": "亲王郡王、宗人府，重血脉正统", "weight_attr": "福运"},
+}
+
+
+def default_court_faction_favor():
+    """三派好感默认各 50。"""
+    return {name: 50 for name in COURT_FACTIONS}
+
+
+def normalize_court_faction_favor(data):
+    """归一化朝堂好感度字典，缺失的派系补 50，非法值裁剪到 0–100。"""
+    base = default_court_faction_favor()
+    if isinstance(data, dict):
+        for name in COURT_FACTIONS:
+            try:
+                base[name] = max(0, min(100, int(data.get(name, 50))))
+            except (TypeError, ValueError):
+                base[name] = 50
+    return base
+
+
 def normalize_rank_name(rank_name):
     if rank_name in RANK_POWER or rank_name == "妃":
         return rank_name
@@ -189,6 +215,8 @@ class GameState:
         # chonghua.children 保存在馆子嗣的 uid 列表；log/events 为流水记录
         self.chonghua = {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}
         self.frameups = {"seq": 1, "cases": [], "log": []}
+        # 公主择婿——三大朝堂势力好感度（默认各 50）
+        self.court_faction_favor = default_court_faction_favor()
         self.emperor = {
             "name": "萧景琰",
             "personality": random.choice([p.value for p in EmperorPersonality]),
@@ -394,6 +422,7 @@ class GameState:
             "heir_status": getattr(self, "heir_status", default_heir_status()),
             "chonghua": getattr(self, "chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
+            "court_faction_favor": normalize_court_faction_favor(getattr(self, "court_faction_favor", None)),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -491,6 +520,7 @@ class GameState:
             game_state.six_palace_assistant = data.get("six_palace_assistant")
             game_state.chonghua = data.get("chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []})
             game_state.frameups = data.get("frameups", {"seq": 1, "cases": [], "log": []})
+            game_state.court_faction_favor = normalize_court_faction_favor(data.get("court_faction_favor"))
             try:
                 game_state.child_uid_seq = max(1, int(data.get("child_uid_seq", 1) or 1))
             except (TypeError, ValueError):

@@ -969,6 +969,16 @@
                         <div id="chonghuaLog" style="font-size:7px;color:var(--text-light);margin-top:3px;"></div>
                     </div>
                 </div>
+                <div class="stat-block">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="block-title">🌸 公 主 择 婿 与 省 亲</span>
+                        <button class="config-toggle-btn" id="princessToggleBtn" style="margin-top:0;" onclick="princessToggle()">收起</button>
+                    </div>
+                    <div id="princessPanel" style="display:block;margin-top:2px;padding-top:2px;border-top:1px solid var(--border-light);font-size:8px;color:var(--text-mid);">
+                        <div id="princessFactionBar" style="font-size:7px;color:var(--text-light);margin-bottom:3px;line-height:1.5;"></div>
+                        <div id="princessList" style="display:flex;flex-direction:column;gap:3px;">加载中…</div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="page" id="pageConflict">
@@ -1526,7 +1536,7 @@ document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
 const pageId=this.dataset.page;
 document.getElementById(pageId).classList.add('active');
 if(pageId==='pageConflict') { loadConflictTargets(); toggleIntrigueTargetRequirement(); }
-if(pageId==='pageChonghua') { renderChonghuaInline(); }
+if(pageId==='pageChonghua') { renderChonghuaInline(); renderPrincessInline(); }
 });
 });
 
@@ -2943,6 +2953,16 @@ function renderChildDetailHtml(child, motherName) {
     }
 
     const rankBadge = ordinal ? `<span style="background:var(--gold-light);padding:1px 8px;border-radius:10px;font-size:8px;">${ordinal}</span>` : '';
+    // 公主婚嫁状态徽标（≥15岁提示可前往「重华宫」页择婿）
+    let marriageBadge = '';
+    if (child.gender === '公主') {
+        const ms = child.marriage_status || '未议';
+        if (ms && ms !== '未议') {
+            marriageBadge = `<span style="background:#fce4ec;color:#a04a6a;padding:1px 8px;border-radius:10px;font-size:8px;">💐 ${ms}</span>`;
+        } else if (age >= 15) {
+            marriageBadge = `<span style="background:#fff4e0;color:#a06a2a;padding:1px 8px;border-radius:10px;font-size:8px;">🌸 可议婚（重华宫页）</span>`;
+        }
+    }
 
     return `
         <div style="display:flex;flex-direction:column;gap:6px;font-size:10px;color:var(--text-mid);max-width:100%;">
@@ -2956,6 +2976,7 @@ function renderChildDetailHtml(child, motherName) {
                         <span style="background:${isPrince ? '#e8eaf6' : '#fce4ec'};padding:1px 8px;border-radius:10px;font-size:8px;">${child.gender || '未知'}</span>
                         <span style="background:var(--gold-light);padding:1px 8px;border-radius:10px;font-size:8px;">${title}</span>
                         ${rankBadge}
+                        ${marriageBadge}
                         <span style="font-size:8px;color:var(--text-light);">${age}岁 · ${trait}</span>
                         <span class="child-mood-tag">${moodEmoji} ${mood}</span>
                     </div>
@@ -4638,6 +4659,193 @@ async function chonghuaPatronize(){
     await chonghuaAction('patronize', null, amount);
     if(input) input.value = '';
 }
+
+// ---------- 公主择婿与省亲（内联面板） ----------
+let princessVisible = true;
+let princessLoading = false;
+let princessLastData = null;
+
+function princessToggle(){
+    const p = document.getElementById('princessPanel');
+    const btn = document.getElementById('princessToggleBtn');
+    if(!p) return;
+    princessVisible = !princessVisible;
+    p.style.display = princessVisible ? 'block' : 'none';
+    if(btn) btn.textContent = princessVisible ? '收起' : '展开';
+    if(princessVisible) renderPrincessInline();
+}
+
+const FACTION_COLOR = {'文官党':'#5a7a9a','武官党':'#9a5a4a','宗室党':'#8a6a3a'};
+
+function princessFavorBadge(pct){
+    const c = pct >= 66 ? '#5a8a6a' : (pct >= 33 ? '#8a7a3a' : '#8a4a3a');
+    return `<span style="color:${c};">${pct}</span>`;
+}
+
+async function renderPrincessInline(){
+    if(princessLoading) return;
+    if(!playerId){
+        const el = document.getElementById('princessList');
+        if(el) el.innerHTML = '<span style="color:var(--text-light);font-size:7px;">请先开始游戏</span>';
+        return;
+    }
+    const listEl = document.getElementById('princessList');
+    const barEl = document.getElementById('princessFactionBar');
+    if(!listEl) return;
+    princessLoading = true;
+    try{
+        const r = await myFetch(`${API_BASE}/api/princess/list?player_id=${playerId}`, {skipLoading:true});
+        const d = await parseApiResponse(r, {allowError:true});
+        if(d.error){ listEl.innerHTML = `<span style="color:#8a3a2a;">❌ ${escapeHtmlText(d.error)}</span>`; return; }
+        princessLastData = d;
+        if(barEl){
+            const favor = d.court_faction_favor || {};
+            const parts = Object.keys(favor).map(k => {
+                const c = FACTION_COLOR[k] || 'var(--text-mid)';
+                return `<span style="color:${c};">${k} ${favor[k]}</span>`;
+            });
+            barEl.innerHTML = '⚖️ 朝堂势力：' + (parts.length ? parts.join(' · ') : '—');
+        }
+        const princesses = d.princesses || [];
+        if(princesses.length === 0){
+            listEl.innerHTML = '<span style="color:var(--text-light);font-size:7px;">暂无公主，或公主尚未及笄</span>';
+            return;
+        }
+        listEl.innerHTML = princesses.map(p => princessCardHtml(p, d)).join('');
+    }catch(e){
+        console.error(e);
+        if(listEl) listEl.innerHTML = '<span style="color:#8a3a2a;">❌ 加载失败</span>';
+    }finally{
+        princessLoading = false;
+    }
+}
+
+function princessCardHtml(p, meta){
+    const minAge = (meta && meta.marry_min_age) || 15;
+    const status = p.marriage_status || '未议';
+    const prefText = p.preference ? `偏好「${p.preference}」` : '性情未明';
+    const authText = p.marriage_authority ? '（你可亲裁婚事）' : '（皇帝亲裁）';
+    let inner = '';
+    if(status === '已嫁' || status === '和亲'){
+        inner = princessMarriedHtml(p);
+    }else if(p.age < minAge){
+        inner = `<div style="font-size:7px;color:var(--text-light);">尚未及笄（需满${minAge}岁），静待成长。</div>`;
+    }else{
+        inner = princessMarriageHtml(p, meta);
+    }
+    return `<div style="background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:5px 6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+            <span style="font-size:9px;color:var(--text-dark);font-weight:600;">🌸 ${escapeHtmlText(p.name||'公主')} <span style="font-size:7px;color:var(--text-light);">${p.age}岁</span></span>
+            <span style="font-size:7px;color:var(--gold-dark);">${status}</span>
+        </div>
+        <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">${prefText} · ${p.decision_type||''}${authText}</div>
+        ${inner}
+    </div>`;
+}
+
+function status_is_betrothed(p){ return p.marriage_status === '已定' && p.consort; }
+
+function princessMarriageHtml(p, meta){
+    const uid = p.uid;
+    const suitors = p.suitors || [];
+    let html = '';
+    if(status_is_betrothed(p)){
+        const c = p.consort || {};
+        html += `<div style="font-size:8px;color:var(--text-mid);margin-bottom:3px;">已定驸马：<strong>${escapeHtmlText(c.name||'')}</strong>（${escapeHtmlText(c.faction||'')}·${escapeHtmlText(c.father_title||'')}之子）</div>`;
+        html += `<div style="display:flex;gap:3px;flex-wrap:wrap;">
+            <button class="chonghua-btn" onclick="princessMarry('${uid}','出降')">🎊 下赐婚圣旨（出降）</button>
+        </div>`;
+        return html;
+    }
+    if(suitors.length === 0){
+        html += `<button class="chonghua-btn" onclick="princessSuitors('${uid}')">💐 相看驸马</button>`;
+    }else{
+        html += `<div style="display:flex;flex-direction:column;gap:2px;margin-bottom:2px;">`;
+        html += suitors.map(s => suitorRowHtml(uid, s)).join('');
+        html += `</div>`;
+        html += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+            <button class="chonghua-btn" onclick="princessSuitors('${uid}', true)">🔄 另择一批</button>`;
+        if(!p.marriage_authority){
+            html += `<button class="chonghua-btn" onclick="princessAuthority('${uid}')">🙏 请旨亲裁</button>`;
+        }
+        html += `</div>`;
+    }
+    html += `<div style="margin-top:3px;border-top:1px dashed var(--border-light);padding-top:3px;">
+        <button class="chonghua-btn" style="background:#f0e6d8;" onclick="princessMarry('${uid}','和亲')">🕊️ 遣其和亲番邦</button>
+    </div>`;
+    return html;
+}
+
+function suitorRowHtml(uid, s){
+    const fc = FACTION_COLOR[s.faction] || 'var(--text-mid)';
+    let hidden = '';
+    if(s.inspected){
+        const tags = (s.hidden_tags||[]).length ? (s.hidden_tags||[]).map(t=>`<span style="color:#8a5a3a;">${escapeHtmlText(t)}</span>`).join('、') : '无异常';
+        hidden = `<div style="font-size:6px;color:var(--text-light);margin-top:1px;">野心${s.ambition} · ${tags}</div>`;
+    }else{
+        hidden = `<div style="font-size:6px;color:var(--text-light);margin-top:1px;">野心/隐情未察</div>`;
+    }
+    return `<div style="border:1px solid var(--border-light);border-radius:4px;padding:3px 4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:8px;color:var(--text-dark);">${escapeHtmlText(s.name)} <span style="font-size:6px;color:${fc};">${escapeHtmlText(s.faction||'')}</span></span>
+            <span style="font-size:6px;color:var(--gold-dark);">圣意契合 ${princessFavorBadge(s.court_favor||0)}</span>
+        </div>
+        <div style="font-size:6px;color:var(--text-light);">${escapeHtmlText(s.father_title||'')}之子 · 家世${s.family} · 才学${s.talent} · 样貌${s.looks} · ${s.age}岁</div>
+        ${hidden}
+        <div style="display:flex;gap:2px;margin-top:2px;">
+            ${s.inspected ? '' : `<button class="chonghua-btn" onclick="princessInspect('${uid}','${s.uid}')">🔍 细察(1行动)</button>`}
+            <button class="chonghua-btn" onclick="princessBetroth('${uid}','${s.uid}')">💍 定亲</button>
+        </div>
+    </div>`;
+}
+
+function princessMarriedHtml(p){
+    const c = p.consort || {};
+    const m = p.mansion;
+    const uid = p.uid;
+    let html = `<div style="font-size:8px;color:var(--text-mid);margin-bottom:2px;">驸马：<strong>${escapeHtmlText(c.name||'')}</strong>（${escapeHtmlText(c.faction||'')}）</div>`;
+    if(p.marriage_status === '和亲'){
+        html += `<div style="font-size:7px;color:#8a6a3a;">🕊️ 已远嫁番邦和亲，音书渐疏。</div>`;
+    }else if(m){
+        html += `<div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">🏯 公主府 ${m.level}进 · 进项${m.income}两/旬 · 声望${m.reputation}</div>`;
+        html += `<button class="chonghua-btn" onclick="princessMansion('${uid}')">🏗️ 扩建公主府</button>`;
+    }
+    const evs = p.marriage_events || [];
+    if(evs.length){
+        html += `<div style="font-size:6px;color:var(--text-light);margin-top:2px;">${evs.slice(0,3).map(e=>`<div>${escapeHtmlText(e)}</div>`).join('')}</div>`;
+    }
+    return html;
+}
+
+async function princessApi(path, body){
+    if(!playerId) return null;
+    try{
+        const r = await myFetch(`${API_BASE}/api/princess/${path}`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({player_id: playerId, ...body}), skipLoading:true
+        });
+        const res = await parseApiResponse(r, {allowError:true});
+        if(!res.success){ showToast('❌ ' + (res.error||'操作失败'), 'error'); return null; }
+        if(res.message){ showToast('✅ ' + res.message); if(typeof addLogEntry==='function') addLogEntry('🌸 ' + res.message, 'prince'); }
+        await renderPrincessInline();
+        await chonghuaRefreshState();
+        return res;
+    }catch(e){ console.error(e); showToast('❌ 操作失败','error'); return null; }
+}
+
+function princessSuitors(uid, refresh){ princessApi('suitors', {child_uid: uid, refresh: !!refresh}); }
+function princessInspect(uid, sid){ princessApi('inspect', {child_uid: uid, suitor_uid: sid}); }
+function princessAuthority(uid){ princessApi('authority', {child_uid: uid}); }
+function princessBetroth(uid, sid){
+    if(!confirm('确定为公主定下此驸马？定亲后不可更改。')) return;
+    princessApi('betroth', {child_uid: uid, suitor_uid: sid});
+}
+function princessMarry(uid, mode){
+    const tip = mode === '和亲' ? '确定遣公主远嫁番邦和亲？此举利社稷而伤骨肉。' : '确定下赐婚圣旨，让公主出降？';
+    if(!confirm(tip)) return;
+    princessApi('marry', {child_uid: uid, mode: mode});
+}
+function princessMansion(uid){ princessApi('mansion', {child_uid: uid, op:'upgrade'}); }
 
 
 </script>
