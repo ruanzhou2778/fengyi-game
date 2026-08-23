@@ -210,6 +210,12 @@
         .servant-card { display:inline-flex; align-items:center; gap:2px; background:var(--bg-card); border:1px solid var(--border-light); border-radius:10px; padding:1px 6px 1px 5px; font-size:7px; color:var(--text-mid); cursor:pointer; transition:all 0.2s; margin:1px; }
         .servant-card:hover { border-color:var(--gold); background:var(--gold-light); }
         .servant-card .s-type { font-size:6px; color:var(--text-light); background:#e8ddd0; padding:0 3px; border-radius:5px; }
+        .chonghua-mini-btn { margin-left:3px; padding:0 4px; font-size:6px; font-family:inherit; color:#8a6a3a; border:1px solid #d5b98a; border-radius:5px; background:#f5ede5; cursor:pointer; }
+        .chonghua-mini-btn:hover { background:var(--gold-light); border-color:var(--gold); }
+        .chonghua-mini-btn:disabled { opacity:.5; cursor:not-allowed; }
+        .chonghua-btn { padding:2px 5px; border:1px solid var(--border-light); border-radius:3px; background:var(--bg-card); cursor:pointer; font-family:inherit; font-size:8px; color:var(--text-dark); transition:all 0.2s; }
+        .chonghua-btn:hover { background:var(--gold-light); border-color:var(--gold); }
+        .chonghua-btn:disabled { opacity:.4; cursor:not-allowed; }
         .servant-card .s-loyalty { color:#2a5a4a; }
         .servant-card .s-skill { color:#8a5a3a; }
         .npc-pregnancy-badge { font-size:6px; padding:1px 4px; border-radius:6px; background:#fce4ec; color:#e91e63; display:inline-block; }
@@ -766,6 +772,10 @@
         .ending-actions .eb-restart { border-color: rgba(190,92,72,.52); background: rgba(190,92,72,.24); color: #f2c8bb; }
         .ending-warn-banner { background: linear-gradient(90deg, rgba(190,92,72,.24), rgba(33,25,24,.80)); border-color: rgba(190,92,72,.44); color: #f2c8bb; }
         .servant-card .s-type { background: rgba(201,168,106,.14); color: var(--text-light); }
+        .chonghua-mini-btn { background: rgba(201,168,106,.14) !important; border-color: rgba(201,168,106,.32) !important; color: #e3c78f !important; }
+        .chonghua-mini-btn:hover { background: rgba(201,168,106,.28) !important; border-color: var(--gold) !important; }
+        .chonghua-btn { background: rgba(201,168,106,.12) !important; border-color: rgba(201,168,106,.30) !important; color: #e3c78f !important; }
+        .chonghua-btn:hover { background: rgba(201,168,106,.26) !important; border-color: var(--gold) !important; }
         .servant-card .s-loyalty { color: #a8dcc4; }
         .servant-card .s-skill { color: #e3c78f; }
         .npc-pregnancy-badge { background: rgba(214,120,158,.20); color: #f3ccdb; }
@@ -900,10 +910,14 @@
                 <div class="stat-block">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span class="block-title">🏛️ 重 华 宫</span>
-                        <button class="config-toggle-btn" id="chonghuaToggleBtn" style="margin-top:0;">展开</button>
+                        <button class="config-toggle-btn" id="chonghuaToggleBtn" style="margin-top:0;" onclick="chonghuaToggle()">展开</button>
                     </div>
                     <div id="chonghuaPanel" style="display:none;margin-top:2px;padding-top:2px;border-top:1px solid var(--border-light);font-size:8px;color:var(--text-mid);">
-                        <span style="color:var(--text-light);font-size:7px;">加载中…</span>
+                        <div id="chonghuaStats" style="font-size:8px;color:var(--text-light);margin-bottom:3px;line-height:1.4;">加载中…</div>
+                        <div id="chonghuaChildList" style="display:flex;flex-wrap:wrap;gap:1px;margin-bottom:3px;"></div>
+                        <div id="chonghuaCandidateList" style="display:flex;flex-wrap:wrap;gap:1px;margin-bottom:3px;"></div>
+                        <div id="chonghuaManageBar" style="display:flex;gap:2px;flex-wrap:wrap;align-items:center;"></div>
+                        <div id="chonghuaLog" style="font-size:7px;color:var(--text-light);margin-top:3px;"></div>
                     </div>
                 </div>
                 <div class="stat-block" id="factionBlock"><div class="block-title">🤝 阵 营 关 系</div><div id="factionContent"><span style="color:var(--text-light);font-size:8px;">加载中...</span></div></div>
@@ -2101,6 +2115,8 @@ const fc=document.getElementById('factionContent');
 const rivals={}; if(data.rivalries){for(let k in data.rivalries){if(data.rivalries[k]>0) rivals[k]=data.rivalries[k];}}
 const allies={}; if(data.alliances){for(let k in data.alliances){if(data.alliances[k]>0) allies[k]=data.alliances[k];}}
 if(Object.keys(rivals).length===0&&Object.keys(allies).length===0){fc.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无仇敌或盟友</span>';}else{let html='';if(Object.keys(rivals).length>0)html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span style="font-size:8px;color:var(--text-light);">⚔️ 仇敌 ${Object.keys(rivals).length}人</span><button onclick="openRivalList()" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;font-size:8px;cursor:pointer;font-family:inherit;">查看</button></div>`;if(Object.keys(allies).length>0)html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span style="font-size:8px;color:var(--text-light);">🤝 盟友 ${Object.keys(allies).length}人</span><button onclick="openAllianceList()" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;font-size:8px;cursor:pointer;font-family:inherit;">查看</button></div>`;fc.innerHTML=html;}
+// 重华宫面板若已展开，随状态页一同刷新
+if(typeof chonghuaVisible!=='undefined'&&chonghuaVisible&&typeof renderChonghuaInline==='function'){renderChonghuaInline();}
 }
 
 function updateEmperorDisplay(data){if(data.emperor){const e=data.emperor;document.getElementById('empName').textContent=e.name||'萧景琰';document.getElementById('empPersonality').textContent=`${e.personality||'明君'}${e.age?` · ${e.age}岁`:''}`;const s=e.stats||{};document.getElementById('empStats').innerHTML=`<span>威严 ${s.威严||'-'}</span><span>仁德 ${s.仁德||'-'}</span><span>勤政 ${s.勤政||'-'}</span><span>好色 ${s.好色||'-'}</span>`;}}
@@ -4387,76 +4403,186 @@ window.addEventListener('pagehide', () => flushSaveOnBackground());
 window.addEventListener('pageshow', (e) => { if (e.persisted) resumeFromBackground(); });
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'){closeModal();closeSaveListModal();}if(e.key==='s'||e.key==='S'){if(playerId)saveGame('default');}});
 console.log('🌸 凤仪天下 · 完整修复版');
-// ---------- 重华宫 ----------
+// ---------- 重华宫（内联可展开面板） ----------
+let chonghuaVisible = false;
+let chonghuaLoading = false;
+let chonghuaLastData = null;
+
+function chonghuaSetBusy(busy){
+    chonghuaLoading = busy;
+    const bar = document.getElementById('chonghuaPanel');
+    if(!bar) return;
+    bar.querySelectorAll('button').forEach(b => { b.disabled = busy; });
+}
+
+function chonghuaJsArg(v){
+    // 用于内联 onclick 的字符串参数转义
+    return String(v === undefined || v === null ? '' : v).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+}
+
 async function renderChonghuaInline(){
     if(!playerId) return;
     const panel = document.getElementById('chonghuaPanel');
     if(!panel) return;
+    if(chonghuaLoading) return;          // 防抖：避免快速点击造成并发请求
+    chonghuaLoading = true;
+    const statsEl = document.getElementById('chonghuaStats');
+    const listEl = document.getElementById('chonghuaChildList');
+    const candEl = document.getElementById('chonghuaCandidateList');
+    const barEl = document.getElementById('chonghuaManageBar');
+    const logEl = document.getElementById('chonghuaLog');
     try{
-        const r = await myFetch(`${API_BASE}/api/chonghua?player_id=${playerId}`);
+        const r = await myFetch(`${API_BASE}/api/chonghua?player_id=${playerId}`, {skipLoading:true});
         const d = await r.json();
-        const c = d.chonghua || {founded:false};
+        if(d.error){ if(statsEl) statsEl.innerHTML = `<span style="color:#8a3a2a;">❌ ${escapeHtmlText(d.error)}</span>`; return; }
+        chonghuaLastData = d;
+        const ch = d.chonghua || {founded:false};
+        const inside = d.children || [];
+        const candidates = d.candidates || [];
+        const capacity = d.capacity || 3;
+        const canManage = !!d.can_manage_all;
         const info = d.info || {};
-        let html = `<div style="font-size:9px;color:var(--text-mid);max-width:100%;display:flex;flex-direction:column;gap:6px;">`;
-        if(!c.founded){
-            html += `<div style="font-size:8px;color:var(--text-light);">🏛️ 重华宫尚未开设（需${(info.manage_ranks||[]).join('/')}或协理六宫，威望≥${info.min_prestige||0}，${info.found_cost||0}两）</div>`;
-            html += `<button onclick="chonghuaAction('found')" class="interact-btn" style="margin-top:4px;">🏛️ 开设（${info.found_cost||0}两）</button>`;
-        }else{
-            html += `<div style="font-size:8px;">🏛️ 重华宫已开设 · 等级${c.level||1} · 预算${c.budget||0}两 · 容量${(c.level||1)*2}</div>`;
-            const children = c.children || [];
-            const inside = children.filter(ch=>ch.in_chonghua);
-            const candidates = children.filter(ch=>!ch.in_chonghua);
-            html += `<div style="font-size:7px;color:var(--text-light);margin:2px 0;">在馆：${inside.map(ch=>ch.name).join('、')||'无'}；候选：${candidates.map(ch=>ch.name).join('、')||'无'}</div>`;
-            const opts = candidates.map(ch=>`<option value="${ch.uid||ch.name}">${ch.name}</option>`).join('');
-            html += `<div style="display:flex;gap:4px;flex-wrap:wrap;">
-                <select id="chonghuaChildSelect" style="font-size:7px;">${opts||'<option>无候选</option>'}</select>
-                <button onclick="chonghuaAction('admit')" class="interact-btn">收容</button>
-                <button onclick="chonghuaAction('tutor')" class="interact-btn">授业</button>
-                <button onclick="chonghuaAction('adopt')" class="interact-btn">亲养</button>
-                <button onclick="chonghuaAction('release')" class="interact-btn">迁出</button>
-                <button onclick="chonghuaAction('upgrade')" class="interact-btn">扩建</button>
-                <input id="chonghuaBudget" type="number" placeholder="拨用度" style="width:60px;font-size:7px;">
-                <button onclick="chonghuaAction('patronize')" class="interact-btn">拨用度</button>
-            </div>`;
-            const log = (c.log||[]).slice(-5).reverse();
-            if(log.length){
-                html += `<div style="font-size:7px;color:var(--text-light);margin-top:4px;border-top:1px dashed var(--border);padding-top:2px;">最近日志：${log.map(l=>l.msg||JSON.stringify(l)).join('；')}</div>`;
+
+        if(statsEl){
+            statsEl.innerHTML = ch.founded
+                ? `🏛️ ${ch.level||1}级 · 👶 ${inside.length}/${capacity}人 · 💰 用度${ch.budget||0}两${canManage?' · 👑 统管全宫':''}`
+                : `❌ 尚未开设（需${(info.manage_ranks||[]).join('/')}位份或协理六宫，威望≥${info.min_prestige||0}，${info.found_cost||0}两）`;
+        }
+
+        if(listEl){
+            listEl.innerHTML = (!ch.founded || inside.length === 0)
+                ? '<span style="color:var(--text-light);font-size:7px;">暂无皇嗣在馆</span>'
+                : inside.map(c => chonghuaChildCardHtml(c, canManage, true)).join('');
+        }
+
+        if(candEl){
+            if(!ch.founded || candidates.length === 0){
+                candEl.innerHTML = '';
+            }else{
+                candEl.innerHTML = '<span style="font-size:7px;color:var(--text-light);margin-right:2px;">候选：</span>'
+                    + candidates.map(c => chonghuaChildCardHtml(c, canManage, false)).join('');
             }
         }
-        html += `</div>`;
-        panel.innerHTML = html;
+
+        if(barEl){
+            if(!ch.founded){
+                barEl.innerHTML = `<button onclick="chonghuaAction('found')" class="chonghua-btn">🏛️ 开设（${info.found_cost||0}两）</button>`;
+            }else{
+                barEl.innerHTML = `
+                    <button onclick="chonghuaAction('upgrade')" class="chonghua-btn">📈 扩建（${info.upgrade_cost||0}两）</button>
+                    <input id="chonghuaBudget" type="number" min="1" placeholder="拨用度" style="width:56px;font-size:7px;padding:1px 3px;font-family:inherit;">
+                    <button onclick="chonghuaPatronize()" class="chonghua-btn">💰 拨用度</button>
+                `;
+            }
+        }
+
+        if(logEl){
+            const log = (ch.log || []).slice(-3).reverse();
+            logEl.innerHTML = log.length ? '📜 ' + log.map(l => escapeHtmlText(l.msg || '')).join('；') : '';
+        }
     }catch(e){
-        panel.innerHTML = '<span style="color:#8a3a2a;font-size:7px;">❌ 加载重华宫失败</span>';
+        console.error(e);
+        if(statsEl) statsEl.innerHTML = '<span style="color:#8a3a2a;font-size:7px;">❌ 加载重华宫失败</span>';
+    }finally{
+        chonghuaLoading = false;
     }
 }
-let chonghuaVisible=false;
-document.getElementById('chonghuaToggleBtn')?.addEventListener('click',function(){
-    const p=document.getElementById('chonghuaPanel');
-    chonghuaVisible=!chonghuaVisible;
-    p.style.display=chonghuaVisible?'block':'none';
-    this.textContent=chonghuaVisible?'收起':'展开';
-    if(chonghuaVisible){renderChonghuaInline();}
-});
-async function chonghuaAction(action){
-    if(!playerId) return;
-    const sel = document.getElementById('chonghuaChildSelect');
-    const uid = sel?.value;
-    const amt = document.getElementById('chonghuaBudget')?.value;
-    const payload = {player_id:playerId, action};
-    if(uid) payload.uid = uid;
-    if(amt) payload.amount = Number(amt);
-    try{
-        const r = await myFetch(`${API_BASE}/api/chonghua/action`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-                const res = await r.json();
-        if(!res.success){showToast('❌ '+ (res.error||'操作失败'), 'error'); return;}
-        showToast(res.message || '操作成功');
-        const p=document.getElementById('chonghuaPanel');
-        if(p){p.style.display='block';chonghuaVisible=true;}
-        const btn = document.getElementById('chonghuaToggleBtn');
-        if (btn) btn.textContent = '收起';
-        renderChonghuaInline(); // 刷新内联内容
-    }catch(e){showToast('❌ 操作失败');}
+
+function chonghuaChildCardHtml(c, canManage, isInside){
+    const age = Math.floor(Number(c.age) || 0);
+    const icon = c.gender === '皇子' ? '👑' : '🌸';
+    const uid = chonghuaJsArg(c.uid);
+    const guardian = c.guardian || '';
+    const mother = c._mother || '';
+    const allowed = (c._owner_type === 'player') || canManage;   // 自己的孩子或有全宫权限
+    const btn = (act, label) => `<button onclick="event.stopPropagation();chonghuaAction('${act}','${uid}')" class="chonghua-mini-btn">${label}</button>`;
+    let actions = '';
+    if(allowed){
+        actions = isInside
+            ? `${guardian ? '' : btn('adopt','亲养')}${btn('tutor','授业')}${btn('release','迁出')}`
+            : btn('admit','收容');
+    }
+    return `<span class="servant-card" onclick="openChonghuaChildDetail('${uid}')" title="${escapeHtmlText(mother)}所出，点击查看详情">
+        ${icon} ${escapeHtmlText(c.name)} <span style="font-size:6px;color:var(--text-light);">${age}岁</span>
+        ${guardian ? `<span style="font-size:6px;color:#b8945a;">（${escapeHtmlText(guardian)}抚养）</span>` : ''}
+        ${actions}
+    </span>`;
 }
+
+function chonghuaFindChild(uid){
+    const d = chonghuaLastData || {};
+    const all = (d.children || []).concat(d.candidates || []);
+    return all.find(c => String(c.uid) === String(uid)) || null;
+}
+
+function openChonghuaChildDetail(uid){
+    const c = chonghuaFindChild(uid);
+    if(!c){ showToast('❌ 子嗣信息不存在'); return; }
+    if(c._owner_type === 'player'){
+        openPlayerChildDetail(c._index);
+    }else{
+        openChildDetail(c._mother, c._index);
+    }
+}
+
+function chonghuaToggle(){
+    const p = document.getElementById('chonghuaPanel');
+    const btn = document.getElementById('chonghuaToggleBtn');
+    if(!p) return;
+    chonghuaVisible = !chonghuaVisible;
+    p.style.display = chonghuaVisible ? 'block' : 'none';
+    if(btn) btn.textContent = chonghuaVisible ? '收起' : '展开';
+    if(chonghuaVisible) renderChonghuaInline();
+}
+
+async function chonghuaRefreshState(){
+    try{
+        const sr = await myFetch(`${API_BASE}/api/state/${playerId}`, {skipLoading:true});
+        const sd = await sr.json();
+        if(sd && !sd.error) updateUI(sd);
+    }catch(e){ console.error(e); }
+}
+
+// 统一的重华宫操作入口：found / upgrade / patronize / admit / tutor / adopt / release
+async function chonghuaAction(action, uid, amount){
+    if(!playerId) return;
+    if(chonghuaLoading) return;              // 防抖：避免连点造成并发与 429
+    chonghuaSetBusy(true);
+    const payload = {player_id: playerId, action};
+    if(uid) payload.uid = uid;
+    if(amount) payload.amount = Number(amount);
+    try{
+        const r = await myFetch(`${API_BASE}/api/chonghua/action`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+            skipLoading: true
+        });
+        const res = await r.json();
+        if(!res.success){ showToast('❌ ' + (res.error || '操作失败'), 'error'); return; }
+        showToast('✅ ' + (res.message || '操作成功'));
+        const p = document.getElementById('chonghuaPanel');
+        if(p){ p.style.display = 'block'; chonghuaVisible = true; }
+        const btn = document.getElementById('chonghuaToggleBtn');
+        if(btn) btn.textContent = '收起';
+    }catch(e){
+        console.error(e);
+        showToast('❌ 操作失败', 'error');
+        return;
+    }finally{
+        chonghuaSetBusy(false);
+    }
+    await renderChonghuaInline();   // 刷新内联面板
+    await chonghuaRefreshState();   // 同步银钱、威望、子嗣等主界面数据
+}
+
+async function chonghuaPatronize(){
+    const input = document.getElementById('chonghuaBudget');
+    const amount = parseInt(input && input.value, 10);
+    if(!amount || amount <= 0){ showToast('请输入有效金额'); return; }
+    await chonghuaAction('patronize', null, amount);
+}
+
 
 </script>
 </body>

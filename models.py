@@ -186,6 +186,7 @@ class GameState:
         self.child_uid_seq = 1
         self.heir_status = default_heir_status()
         # 重华宫与陷害系统新属性
+        # chonghua.children 保存在馆子嗣的 uid 列表；log/events 为流水记录
         self.chonghua = {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}
         self.frameups = {"seq": 1, "cases": [], "log": []}
         self.emperor = {
