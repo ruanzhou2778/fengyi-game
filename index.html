@@ -80,7 +80,7 @@
         .loading.active { display: block; }
         .loading .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-light); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .bottom-nav { display: flex; background: var(--bg-nav); border-top: 1px solid var(--border-light); flex-shrink: 0; position: sticky; bottom: 0; z-index: 10; }
+        .bottom-nav { display: flex; background: var(--bg-nav); border-top: 1px solid var(--border-light); flex-shrink: 0; }
         .bottom-nav .nav-item { flex: 1; text-align: center; padding: 3px 0 5px 0; cursor: pointer; transition: all 0.2s ease; color: var(--text-light); font-size: 8px; letter-spacing: 1px; position: relative; border: none; background: transparent; font-family: 'Georgia','楷体',serif; }
         .bottom-nav .nav-item .nav-icon { font-size: 14px; display: block; margin-bottom: 1px; }
         .bottom-nav .nav-item.active { color: var(--gold-dark); }
@@ -4439,10 +4439,12 @@ async function renderChonghuaInline(){
     if(!playerId){
         const statsEl = document.getElementById('chonghuaStats');
         if(statsEl) statsEl.innerHTML = '<span style="color:var(--text-light);font-size:7px;">请先开始游戏</span>';
+        console.log('renderChonghuaInline: playerId not set');
         return;
     }
     const panel = document.getElementById('chonghuaPanel');
     if(!panel) return;
+    console.log('renderChonghuaInline: starting render, chonghuaLoading =', chonghuaLoading);
     chonghuaLoading = true;
     const statsEl = document.getElementById('chonghuaStats');
     const listEl = document.getElementById('chonghuaChildList');
