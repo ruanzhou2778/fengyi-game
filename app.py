@@ -1227,6 +1227,17 @@ def _player_relationship_promotion(game_state):
     target_rank = step.get("target")
     if not target_rank or not can_promote_to_rank(game_state, target_rank):
         return None
+    # 盟友美言的底层晋升逻辑不可以大于（放宽于）晋升必须条件：宠爱与属性等硬门槛
+    # 必须先行达标，与 check_promotion_condition 采用同一套门槛（含专宠折扣）。
+    # 盟友美言仅能帮衬资历（免除历练旬数），不能绕过圣宠与才德等晋升必须条件。
+    favor_req = get_favor_threshold(game_state.rank.name)
+    favor = game_state.attributes.get("宠爱", 0)
+    favor_ratio = 0.92 if is_super_favor(game_state) else 1.0
+    if favor < int(favor_req * favor_ratio):
+        return None
+    attr_ratio = 0.94 if is_super_favor(game_state) else 1.0
+    if not check_promotion_thresholds_met(game_state, attr_ratio):
+        return None
     queen_name = get_queen_name(game_state)
     assistant_name = _get_six_palace_assistant(game_state)
     queen_rel = _get_relation_favor(game_state, queen_name) if queen_name else 0
