@@ -907,20 +907,8 @@
                         <button onclick="hireServant('太监')" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;color:var(--text-dark);font-size:8px;cursor:pointer;font-family:inherit;">招募太监 (20两)</button>
                     </div>
                 </div>
-                <div class="stat-block">
-                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <span class="block-title">🏛️ 重 华 宫</span>
-                        <button class="config-toggle-btn" id="chonghuaToggleBtn" style="margin-top:0;" onclick="chonghuaToggle()">展开</button>
-                    </div>
-                    <div id="chonghuaPanel" style="display:none;margin-top:2px;padding-top:2px;border-top:1px solid var(--border-light);font-size:8px;color:var(--text-mid);">
-                        <div id="chonghuaStats" style="font-size:8px;color:var(--text-light);margin-bottom:3px;line-height:1.4;">加载中…</div>
-                        <div id="chonghuaChildList" style="display:flex;flex-wrap:wrap;gap:1px;margin-bottom:3px;"></div>
-                        <div id="chonghuaCandidateList" style="display:flex;flex-wrap:wrap;gap:1px;margin-bottom:3px;"></div>
-                        <div id="chonghuaManageBar" style="display:flex;gap:2px;flex-wrap:wrap;align-items:center;"></div>
-                        <div id="chonghuaLog" style="font-size:7px;color:var(--text-light);margin-top:3px;"></div>
-                    </div>
-                </div>
                 <div class="stat-block" id="factionBlock"><div class="block-title">🤝 阵 营 关 系</div><div id="factionContent"><span style="color:var(--text-light);font-size:8px;">加载中...</span></div></div>
+                <div class="stat-block">
                 <div class="stat-block">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
                         <span style="font-size:8px;color:var(--text-light);letter-spacing:1px;">⚙️ 配 置</span>
@@ -963,6 +951,23 @@
                         </div>
                         <button class="save-config-btn" id="saveConfigBtn" style="margin-top:2px;padding:1px 8px;border:1px solid var(--gold);border-radius:3px;background:var(--gold-light);color:var(--text-dark);font-size:7px;cursor:pointer;font-family:inherit;">💾 保存配置</button>
                         <div id="configStatus" style="font-size:6px;color:var(--text-light);margin-top:1px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="page" id="pageChonghua">
+            <div class="status-scroll" style="height:100%;overflow-y:auto;display:flex;flex-direction:column;gap:3px;padding-bottom:2px;">
+                <div class="stat-block">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="block-title">🏛️ 重 华 宫</span>
+                        <button class="config-toggle-btn" id="chonghuaToggleBtn" style="margin-top:0;" onclick="chonghuaToggle()">收起</button>
+                    </div>
+                    <div id="chonghuaPanel" style="display:block;margin-top:2px;padding-top:2px;border-top:1px solid var(--border-light);font-size:8px;color:var(--text-mid);">
+                        <div id="chonghuaStats" style="font-size:8px;color:var(--text-light);margin-bottom:3px;line-height:1.4;">加载中…</div>
+                        <div id="chonghuaChildList" style="display:flex;flex-wrap:wrap;gap:1px;margin-bottom:3px;"></div>
+                        <div id="chonghuaCandidateList" style="display:flex;flex-wrap:wrap;gap:1px;margin-bottom:3px;"></div>
+                        <div id="chonghuaManageBar" style="display:flex;gap:2px;flex-wrap:wrap;align-items:center;"></div>
+                        <div id="chonghuaLog" style="font-size:7px;color:var(--text-light);margin-top:3px;"></div>
                     </div>
                 </div>
             </div>
@@ -1059,6 +1064,7 @@
         <button class="nav-item active" data-page="pageStory"><span class="nav-icon">📖</span> 记事</button>
         <button class="nav-item" data-page="pageHarem"><span class="nav-icon">👥</span> 后宫</button>
         <button class="nav-item" data-page="pageStatus"><span class="nav-icon">📊</span> 状态</button>
+        <button class="nav-item" data-page="pageChonghua"><span class="nav-icon">🏛️</span> 重华宫</button>
         <button class="nav-item" data-page="pageConflict"><span class="nav-icon">⚔️</span> 宫斗</button>
     </div>
 </div>
@@ -1521,6 +1527,7 @@ document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
 const pageId=this.dataset.page;
 document.getElementById(pageId).classList.add('active');
 if(pageId==='pageConflict') { loadConflictTargets(); toggleIntrigueTargetRequirement(); }
+if(pageId==='pageChonghua' && chonghuaVisible) { renderChonghuaInline(); }
 });
 });
 
@@ -2115,8 +2122,11 @@ const fc=document.getElementById('factionContent');
 const rivals={}; if(data.rivalries){for(let k in data.rivalries){if(data.rivalries[k]>0) rivals[k]=data.rivalries[k];}}
 const allies={}; if(data.alliances){for(let k in data.alliances){if(data.alliances[k]>0) allies[k]=data.alliances[k];}}
 if(Object.keys(rivals).length===0&&Object.keys(allies).length===0){fc.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无仇敌或盟友</span>';}else{let html='';if(Object.keys(rivals).length>0)html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span style="font-size:8px;color:var(--text-light);">⚔️ 仇敌 ${Object.keys(rivals).length}人</span><button onclick="openRivalList()" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;font-size:8px;cursor:pointer;font-family:inherit;">查看</button></div>`;if(Object.keys(allies).length>0)html+=`<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0;"><span style="font-size:8px;color:var(--text-light);">🤝 盟友 ${Object.keys(allies).length}人</span><button onclick="openAllianceList()" style="padding:1px 6px;border:1px solid var(--border-light);border-radius:3px;background:transparent;font-size:8px;cursor:pointer;font-family:inherit;">查看</button></div>`;fc.innerHTML=html;}
-// 重华宫面板若已展开，随状态页一同刷新
-if(typeof chonghuaVisible!=='undefined'&&chonghuaVisible&&typeof renderChonghuaInline==='function'){renderChonghuaInline();}
+// 重华宫面板若已展开且当前在重华宫页，随状态页一同刷新
+if(typeof chonghuaVisible!=='undefined'&&chonghuaVisible&&typeof renderChonghuaInline==='function'){
+    const chPage = document.getElementById('pageChonghua');
+    if(!chPage || chPage.classList.contains('active')) renderChonghuaInline();
+}
 }
 
 function updateEmperorDisplay(data){if(data.emperor){const e=data.emperor;document.getElementById('empName').textContent=e.name||'萧景琰';document.getElementById('empPersonality').textContent=`${e.personality||'明君'}${e.age?` · ${e.age}岁`:''}`;const s=e.stats||{};document.getElementById('empStats').innerHTML=`<span>威严 ${s.威严||'-'}</span><span>仁德 ${s.仁德||'-'}</span><span>勤政 ${s.勤政||'-'}</span><span>好色 ${s.好色||'-'}</span>`;}}
@@ -4405,7 +4415,7 @@ window.addEventListener('pageshow', (e) => { if (e.persisted) resumeFromBackgrou
 document.addEventListener('keydown',(e)=>{if(e.key==='Escape'){closeModal();closeSaveListModal();}if(e.key==='s'||e.key==='S'){if(playerId)saveGame('default');}});
 console.log('🌸 凤仪天下 · 完整修复版');
 // ---------- 重华宫（内联可展开面板） ----------
-let chonghuaVisible = false;
+let chonghuaVisible = true;
 let chonghuaLoading = false;      // 渲染请求在途
 let chonghuaBusy = false;         // 操作请求在途
 let chonghuaLastData = null;
