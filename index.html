@@ -25,7 +25,7 @@
         .app-header .save-btns button:hover { background: var(--gold-light); border-color: var(--gold); }
         .app-header .save-btns .reset-btn { border-color: #d48c7a; color: #8a3a2a; }
         .app-header .save-btns .reset-btn:hover { background: #f0d5d0; border-color: #c0392b; }
-        .page-container { flex: 1 1 0; min-height: 0; overflow: hidden; position: relative; background: var(--bg-primary); }
+        .page-container { flex: 1 1 0; min-height: 0; overflow-y: auto; position: relative; background: var(--bg-primary); }
         .page { display: none; height: 100%; overflow-y: auto; overflow-x: hidden; padding: 6px 8px 3px 8px; animation: fadeIn 0.25s ease; }
         .page.active { display: flex; flex-direction: column; }
         .page::-webkit-scrollbar { width: 3px; }
@@ -80,7 +80,7 @@
         .loading.active { display: block; }
         .loading .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-light); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .bottom-nav { display: flex; background: var(--bg-nav); border-top: 1px solid var(--border-light); flex-shrink: 0; }
+        .bottom-nav { display: flex; background: var(--bg-nav); border-top: 1px solid var(--border-light); flex-shrink: 0; position: sticky; bottom: 0; z-index: 10; }
         .bottom-nav .nav-item { flex: 1; text-align: center; padding: 3px 0 5px 0; cursor: pointer; transition: all 0.2s ease; color: var(--text-light); font-size: 8px; letter-spacing: 1px; position: relative; border: none; background: transparent; font-family: 'Georgia','楷体',serif; }
         .bottom-nav .nav-item .nav-icon { font-size: 14px; display: block; margin-bottom: 1px; }
         .bottom-nav .nav-item.active { color: var(--gold-dark); }
