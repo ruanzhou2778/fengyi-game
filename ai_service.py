@@ -87,6 +87,37 @@ def build_prompt(game_state, player_action, npc_names, event=None):
 请生成一段精彩的故事（80-120字），直接输出故事内容，不要加任何格式标记。"""
     return prompt
 
+def _strip_reasoning(text):
+    """清洗推理模型（DeepSeek-R1/QwQ 类）泄漏到正文里的思考过程。
+
+    - 剥离 <think>...</think> / <thinking>...</thinking> 等标签块（含未闭合的残留）；
+    - 去除以「思考：」「分析：」等前缀独占一行的引导段；
+    - 返回清洗后的正文。
+    """
+    if not text:
+        return text
+    # 去掉成对的思维标签块
+    text = re.sub(r"<\s*(think|thinking|reasoning|thought)\s*>.*?<\s*/\s*\1\s*>",
+                  "", text, flags=re.DOTALL | re.IGNORECASE)
+    # 去掉未闭合的起始标签及其之前的内容（模型只输出了 </think> 收尾的情况）
+    m = re.search(r"<\s*/\s*(think|thinking|reasoning|thought)\s*>", text, flags=re.IGNORECASE)
+    if m:
+        text = text[m.end():]
+    # 去掉残留的孤立标签
+    text = re.sub(r"<\s*/?\s*(think|thinking|reasoning|thought)\s*>", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def _extract_story_content(message):
+    """从模型返回的 message 中提取「故事正文」。
+
+    推理模型常把思考写进 reasoning_content，正文写进 content；
+    这里只取 content，并清洗其中可能混入的 <think> 块。
+    """
+    content = getattr(message, "content", None) or ""
+    return _strip_reasoning(content)
+
+
 def generate_story(game_state, player_action, npc_names=None, api_key=None, base_url=None, model=None):
     if npc_names is None:
         npc_names = list(game_state.npcs.keys())
@@ -99,14 +130,14 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, base
         response = client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": "你是才华横溢的宫斗小说作家，擅长写细腻深刻的宫廷故事。故事要引人入胜，人物要有血有肉。你只输出故事内容，不输出任何分析或评价。注意：绝对不能编造后宫妃嫔名单之外的人物。"},
+                {"role": "system", "content": "你是才华横溢的宫斗小说作家，擅长写细腻深刻的宫廷故事。故事要引人入胜，人物要有血有肉。你只输出故事正文本身，绝对不要输出任何思考过程、分析、评价、解释或 <think> 之类的标记；不要写「思考：」「分析：」「我认为」这类内容。注意：绝对不能编造后宫妃嫔名单之外的人物。"},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.85,
             max_tokens=500,
             top_p=0.95
         )
-        narration = response.choices[0].message.content.strip()
+        narration = _extract_story_content(response.choices[0].message)
         if len(narration) < 20:
             narration = random.choice(NARRATIONS)
         base_changes = {"宠爱": random.randint(-2, 4), "威望": random.randint(-1, 3), "心计": random.randint(-1, 3), "健康": random.randint(-2, 2)}
@@ -218,7 +249,7 @@ def generate_promotion_event(game_state, api_key=None, base_url=None, model=None
             max_tokens=800,
             response_format={"type": "json_object"}
         )
-        result = json.loads(response.choices[0].message.content)
+        result = json.loads(_strip_reasoning(response.choices[0].message.content))
         if "title" in result and "description" in result and "options" in result:
             return result
         else:
@@ -351,7 +382,7 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
             temperature=0.9,
             max_tokens=300
         )
-        narration = response.choices[0].message.content.strip()
+        narration = _strip_reasoning(response.choices[0].message.content)
         if len(narration) < 20:
             narration = f"{initiator}与{target}在御花园相遇，因言语不合起了冲突。"
     except Exception as e:
@@ -432,7 +463,7 @@ def generate_emperor_name(api_key=None, base_url=None, model=None):
             max_tokens=100,
             response_format={"type": "json_object"}
         )
-        result = json.loads(response.choices[0].message.content)
+        result = json.loads(_strip_reasoning(response.choices[0].message.content))
         return result.get("full_name", "萧景琰")
     except Exception as e:
         print(f"AI生成皇帝名字失败: {e}")
@@ -528,7 +559,7 @@ def _call_period_events_ai(client, model, npc_list, children_hint, pregnant_hint
         timeout=12,
         **kwargs,
     )
-    text = (response.choices[0].message.content or "").strip()
+    text = _strip_reasoning(response.choices[0].message.content or "")
     return _parse_period_event_lines(text), text
 
 

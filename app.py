@@ -51,7 +51,7 @@ from endings import (
 from openai import OpenAI
 import httpx
 from urllib.parse import urlparse
-from ai_service import generate_period_events
+from ai_service import generate_period_events, _strip_reasoning
 
 app = Flask(__name__)
 
@@ -1738,7 +1738,7 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
                     max_tokens=800,
                     timeout=10
                 )
-                narration = response.choices[0].message.content.strip()
+                narration = _strip_reasoning(response.choices[0].message.content)
     except Exception as e:
         print(f"AI生成宫斗事件失败: {e}")
     
@@ -2032,6 +2032,7 @@ GRAB_ITEMS = ["书卷", "金印", "弓箭", "凤钗", "算盘", "绣球"]
 #  公主择婿与省亲 · 配置常量
 # ============================================================
 PRINCESS_MARRY_MIN_AGE = 15          # 及笄可议婚年龄
+PRINCESS_FORCE_MARRY_AGE = 20        # 年满此岁的公主必须出嫁（依制强制择婿）
 PRINCESS_SUITOR_MIN = 3              # 每次相看候选驸马下限
 PRINCESS_SUITOR_MAX = 5              # 每次相看候选驸马上限
 BETROTH_COST = 60                   # 定亲纳采礼（银两）
@@ -2247,6 +2248,7 @@ def ensure_child_fields(child):
     child.setdefault("marriage_events", [])        # 婚后事件流水
     child.setdefault("preference", None)           # 公主本人隐藏择偶偏好（情感锚点）
     child.setdefault("marriage_authority", None)   # 婚事决策权归属（皇帝下放给生母/皇后时为其名）
+    child.setdefault("marriage_decider", None)      # 择婿主持人：皇帝亲选 / 生母自选 / 皇后择婿（依皇帝态度而定）
     child.setdefault("last_visit_period", None)    # 上次省亲的旬标记
     return child
 
@@ -2581,6 +2583,8 @@ def process_player_child_events(game_state):
 
     # ---- 已出嫁公主：省亲与公主府随机事件 ----
     events.extend(process_princess_marriage_events(game_state))
+    # ---- 成年公主强制出嫁催办（含 NPC 所出） ----
+    events.extend(process_princess_force_marriage(game_state))
     return events
 
 
@@ -2595,6 +2599,72 @@ def period_stamp(game_state):
 
 def is_princess(child):
     return isinstance(child, dict) and child.get("gender") == "公主"
+
+
+def princess_marriage_decider(game_state, child):
+    """依皇帝态度（性格 + 对玩家宠爱）决定公主择婿主持人。
+
+    - 皇帝态度冷淡（宠爱低）：皇帝亲选，玩家只能旁观；
+    - 皇帝态度中庸：交由孩子生母（若生母在世且为妃嫔）自选，否则皇帝亲选；
+    - 皇帝态度亲厚（宠爱高或痴情人格）：可交由皇后择婿或生母自选。
+
+    返回字符串：'皇帝亲选' / '生母自选' / '皇后择婿'。
+    结果缓存在 child['marriage_decider']，一经定下不再随宠爱浮动。
+    """
+    cached = child.get("marriage_decider")
+    if cached:
+        return cached
+    # 若玩家已请旨亲裁，主持人即为玩家（生母自选的一种）
+    if child.get("marriage_authority"):
+        child["marriage_decider"] = "生母自选"
+        return "生母自选"
+    emp = getattr(game_state, "emperor", None)
+    personality = emp.get("personality", "明君") if isinstance(emp, dict) else "明君"
+    favor = 0
+    try:
+        favor = int(game_state.attributes.get("宠爱", 0) or 0)
+    except (TypeError, ValueError):
+        favor = 0
+    # 生母是否在世且可主持（玩家本人或在世妃嫔）
+    mother_name = child.get("adoptive_mother") or child.get("birth_mother") or ""
+    mother_alive = False
+    if mother_name and mother_name == getattr(game_state, "name", ""):
+        mother_alive = True
+    else:
+        npc = (getattr(game_state, "npcs", {}) or {}).get(mother_name)
+        if isinstance(npc, dict) and npc.get("alive", True):
+            mother_alive = True
+    if personality == "痴情" or favor >= 70:
+        decider = "生母自选" if mother_alive else "皇后择婿"
+    elif personality in ("昏君", "多疑") or favor < 30:
+        decider = "皇帝亲选"
+    else:
+        decider = "生母自选" if mother_alive else "皇帝亲选"
+    child["marriage_decider"] = decider
+    return decider
+
+
+def iter_all_princesses(game_state):
+    """遍历后宫所有在世公主（含玩家与 NPC 所出），返回 (owner_name, owner_type, index, child)。"""
+    for idx, c in enumerate(getattr(game_state, "children", []) or []):
+        if is_princess(c) and c.get("alive", True):
+            yield (game_state.name, "player", idx, c)
+    for name, npc in (getattr(game_state, "npcs", {}) or {}).items():
+        if not isinstance(npc, dict) or name == game_state.name or name == "太后":
+            continue
+        for idx, c in enumerate(npc.get("children", []) or []):
+            if is_princess(c) and c.get("alive", True):
+                yield (name, "npc", idx, c)
+
+
+def find_any_princess(game_state, child_uid):
+    """在全后宫（含 NPC 所出）按 uid 找到公主，返回 (owner, owner_type, index, child) 或 (None, None, -1, None)。"""
+    target = str(child_uid)
+    for owner, otype, idx, c in iter_all_princesses(game_state):
+        ensure_child_fields(c)
+        if str(c.get("uid")) == target:
+            return owner, otype, idx, c
+    return None, None, -1, None
 
 
 def princess_prestige_tier(game_state, child):
@@ -2769,12 +2839,26 @@ def suitor_court_favor_score(game_state, child, suitor):
 
 
 def find_player_princess(game_state, child_uid):
-    """在玩家子嗣中按 uid 找到公主，返回 (index, child) 或 (-1, None)。"""
+    """按 uid 找到公主，返回 (index, child) 或 (-1, None)。
+
+    先在玩家子嗣中查找；找不到时再遍历 NPC 妃嫔所出的公主，
+    使 NPC 抚养/所生的公主也能进入择婿与婚嫁流程（index 对 NPC
+    公主表示其在生母 children 列表中的下标，调用方仅原地改 child，
+    不依赖 index 归属）。
+    """
     for idx, c in enumerate(getattr(game_state, "children", []) or []):
         ensure_child_fields(c)
         if str(c.get("uid")) == str(child_uid) and is_princess(c):
             return idx, c
+    for name, npc in (getattr(game_state, "npcs", {}) or {}).items():
+        if not isinstance(npc, dict) or name == game_state.name or name == "太后":
+            continue
+        for idx, c in enumerate(npc.get("children", []) or []):
+            ensure_child_fields(c)
+            if str(c.get("uid")) == str(child_uid) and is_princess(c):
+                return idx, c
     return -1, None
+
 
 
 def default_mansion():
@@ -2794,6 +2878,121 @@ def apply_marriage_court_effect(game_state, child):
     if "外戚之相" in consort.get("hidden_tags", []):
         notes.append(f"⚠️ {consort.get('name','驸马')}出身权门，朝野已有『外戚坐大』之虑。")
     return notes
+
+
+def subsidize_princess_mother(game_state, child, occasion="出嫁"):
+    """出嫁公主随机补贴母亲（生母或养母）。
+
+    - 若生母为玩家本人：随机加银两；
+    - 若生母为在世 NPC 妃嫔：给其加银两与对玩家好感；
+    返回补贴文案（无补贴时返回 None）。
+    """
+    if random.random() >= 0.55:
+        return None
+    mother_name = child.get("adoptive_mother") or child.get("birth_mother") or ""
+    if not mother_name:
+        return None
+    amount = random.randint(20, 80)
+    pname = child.get("name", "公主")
+    if mother_name == getattr(game_state, "name", ""):
+        game_state.silver = getattr(game_state, "silver", 0) + amount
+        game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + random.randint(1, 3))
+        return f"🎁 {pname}{occasion}后不忘母恩，遣人送来体己银{amount}两孝敬于你（银两+{amount}）"
+    npc = (getattr(game_state, "npcs", {}) or {}).get(mother_name)
+    if isinstance(npc, dict) and npc.get("alive", True):
+        npc["silver"] = int(npc.get("silver", 0) or 0) + amount
+        if mother_name in game_state.relationships:
+            game_state.relationships[mother_name]["好感"] = min(100, game_state.relationships[mother_name].get("好感", 0) + random.randint(1, 4))
+        return f"🎁 {pname}{occasion}后厚赠生母{mother_name}体己银{amount}两，{mother_name}感念不已"
+    return None
+
+
+def process_princess_force_marriage(game_state):
+    """年满 PRINCESS_FORCE_MARRY_AGE 的公主必须出嫁：逐旬催办，
+    连续拖延则由主持人（皇帝/生母/皇后）代为定夺赐婚。含 NPC 所出公主。
+    """
+    events = []
+    for owner, otype, idx, child in iter_all_princesses(game_state):
+        ensure_child_fields(child)
+        age = int(child.get("age", 0) or 0)
+        status = child.get("marriage_status", "未议")
+        if age < PRINCESS_FORCE_MARRY_AGE or status in ("已嫁", "和亲"):
+            continue
+        pname = child.get("name", "公主")
+        decider = princess_marriage_decider(game_state, child)
+        overdue = int(child.get("force_marry_overdue", 0) or 0) + 1
+        child["force_marry_overdue"] = overdue
+        # 前两旬仅催办提示，给玩家自主择婿的时间
+        if overdue < 3:
+            if decider == "生母自选":
+                msg = f"⏳ {pname}已年满{age}，依制早该出降，宗人府屡次催办，母族当尽早择定佳婿"
+            elif decider == "皇后择婿":
+                msg = f"⏳ {pname}已年满{age}，中宫皇后有意代为择婿，宗人府正在拟定人选"
+            else:
+                msg = f"⏳ {pname}已年满{age}，皇帝将亲为择定驸马，只待钦点"
+            add_child_event(child, msg)
+            child.setdefault("marriage_events", []).insert(0, msg)
+            events.append(msg)
+            continue
+        # 拖延过久：由主持人强制赐婚
+        if status == "已定" and child.get("consort"):
+            consort = child.get("consort") or {}
+        else:
+            consort = _auto_pick_consort(game_state, child, decider)
+            child["consort"] = consort
+        child["marriage_status"] = "已嫁"
+        child["mansion"] = default_mansion()
+        child["suitors"] = []
+        child["suitors_period"] = None
+        child["force_marry_overdue"] = 0
+        if decider == "皇帝亲选":
+            who = "皇帝亲自钦点"
+        elif decider == "皇后择婿":
+            who = "皇后代为择定"
+        else:
+            who = f"其母{child.get('adoptive_mother') or child.get('birth_mother') or ''}操办"
+        msg = f"🎊 {pname}年岁已长，依制出降——{who}驸马{consort.get('name','')}，婚事就此了结"
+        add_child_event(child, msg)
+        child.setdefault("marriage_events", []).insert(0, msg)
+        events.append(msg)
+        # 仅玩家名下公主出降才联动朝堂与威望
+        if otype == "player":
+            court_notes = apply_marriage_court_effect(game_state, child)
+            game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + random.randint(3, 7))
+            for note in court_notes:
+                events.append(note)
+        sub = subsidize_princess_mother(game_state, child, occasion="出嫁")
+        if sub:
+            events.append(sub)
+    return [e for e in events if e]
+
+
+def _auto_pick_consort(game_state, child, decider):
+    """主持人代为择婿时，按主持人风格从候选中挑选驸马；无候选则临时生成。"""
+    suitors = child.get("suitors") or generate_suitors(game_state, child)
+    if not suitors:
+        # 兜底：临时生成一个中等门第驸马
+        return {
+            "name": suitor_male_name(),
+            "faction": random.choice(list(COURT_FACTIONS.keys())),
+            "father_title": "闲散宗室",
+            "family_score": random.randint(45, 65),
+            "hidden_tags": [],
+            "talent": random.randint(40, 80),
+            "looks": random.randint(40, 80),
+            "age": random.randint(18, 28),
+            "ambition": random.randint(30, 70),
+        }
+    if decider == "皇帝亲选":
+        # 皇帝重门第/派系权衡：取朝堂加分最高者
+        pick = max(suitors, key=lambda s: suitor_court_favor_score(game_state, child, s))
+    elif decider == "皇后择婿":
+        # 皇后求稳：取门第居中、野心不高者
+        pick = min(suitors, key=lambda s: (s.get("ambition", 50), -s.get("family_score", 50)))
+    else:
+        # 生母/慈父：优先契合公主偏好
+        pick = max(suitors, key=lambda s: preference_match_score(child, s))
+    return dict(pick)
 
 
 def process_princess_marriage_events(game_state):
@@ -3826,12 +4025,12 @@ def generate_story(game_state, player_action, npc_names=None, api_key=None, api_
             if client:
                 model = api_model
                 messages = [
-                    {"role": "system", "content": "你是才华横溢的宫斗小说作家，只输出故事内容，不要任何格式标记。尽量使用名单中的人物。"},
+                    {"role": "system", "content": "你是才华横溢的宫斗小说作家，只输出故事正文本身，绝对不要输出任何思考过程、分析、解释或 <think> 之类的标记。尽量使用名单中的人物。"},
                     {"role": "user", "content": prompt}
                 ]
                 response, used_model, err = call_ai_chat(client, model, messages)
                 if response:
-                    narration = response.choices[0].message.content.strip()
+                    narration = _strip_reasoning(response.choices[0].message.content)
                     print(f"[ai] ok len={len(narration)} model={used_model}")
                 elif err:
                     print(f"[ai] failed: {err}")
@@ -7083,6 +7282,8 @@ def chonghua_state(game_state):
     ch.setdefault('founded', False)
     ch.setdefault('level', 1)
     ch.setdefault('budget', 0)
+    ch.setdefault('stipend', 0)        # 皇帝每月固定拨发的用度（主控自行填写）
+    ch.setdefault('stipend_period', None)  # 上次发放月俸的「年-月」标记，防同月重复发放
     ch.setdefault('children', [])
     ch.setdefault('log', [])
     ch.setdefault('events', [])
@@ -7272,6 +7473,19 @@ def chonghua_period_tick(game_state):
     ch['tutored'] = {}
     entries = chonghua_collect_all_children(game_state)
 
+    # 0) 月俸固定发放：皇帝每月拨给重华宫的用度（金额由主控自行填写）
+    stipend = int(ch.get('stipend', 0) or 0)
+    if stipend > 0:
+        month_key = f'{getattr(game_state, "year", 0)}-{getattr(game_state, "month", 0)}'
+        if ch.get('stipend_period') != month_key:
+            ch['budget'] = int(ch.get('budget', 0) or 0) + stipend
+            ch['stipend_period'] = month_key
+            if ch.get('arrears'):
+                ch['arrears'] = 0
+            msg = f'📥 皇帝按月拨给重华宫用度{stipend}两'
+            msgs.append(msg)
+            chonghua_add_log(game_state, ch, f'月俸入账{stipend}两')
+
     # 1) 学成出馆：年满则迁出，交回生母/养母
     for owner, _otype, _idx, c in entries:
         if not chonghua_is_inside(c):
@@ -7445,6 +7659,7 @@ def get_chonghua():
         'auto_admit_age': CHONGHUA_AUTO_ADMIT_AGE,
         'upkeep_per_child': CHONGHUA_UPKEEP_PER_CHILD,
         'upkeep_due': total_inside * CHONGHUA_UPKEEP_PER_CHILD,
+        'stipend': int(ch.get('stipend', 0) or 0),
         'arrears': int(ch.get('arrears', 0) or 0),
         'permission': perm,
         'has_permission': can_manage_all,
@@ -7579,6 +7794,23 @@ def chonghua_action():
         due = chonghua_upkeep_due(game_state, ch)
         tail = f'，现存用度{ch["budget"]}两（每旬需{due}两）'
         return ok(f'拨用度{amt}两成功' + tail + ('，威望+1' if gain else ''))
+
+    if action == 'set_stipend':
+        if not ch.get('founded'):
+            return jsonify({'success': False, 'error': '重华宫尚未开设'}), 400
+        if not can_manage_all:
+            return jsonify({'success': False, 'error': '月俸支给须皇后或协理六宫者定夺'}), 403
+        try:
+            amt = int(amount or 0)
+        except (TypeError, ValueError):
+            amt = 0
+        if amt < 0:
+            return jsonify({'success': False, 'error': '月俸金额无效'}), 400
+        ch['stipend'] = amt
+        add_log(f'设定月俸{amt}两' if amt else '停发月俸')
+        if amt:
+            return ok(f'已设定皇帝月俸{amt}两，自下月起按月拨入重华宫用度')
+        return ok('已停发重华宫月俸')
 
     if action not in ('admit', 'tutor', 'adopt', 'release'):
         return jsonify({'success': False, 'error': '未知操作'}), 400
@@ -7737,6 +7969,9 @@ def princess_serialize(game_state, child):
         v = suitor_public_view(s)
         v["court_favor"] = suitor_court_favor_score(game_state, child, s)
         suitor_views.append(v)
+    mother_name = child.get("adoptive_mother") or child.get("birth_mother") or ""
+    is_own = mother_name == getattr(game_state, "name", "") or child in (getattr(game_state, "children", []) or [])
+    decider = princess_marriage_decider(game_state, child)
     return {
         "uid": child.get("uid"),
         "name": child.get("name"),
@@ -7744,13 +7979,19 @@ def princess_serialize(game_state, child):
         "marriage_status": child.get("marriage_status", "未议"),
         "preference": child.get("preference"),
         "marriage_authority": child.get("marriage_authority"),
+        "marriage_decider": decider,
         "decision_type": emperor_decision_type(game_state, child),
         "suitors": suitor_views,
         "consort": child.get("consort"),
         "mansion": child.get("mansion"),
         "marriage_events": (child.get("marriage_events") or [])[:8],
         "prestige_tier": princess_prestige_tier(game_state, child),
+        "mother": mother_name,
+        "is_own": bool(is_own),
+        "must_marry": int(child.get("age", 0)) >= PRINCESS_FORCE_MARRY_AGE and child.get("marriage_status") not in ("已嫁", "和亲"),
+        "force_marry_age": PRINCESS_FORCE_MARRY_AGE,
     }
+
 
 
 @app.route('/api/princess/list', methods=['GET'])
@@ -7761,9 +8002,14 @@ def princess_list():
     if err:
         return err
     princesses = []
-    for c in getattr(game_state, "children", []) or []:
-        if is_princess(c) and c.get("alive", True):
-            princesses.append(princess_serialize(game_state, c))
+    seen = set()
+    for owner, otype, idx, c in iter_all_princesses(game_state):
+        ensure_child_fields(c)
+        uid = ensure_child_uid(game_state, c)
+        if uid in seen:
+            continue
+        seen.add(uid)
+        princesses.append(princess_serialize(game_state, c))
     return jsonify({
         "princesses": princesses,
         "marry_min_age": PRINCESS_MARRY_MIN_AGE,
@@ -7984,10 +8230,14 @@ def princess_marry():
     child.setdefault("marriage_events", []).insert(0, msg)
     for note in court_notes:
         game_state.add_memory(note)
+    sub = subsidize_princess_mother(game_state, child, occasion="出降")
+    if sub:
+        game_state.add_memory(sub)
     autosave_session(player_id)
     return jsonify({
         "success": True, "message": msg,
         "court_notes": court_notes,
+        "subsidy": sub,
         "silver": game_state.silver,
         "princess": princess_serialize(game_state, child),
     })

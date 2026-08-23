@@ -4552,8 +4552,10 @@ async function renderChonghuaInline(){
                 const budget = ch.budget || 0;
                 const short = due > budget;
                 const arrears = info.arrears || 0;
+                const stipend = info.stipend || 0;
                 statsEl.innerHTML = `🏛️ ${ch.level||1}/${info.max_level||5}级 · 👶 ${totalInside}/${capacity}人 · ${permLabel}`
                     + `<br>💰 用度${budget}两 · 每旬需<span style="color:${short?'#8a3a2a':'inherit'};">${due}两</span>`
+                    + (stipend ? ` · <span style="color:#5a7a5a;">月俸${stipend}两</span>` : '')
                     + (arrears ? ` · <span style="color:#8a3a2a;">已欠${arrears}旬</span>` : (short ? ' · <span style="color:#8a3a2a;">下旬将短缺</span>' : ''));
             }
         }
@@ -4590,7 +4592,10 @@ async function renderChonghuaInline(){
                 barEl.innerHTML = upgradeBtn + `
                     <input id="chonghuaBudget" type="number" min="1" placeholder="拨用度" style="width:56px;font-size:7px;padding:1px 3px;font-family:inherit;">
                     <button onclick="chonghuaPatronize()" class="chonghua-btn">💰 拨用度</button>
-                `;
+                ` + (perm === 'full' ? `
+                    <input id="chonghuaStipend" type="number" min="0" value="${ch.stipend||0}" placeholder="月俸" style="width:56px;font-size:7px;padding:1px 3px;font-family:inherit;">
+                    <button onclick="chonghuaSetStipend()" class="chonghua-btn">📥 定月俸</button>
+                ` : '');
             }
         }
 
@@ -4717,6 +4722,13 @@ async function chonghuaPatronize(){
     if(input) input.value = '';
 }
 
+async function chonghuaSetStipend(){
+    const input = document.getElementById('chonghuaStipend');
+    const amount = parseInt(input && input.value, 10);
+    if(isNaN(amount) || amount < 0){ showToast('请输入有效月俸金额'); return; }
+    await chonghuaAction('set_stipend', null, amount);
+}
+
 // ---------- 公主择婿与省亲（内联面板） ----------
 let princessVisible = true;
 let princessLoading = false;
@@ -4781,21 +4793,31 @@ function princessCardHtml(p, meta){
     const minAge = (meta && meta.marry_min_age) || 15;
     const status = p.marriage_status || '未议';
     const prefText = p.preference ? `偏好「${p.preference}」` : '性情未明';
-    const authText = p.marriage_authority ? '（你可亲裁婚事）' : '（皇帝亲裁）';
+    const decider = p.marriage_decider || '皇帝亲选';
+    const deciderIcon = decider === '生母自选' ? '👩‍👧' : (decider === '皇后择婿' ? '👑' : '🐉');
+    const deciderText = `主婚：${deciderIcon}${decider}`;
+    const motherLine = p.mother ? `<span style="font-size:6px;color:var(--text-light);"> · 母${escapeHtmlText(p.mother)}${p.is_own?'':'（他抚）'}</span>` : '';
     let inner = '';
+    let warnBar = '';
+    if(p.must_marry && status !== '已嫁' && status !== '和亲'){
+        warnBar = `<div style="font-size:7px;color:#b3402f;background:#f7e4df;border-radius:3px;padding:2px 4px;margin-bottom:3px;">⏳ 已满${p.force_marry_age||20}岁，依制必须出降——若久拖不决，将由${decider==='皇帝亲选'?'皇帝钦点':(decider==='皇后择婿'?'皇后代择':'其母操办')}赐婚。</div>`;
+    }
     if(status === '已嫁' || status === '和亲'){
         inner = princessMarriedHtml(p);
     }else if(p.age < minAge){
         inner = `<div style="font-size:7px;color:var(--text-light);">尚未及笄（需满${minAge}岁），静待成长。</div>`;
+    }else if(!p.is_own && decider === '皇帝亲选'){
+        inner = `<div style="font-size:7px;color:var(--text-light);">此公主非你所出，婚事由皇帝亲选，你无从置喙，只可静观其变。</div>`;
     }else{
         inner = princessMarriageHtml(p, meta);
     }
     return `<div style="background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:5px 6px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-            <span style="font-size:9px;color:var(--text-dark);font-weight:600;">🌸 ${escapeHtmlText(p.name||'公主')} <span style="font-size:7px;color:var(--text-light);">${p.age}岁</span></span>
+            <span style="font-size:9px;color:var(--text-dark);font-weight:600;">🌸 ${escapeHtmlText(p.name||'公主')} <span style="font-size:7px;color:var(--text-light);">${p.age}岁</span>${motherLine}</span>
             <span style="font-size:7px;color:var(--gold-dark);">${status}</span>
         </div>
-        <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">${prefText} · ${p.decision_type||''}${authText}</div>
+        <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">${prefText} · ${deciderText}</div>
+        ${warnBar}
         ${inner}
     </div>`;
 }
@@ -4805,7 +4827,14 @@ function status_is_betrothed(p){ return p.marriage_status === '已定' && p.cons
 function princessMarriageHtml(p, meta){
     const uid = p.uid;
     const suitors = p.suitors || [];
+    const decider = p.marriage_decider || '皇帝亲选';
     let html = '';
+    // 主婚人提示条：不同主持人下玩家的角色不同
+    if(decider === '皇后择婿'){
+        html += `<div style="font-size:6px;color:var(--text-light);margin-bottom:2px;">👑 皇帝已将婚事交由皇后主持，你可代为相看，最终由皇后定夺。</div>`;
+    }else if(decider === '皇帝亲选' && p.is_own){
+        html += `<div style="font-size:6px;color:var(--text-light);margin-bottom:2px;">🐉 皇帝亲选驸马；你可相看举荐，但圣意契合度更为要紧。</div>`;
+    }
     if(status_is_betrothed(p)){
         const c = p.consort || {};
         html += `<div style="font-size:8px;color:var(--text-mid);margin-bottom:3px;">已定驸马：<strong>${escapeHtmlText(c.name||'')}</strong>（${escapeHtmlText(c.faction||'')}·${escapeHtmlText(c.father_title||'')}之子）</div>`;
@@ -4822,7 +4851,7 @@ function princessMarriageHtml(p, meta){
         html += `</div>`;
         html += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
             <button class="chonghua-btn" onclick="princessSuitors('${uid}', true)">🔄 另择一批</button>`;
-        if(!p.marriage_authority){
+        if(!p.marriage_authority && decider !== '皇后择婿'){
             html += `<button class="chonghua-btn" onclick="princessAuthority('${uid}')">🙏 请旨亲裁</button>`;
         }
         html += `</div>`;
