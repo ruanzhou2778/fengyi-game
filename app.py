@@ -4009,6 +4009,12 @@ def next_period():
         for msg in growth_events:
             game_state.add_memory(msg)
 
+    # ---- 重华宫转旬结算：出馆/收容/用度/教养 ----
+    chonghua_events = chonghua_period_tick(game_state)
+    for msg in chonghua_events:
+        intelligence.append(msg)
+        game_state.add_memory(msg)
+
     pressure_events = process_pressure(game_state)
     if pressure_events:
         for msg in pressure_events:
@@ -4386,6 +4392,8 @@ def next_period():
         "other_birth_msgs": birth_events,
         "prince_events": prince_events,
         "growth_events": growth_events,
+        "chonghua_events": chonghua_events,
+        "chonghua": chonghua_state(game_state),
         "death_events": death_events,
         "intrigue": summarize_intrigue(game_state),
         "intrigue_events": intrigue_events,
@@ -4844,7 +4852,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state)})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -6289,12 +6297,23 @@ def abort_pregnancy():
 #  重华宫（皇嗣共育之所）
 # ============================================================
 
-CHONGHUA_MANAGE_RANKS = ['皇后', '皇贵妃', '贵妃']
+CHONGHUA_PALACE_NAME = '重华宫'
+# 统管全宫（可处置他人皇嗣）：皇后本人或受命协理六宫者。
+# 贵妃/皇贵妃只可「查阅」全宫名册，不可处置他人皇嗣（见 chonghua_permission）。
+CHONGHUA_MANAGE_RANKS = ['皇后']
+CHONGHUA_VIEW_MIN_RANK = '贵妃'
 CHONGHUA_MIN_PRESTIGE = 80
 CHONGHUA_FOUND_COST = 200
+CHONGHUA_UPGRADE_BASE = 300
+CHONGHUA_MAX_LEVEL = 5
 CHONGHUA_PER_LEVEL_CAPACITY = 3
-CHONGHUA_AUTO_ADMIT_AGE = 3
-CHONGHUA_PALACE_NAME = '重华宫'
+CHONGHUA_AUTO_ADMIT_AGE = 3        # ≤此岁的皇嗣转旬时自动入馆
+CHONGHUA_GRADUATE_AGE = 15         # ≥此岁的皇嗣转旬时学成出馆
+CHONGHUA_UPKEEP_PER_CHILD = 8      # 每名在馆皇嗣每旬用度
+CHONGHUA_TUTOR_COST = 20           # 授业束脩基数（按已授次数递增）
+CHONGHUA_TUTOR_MIN_AGE = 4         # 可受业最低年龄
+CHONGHUA_TUTOR_MAX_LEVEL = 10      # 授业上限
+CHONGHUA_ADOPT_PRESTIGE = 10       # 首次亲养他人皇嗣的威望奖赏
 
 
 def chonghua_state(game_state):
@@ -6308,6 +6327,8 @@ def chonghua_state(game_state):
     ch.setdefault('children', [])
     ch.setdefault('log', [])
     ch.setdefault('events', [])
+    ch.setdefault('arrears', 0)        # 累计欠用度旬数
+    ch.setdefault('tutored', {})       # {uid: 本旬已授业的旬标记}
     # 兼容旧存档：children 曾保存子嗣字典，统一收敛为 uid 字符串列表
     normalized = []
     for item in ch.get('children') or []:
@@ -6338,36 +6359,70 @@ def chonghua_rank_name(game_state):
         return ''
 
 
-def chonghua_can_manage_all(game_state):
-    """皇后本人、协理六宫者、或皇贵妃/贵妃可统管全宫皇嗣。"""
+def chonghua_permission(game_state):
+    """重华宫权限分级。
+
+    'full' —— 皇后本人或受命协理六宫者：可查阅并处置全宫皇嗣（收容/亲养/授业/迁出）。
+    'view' —— 贵妃及以上：可查阅全宫在馆名册，但只可处置自己膝下皇嗣。
+    'own'  —— 其余位份：只见自己的皇嗣。
+    """
+    if get_queen_name(game_state, include_player=True) == game_state.name:
+        return 'full'
+    if _get_six_palace_assistant(game_state) == game_state.name:
+        return 'full'
     rank_name = chonghua_rank_name(game_state)
     if rank_name in CHONGHUA_MANAGE_RANKS:
-        return True
-    if get_queen_name(game_state, include_player=True) == game_state.name:
-        return True
-    if _get_six_palace_assistant(game_state) == game_state.name:
-        return True
-    return bool(getattr(game_state, 'manage_six_palaces', False))
+        return 'full'
+    if getattr(game_state, 'manage_six_palaces', False):
+        return 'full'
+    if RANK_LEVELS.get(rank_name, -1) >= RANK_LEVELS.get(CHONGHUA_VIEW_MIN_RANK, 99):
+        return 'view'
+    return 'own'
+
+
+def chonghua_can_manage_all(game_state):
+    """是否可处置他人皇嗣（仅 'full' 权限）。"""
+    return chonghua_permission(game_state) == 'full'
+
+
+def chonghua_can_see_all(game_state, perm=None):
+    """是否可查阅全宫皇嗣名册（'full' 与 'view' 均可）。"""
+    return (perm or chonghua_permission(game_state)) in ('full', 'view')
 
 
 def chonghua_is_inside(child):
     return bool(child.get('in_chonghua')) or child.get('palace') == CHONGHUA_PALACE_NAME
 
 
-def chonghua_collect_children(game_state, can_manage_all):
+def chonghua_collect_children(game_state, can_see_all):
     """汇总可见的存活子嗣。返回 [(owner_name, owner_type, index, child), ...]"""
     entries = []
     for idx, c in enumerate(getattr(game_state, 'children', []) or []):
         if not isinstance(c, dict) or not c.get('alive', True):
             continue
         entries.append((game_state.name, 'player', idx, c))
-    if can_manage_all:
+    if can_see_all:
         for name, npc in (getattr(game_state, 'npcs', {}) or {}).items():
-            if not isinstance(npc, dict) or name == game_state.name:
+            if not isinstance(npc, dict) or name == game_state.name or name == '太后':
                 continue
             for idx, c in enumerate(npc.get('children', []) or []):
                 if not isinstance(c, dict) or not c.get('alive', True):
                     continue
+                entries.append((name, 'npc', idx, c))
+    return entries
+
+
+def chonghua_collect_all_children(game_state):
+    """无视权限，汇总全宫存活子嗣——用于容量与用度等全局结算。"""
+    entries = []
+    for idx, c in enumerate(getattr(game_state, 'children', []) or []):
+        if isinstance(c, dict) and c.get('alive', True):
+            entries.append((game_state.name, 'player', idx, c))
+    for name, npc in (getattr(game_state, 'npcs', {}) or {}).items():
+        if not isinstance(npc, dict) or name == game_state.name or name == '太后':
+            continue
+        for idx, c in enumerate(npc.get('children', []) or []):
+            if isinstance(c, dict) and c.get('alive', True):
                 entries.append((name, 'npc', idx, c))
     return entries
 
@@ -6377,12 +6432,193 @@ def chonghua_capacity(ch):
         level = int(ch.get('level', 1) or 1)
     except (TypeError, ValueError):
         level = 1
-    return max(1, level) * CHONGHUA_PER_LEVEL_CAPACITY
+    return max(1, min(CHONGHUA_MAX_LEVEL, level)) * CHONGHUA_PER_LEVEL_CAPACITY
 
 
-def chonghua_serialize_child(game_state, owner, owner_type, index, child):
+def chonghua_upgrade_cost(ch):
+    try:
+        level = int(ch.get('level', 1) or 1)
+    except (TypeError, ValueError):
+        level = 1
+    return CHONGHUA_UPGRADE_BASE * max(1, level)
+
+
+def chonghua_period_key(game_state):
+    """一旬的唯一标记，用于「每旬限一次」类限制。"""
+    return f'{getattr(game_state, "year", 0)}-{getattr(game_state, "month", 0)}-{getattr(game_state, "day", 0)}'
+
+
+def chonghua_since_label(game_state):
+    return f'{getattr(game_state, "year", 0)}年{getattr(game_state, "month", 0)}月'
+
+
+def chonghua_upkeep_due(game_state, ch=None):
+    """本旬应付用度 = 在馆人数 × 每人用度。"""
+    inside = sum(1 for _o, _t, _i, c in chonghua_collect_all_children(game_state)
+                 if chonghua_is_inside(c))
+    return inside * CHONGHUA_UPKEEP_PER_CHILD
+
+
+def chonghua_admit_child(game_state, ch, child, reason='入馆'):
+    """将子嗣置入在馆状态并登记名册。调用方负责校验容量与权限。"""
+    child['in_chonghua'] = True
+    child['palace'] = CHONGHUA_PALACE_NAME
+    child['chonghua_since'] = chonghua_since_label(game_state)
+    uid = ensure_child_uid(game_state, child)
+    if uid not in ch['children']:
+        ch['children'].append(uid)
+    chonghua_add_log(game_state, ch, f'{child.get("name") or "皇嗣"}{reason}')
+    return uid
+
+
+def chonghua_remove_child(game_state, ch, child):
+    """解除在馆状态并从名册摘除。"""
+    uid = ensure_child_uid(game_state, child)
+    child['in_chonghua'] = False
+    if child.get('palace') == CHONGHUA_PALACE_NAME:
+        child['palace'] = ''
+    child.pop('chonghua_since', None)
+    if uid in ch['children']:
+        ch['children'].remove(uid)
+    (ch.get('tutored') or {}).pop(uid, None)
+    return uid
+
+
+def chonghua_sync_roster(game_state, ch):
+    """按全宫（非仅可见）在馆子嗣重建名册，避免低权限查询把名册截断。"""
+    roster = []
+    for _owner, _otype, _idx, c in chonghua_collect_all_children(game_state):
+        if chonghua_is_inside(c):
+            uid = ensure_child_uid(game_state, c)
+            if uid not in roster:
+                roster.append(uid)
+    ch['children'] = roster
+    tutored = ch.get('tutored')
+    if isinstance(tutored, dict):
+        ch['tutored'] = {k: v for k, v in tutored.items() if k in roster}
+    return roster
+
+
+def chonghua_period_tick(game_state):
+    """转旬结算：学成出馆 → 自动收容 → 用度支给 → 在馆教养收益。
+
+    返回可播报的消息列表。仅在重华宫已开设时产生效果。
+    """
+    ch = chonghua_state(game_state)
+    if not ch.get('founded'):
+        chonghua_sync_roster(game_state, ch)
+        return []
+
+    msgs = []
+    ch['tutored'] = {}
+    entries = chonghua_collect_all_children(game_state)
+
+    # 1) 学成出馆：年满则迁出，交回生母/养母
+    for owner, _otype, _idx, c in entries:
+        if not chonghua_is_inside(c):
+            continue
+        try:
+            age = float(c.get('age', 0) or 0)
+        except (TypeError, ValueError):
+            age = 0
+        if age >= CHONGHUA_GRADUATE_AGE:
+            name = c.get('name') or '皇嗣'
+            chonghua_remove_child(game_state, ch, c)
+            if not c.get('guardian'):
+                c['guardian'] = c.get('adoptive_mother') or c.get('birth_mother') or owner
+            msg = f'🎓 {name}年已{int(age)}，自重华宫学成出馆'
+            msgs.append(msg)
+            chonghua_add_log(game_state, ch, f'{name}学成出馆')
+
+    # 2) 自动收容：年幼皇嗣（≤CHONGHUA_AUTO_ADMIT_AGE）且无监护人时入馆
+    capacity = chonghua_capacity(ch)
+    inside = sum(1 for _o, _t, _i, c in entries if chonghua_is_inside(c))
+    for owner, _otype, _idx, c in entries:
+        if inside >= capacity:
+            break
+        if chonghua_is_inside(c) or c.get('guardian'):
+            continue
+        try:
+            age = float(c.get('age', 0) or 0)
+        except (TypeError, ValueError):
+            age = 0
+        if age <= CHONGHUA_AUTO_ADMIT_AGE:
+            chonghua_admit_child(game_state, ch, c, '自动入馆')
+            msgs.append(f'🏛️ {c.get("name") or "皇嗣"}年幼无依，已入重华宫共育')
+            inside += 1
+
+    # 3) 用度支给：不足则欠饷，连欠三旬有皇嗣被生母领回
+    due = inside * CHONGHUA_UPKEEP_PER_CHILD
+    if due > 0:
+        budget = int(ch.get('budget', 0) or 0)
+        if budget >= due:
+            ch['budget'] = budget - due
+            ch['arrears'] = 0
+        else:
+            short = due - budget
+            ch['budget'] = 0
+            ch['arrears'] = int(ch.get('arrears', 0) or 0) + 1
+            msgs.append(f'💸 重华宫用度短缺{short}两，膳食减半，皇嗣颇有怨言（已欠{ch["arrears"]}旬）')
+            chonghua_add_log(game_state, ch, f'用度短缺{short}两')
+            for _owner, _otype, _idx, c in entries:
+                if not chonghua_is_inside(c):
+                    continue
+                c['health'] = max(20, int(c.get('health', 70) or 70) - random.randint(1, 3))
+                c['affection'] = max(5, int(c.get('affection', 30) or 30) - random.randint(1, 2))
+            if ch['arrears'] >= 3:
+                pool = [(o, c) for o, _t, _i, c in entries if chonghua_is_inside(c)]
+                if pool:
+                    owner, c = random.choice(pool)
+                    name = c.get('name') or '皇嗣'
+                    chonghua_remove_child(game_state, ch, c)
+                    c['guardian'] = c.get('adoptive_mother') or c.get('birth_mother') or owner
+                    ch['arrears'] = 0
+                    msg = f'🕯️ 重华宫久欠用度，{name}被{c["guardian"]}领回自养，宫中物议'
+                    msgs.append(msg)
+                    chonghua_add_log(game_state, ch, f'{name}因欠用度被领回')
+                    game_state.attributes['威望'] = max(0, game_state.attributes.get('威望', 0) - 3)
+    else:
+        ch['arrears'] = 0
+
+    # 4) 在馆教养收益：等级越高，才情/机敏长进越快
+    level = max(1, min(CHONGHUA_MAX_LEVEL, int(ch.get('level', 1) or 1)))
+    if not ch.get('arrears'):
+        for _owner, _otype, _idx, c in entries:
+            if not chonghua_is_inside(c):
+                continue
+            c['talent'] = min(100, int(c.get('talent', 50) or 50) + random.randint(0, level))
+            c['wit'] = min(100, int(c.get('wit', 40) or 40) + random.randint(0, max(1, level - 1)))
+            c['health'] = min(100, int(c.get('health', 70) or 70) + random.randint(0, 1))
+
+    # 5) 宫中轶事：偶发一条在馆动态
+    if inside > 0 and random.random() < 0.35:
+        pool = [c for _o, _t, _i, c in entries if chonghua_is_inside(c)]
+        c = random.choice(pool)
+        name = c.get('name') or '皇嗣'
+        flavor = random.choice([
+            f'📖 重华宫师傅称{name}读书用心，字有筋骨',
+            f'🎋 {name}在重华宫庭中习射，颇得众师称许',
+            f'🍬 {name}与馆中同侪争一枚蜜饯，闹作一团，被师傅罚抄书',
+            f'🌙 {name}夜里想念母妃，抱着枕头哭了半宿',
+        ])
+        msgs.append(flavor)
+        events = ch.setdefault('events', [])
+        events.insert(0, {'msg': flavor, 'time': getattr(game_state, 'day', 0)})
+        ch['events'] = events[:20]
+
+    chonghua_sync_roster(game_state, ch)
+    return msgs
+
+
+def chonghua_serialize_child(game_state, owner, owner_type, index, child, perm='own'):
     ensure_child_fields(child)
     uid = ensure_child_uid(game_state, child)
+    is_own = owner_type == 'player'
+    try:
+        age = float(child.get('age', 0) or 0)
+    except (TypeError, ValueError):
+        age = 0
+    heir_id = (getattr(game_state, 'heir_status', None) or {}).get('heir_id')
     return {
         'uid': uid,
         'name': child.get('name') or '未命名',
@@ -6393,6 +6629,17 @@ def chonghua_serialize_child(game_state, owner, owner_type, index, child):
         'guardian': child.get('guardian', '') or child.get('adoptive_mother', '') or '',
         'birth_mother': child.get('birth_mother', '') or owner,
         'tutor_level': child.get('tutor_level', 0),
+        'talent': child.get('talent', 0),
+        'wit': child.get('wit', 0),
+        'health': child.get('health', 0),
+        'affection': child.get('affection', 0),
+        'mood': child.get('mood', ''),
+        'is_heir': bool(child.get('is_heir')) or (heir_id and str(heir_id) == uid),
+        'since': child.get('chonghua_since', ''),
+        'tutored_this_period': uid in (getattr(game_state, 'chonghua', {}) or {}).get('tutored', {}),
+        # 可操作性：自己的皇嗣任何位份皆可处置；他人皇嗣仅 full 权限可动
+        'can_act': is_own or perm == 'full',
+        'can_tutor': (is_own or perm == 'full') and age >= CHONGHUA_TUTOR_MIN_AGE,
         '_mother': owner,
         '_owner_type': owner_type,
         '_index': index,
@@ -6401,86 +6648,78 @@ def chonghua_serialize_child(game_state, owner, owner_type, index, child):
 
 @app.route('/api/chonghua', methods=['GET'])
 def get_chonghua():
+    """只读查询：不改动任何状态（自动收容等已移入转旬结算）。"""
     player_id = request.args.get('player_id')
     game_state, err = session_or_404(player_id)
     if err:
         return err
     ch = chonghua_state(game_state)
-    can_manage_all = chonghua_can_manage_all(game_state)
-    entries = chonghua_collect_children(game_state, can_manage_all)
-
-    # 自动收容：重华宫已开设时，年幼皇嗣（≤3岁）在有余量的情况下自动入馆
-    dirty = False
-    if ch.get('founded'):
-        capacity = chonghua_capacity(ch)
-        inside = sum(1 for _o, _t, _i, c in entries if chonghua_is_inside(c))
-        for _owner, _otype, _idx, c in entries:
-            if inside >= capacity:
-                break
-            if chonghua_is_inside(c):
-                continue
-            try:
-                age = float(c.get('age', 0) or 0)
-            except (TypeError, ValueError):
-                age = 0
-            if age <= CHONGHUA_AUTO_ADMIT_AGE:
-                c['in_chonghua'] = True
-                c['palace'] = CHONGHUA_PALACE_NAME
-                c['chonghua_since'] = f'{getattr(game_state, "year", 0)}年{getattr(game_state, "month", 0)}月'
-                uid = ensure_child_uid(game_state, c)
-                if uid not in ch['children']:
-                    ch['children'].append(uid)
-                chonghua_add_log(game_state, ch, f'{c.get("name")}自动入馆')
-                inside += 1
-                dirty = True
+    perm = chonghua_permission(game_state)
+    can_manage_all = perm == 'full'
+    can_see_all = chonghua_can_see_all(game_state, perm)
+    entries = chonghua_collect_children(game_state, can_see_all)
 
     inside_list = []
     candidate_list = []
     for owner, owner_type, idx, c in entries:
-        payload = chonghua_serialize_child(game_state, owner, owner_type, idx, c)
+        payload = chonghua_serialize_child(game_state, owner, owner_type, idx, c, perm)
         if payload['in_chonghua']:
             inside_list.append(payload)
         else:
             candidate_list.append(payload)
 
-    # 同步 ch['children'] 为在馆 uid 列表
-    ch['children'] = [c['uid'] for c in inside_list]
+    # 名册按全宫在馆情况重建（低权限查询不得截断名册）
+    chonghua_sync_roster(game_state, ch)
+    total_inside = len(ch['children'])
 
-    if dirty:
-        autosave_session(player_id)
-
-    ch_copy = dict(ch)
+    rank_name = chonghua_rank_name(game_state)
     info = {
         'manage_ranks': CHONGHUA_MANAGE_RANKS,
+        'view_min_rank': CHONGHUA_VIEW_MIN_RANK,
         'min_prestige': CHONGHUA_MIN_PRESTIGE,
         'found_cost': CHONGHUA_FOUND_COST,
-        'upgrade_cost': 300 * max(1, int(ch.get('level', 1) or 1)),
+        'upgrade_cost': chonghua_upgrade_cost(ch),
+        'max_level': CHONGHUA_MAX_LEVEL,
+        'tutor_cost': CHONGHUA_TUTOR_COST,
+        'tutor_min_age': CHONGHUA_TUTOR_MIN_AGE,
+        'graduate_age': CHONGHUA_GRADUATE_AGE,
+        'auto_admit_age': CHONGHUA_AUTO_ADMIT_AGE,
+        'upkeep_per_child': CHONGHUA_UPKEEP_PER_CHILD,
+        'upkeep_due': total_inside * CHONGHUA_UPKEEP_PER_CHILD,
+        'arrears': int(ch.get('arrears', 0) or 0),
+        'permission': perm,
         'has_permission': can_manage_all,
+        'rank_name': rank_name,
+        'prestige': game_state.attributes.get('威望', 0),
     }
     return jsonify({
-        'chonghua': ch_copy,
+        'chonghua': dict(ch),
         'children': inside_list,
         'candidates': candidate_list,
         'capacity': chonghua_capacity(ch),
+        'total_inside': total_inside,
+        'permission': perm,
         'can_manage_all': can_manage_all,
+        'can_see_all': can_see_all,
         'player_name': game_state.name,
         'silver': getattr(game_state, 'silver', 0),
         'info': info,
     })
 
-def chonghua_find_child(game_state, uid, can_manage_all):
+def chonghua_find_child(game_state, uid, can_see_all):
     """按 uid（兼容按名字）查找子嗣，返回 (owner, owner_type, index, child)。"""
     if uid is None or uid == '':
         return None, None, -1, None
     target = str(uid)
-    for owner, owner_type, idx, c in chonghua_collect_children(game_state, can_manage_all):
+    for owner, owner_type, idx, c in chonghua_collect_children(game_state, can_see_all):
         if str(c.get('uid')) == target or c.get('name') == target:
             return owner, owner_type, idx, c
     return None, None, -1, None
 
 
-def chonghua_count_inside(game_state, can_manage_all):
-    return sum(1 for _o, _t, _i, c in chonghua_collect_children(game_state, can_manage_all)
+def chonghua_count_inside(game_state):
+    """全宫在馆人数（容量校验必须用全局值，否则低权限可越过上限）。"""
+    return sum(1 for _o, _t, _i, c in chonghua_collect_all_children(game_state)
                if chonghua_is_inside(c))
 
 
@@ -6494,14 +6733,20 @@ def chonghua_action():
     game_state, err = session_or_404(player_id)
     if err:
         return err
+    ensure_ending_fields(game_state)
+    if is_game_over(game_state):
+        return game_over_response(game_state)
     # 重华宫事务属宫务打理，不消耗行动点
     ch = chonghua_state(game_state)
-    can_manage_all = chonghua_can_manage_all(game_state)
+    perm = chonghua_permission(game_state)
+    can_manage_all = perm == 'full'
+    can_see_all = chonghua_can_see_all(game_state, perm)
 
     def add_log(msg):
         chonghua_add_log(game_state, ch, msg)
 
     def ok(message, extra=None):
+        chonghua_sync_roster(game_state, ch)
         autosave_session(player_id)
         payload = {
             'success': True,
@@ -6510,6 +6755,8 @@ def chonghua_action():
             'silver': getattr(game_state, 'silver', 0),
             'attributes': game_state.attributes,
             'capacity': chonghua_capacity(ch),
+            'total_inside': len(ch['children']),
+            'permission': perm,
         }
         if extra:
             payload.update(extra)
@@ -6519,7 +6766,7 @@ def chonghua_action():
         if ch.get('founded'):
             return jsonify({'success': False, 'error': '重华宫已开设'}), 400
         if not can_manage_all:
-            return jsonify({'success': False, 'error': f'须{"/".join(CHONGHUA_MANAGE_RANKS)}位份或协理六宫方可开设'}), 403
+            return jsonify({'success': False, 'error': '重华宫为六宫公器，须皇后或协理六宫者方可开设'}), 403
         if game_state.attributes.get('威望', 0) < CHONGHUA_MIN_PRESTIGE:
             return jsonify({'success': False, 'error': f'威望不足（需≥{CHONGHUA_MIN_PRESTIGE}）'}), 400
         if game_state.silver < CHONGHUA_FOUND_COST:
@@ -6528,21 +6775,26 @@ def chonghua_action():
         ch['founded'] = True
         ch['level'] = 1
         ch['budget'] = 0
+        ch['arrears'] = 0
         add_log('重华宫开设成功')
+        game_state.add_memory('🏛️ 你奏请开设重华宫，皇嗣共育之所自此立起')
         return ok(f'重华宫开设成功，耗费{CHONGHUA_FOUND_COST}两')
 
     if action == 'upgrade':
         if not ch.get('founded'):
             return jsonify({'success': False, 'error': '重华宫尚未开设'}), 400
         if not can_manage_all:
-            return jsonify({'success': False, 'error': '权限不足'}), 403
-        cost = 300 * max(1, int(ch.get('level', 1) or 1))
+            return jsonify({'success': False, 'error': '扩建须皇后或协理六宫者主持'}), 403
+        level = max(1, int(ch.get('level', 1) or 1))
+        if level >= CHONGHUA_MAX_LEVEL:
+            return jsonify({'success': False, 'error': f'重华宫已达最高等级（{CHONGHUA_MAX_LEVEL}级）'}), 400
+        cost = chonghua_upgrade_cost(ch)
         if game_state.silver < cost:
             return jsonify({'success': False, 'error': f'银两不足（需{cost}两）'}), 400
         game_state.silver -= cost
-        ch['level'] = max(1, int(ch.get('level', 1) or 1)) + 1
+        ch['level'] = level + 1
         add_log(f'重华宫扩建至等级{ch["level"]}')
-        return ok(f'扩建成功，等级提升至{ch["level"]}，耗费{cost}两')
+        return ok(f'扩建成功，等级提升至{ch["level"]}（容量{chonghua_capacity(ch)}人），耗费{cost}两')
 
     if action == 'patronize':
         if not ch.get('founded'):
@@ -6556,9 +6808,18 @@ def chonghua_action():
         if game_state.silver < amt:
             return jsonify({'success': False, 'error': '银两不足'}), 400
         game_state.silver -= amt
-        ch['budget'] = ch.get('budget', 0) + amt
+        ch['budget'] = int(ch.get('budget', 0) or 0) + amt
+        # 拨用度即刻缓解欠饷
+        if ch.get('arrears'):
+            ch['arrears'] = 0
         add_log(f'拨用度{amt}两')
-        return ok(f'拨用度{amt}两成功')
+        gain = 1 if amt >= 100 else 0
+        if gain:
+            game_state.attributes['威望'] = min(game_state.get_attr_max('威望'),
+                                              game_state.attributes.get('威望', 0) + gain)
+        due = chonghua_upkeep_due(game_state, ch)
+        tail = f'，现存用度{ch["budget"]}两（每旬需{due}两）'
+        return ok(f'拨用度{amt}两成功' + tail + ('，威望+1' if gain else ''))
 
     if action not in ('admit', 'tutor', 'adopt', 'release'):
         return jsonify({'success': False, 'error': '未知操作'}), 400
@@ -6566,7 +6827,7 @@ def chonghua_action():
     if not ch.get('founded'):
         return jsonify({'success': False, 'error': '重华宫尚未开设'}), 400
 
-    owner, owner_type, idx, child = chonghua_find_child(game_state, uid, can_manage_all)
+    owner, owner_type, idx, child = chonghua_find_child(game_state, uid, can_see_all)
     if not child:
         return jsonify({'success': False, 'error': '子嗣不存在'}), 404
     ensure_child_fields(child)
@@ -6574,46 +6835,69 @@ def chonghua_action():
     child_name = child.get('name') or '未命名'
     is_own = (owner_type == 'player')
     if not is_own and not can_manage_all:
-        return jsonify({'success': False, 'error': '权限不足，无法处置他人皇嗣'}), 403
+        return jsonify({'success': False, 'error': f'你只可查阅名册，处置{owner}的皇嗣须皇后或协理六宫者出面'}), 403
+    try:
+        child_age = float(child.get('age', 0) or 0)
+    except (TypeError, ValueError):
+        child_age = 0
 
     if action == 'admit':
         if chonghua_is_inside(child):
             return jsonify({'success': False, 'error': f'{child_name}已在馆'}), 400
+        if child_age >= CHONGHUA_GRADUATE_AGE:
+            return jsonify({'success': False, 'error': f'{child_name}已{int(child_age)}岁，年长不必再入馆共育'}), 400
         capacity = chonghua_capacity(ch)
-        if chonghua_count_inside(game_state, can_manage_all) >= capacity:
+        if chonghua_count_inside(game_state) >= capacity:
             return jsonify({'success': False, 'error': f'重华宫容量已满（{capacity}人），请先扩建'}), 400
-        child['in_chonghua'] = True
-        child['palace'] = CHONGHUA_PALACE_NAME
-        child['chonghua_since'] = f'{getattr(game_state, "year", 0)}年{getattr(game_state, "month", 0)}月'
-        if child_uid not in ch['children']:
-            ch['children'].append(child_uid)
-        add_log(f'{child_name}入馆')
+        guardian = child.get('guardian') or ''
+        if guardian and guardian != game_state.name and not can_manage_all:
+            return jsonify({'success': False, 'error': f'{child_name}由{guardian}亲养，不便代为送入'}), 400
+        chonghua_admit_child(game_state, ch, child)
+        if guardian:
+            child['guardian'] = ''
         return ok(f'{child_name}已收容至重华宫')
 
     if action == 'release':
         if not chonghua_is_inside(child):
             return jsonify({'success': False, 'error': f'{child_name}不在馆'}), 400
-        child['in_chonghua'] = False
-        if child.get('palace') == CHONGHUA_PALACE_NAME:
-            child['palace'] = ''
-        child.pop('chonghua_since', None)
-        if child_uid in ch['children']:
-            ch['children'].remove(child_uid)
+        chonghua_remove_child(game_state, ch, child)
+        if not child.get('guardian'):
+            child['guardian'] = child.get('adoptive_mother') or child.get('birth_mother') or owner
         add_log(f'{child_name}迁出重华宫')
-        return ok(f'{child_name}已迁出重华宫')
+        return ok(f'{child_name}已迁出重华宫，交由{child["guardian"]}抚养')
 
     if action == 'tutor':
         if not chonghua_is_inside(child):
             return jsonify({'success': False, 'error': f'{child_name}不在馆'}), 400
-        cost = 20
-        if game_state.silver < cost:
-            return jsonify({'success': False, 'error': f'银两不足（需{cost}两）'}), 400
-        game_state.silver -= cost
-        child['tutor_level'] = int(child.get('tutor_level', 0) or 0) + 1
-        child['talent'] = min(100, int(child.get('talent', 50) or 50) + random.randint(2, 5))
-        child['wit'] = min(100, int(child.get('wit', 40) or 40) + random.randint(1, 4))
+        if child_age < CHONGHUA_TUTOR_MIN_AGE:
+            return jsonify({'success': False, 'error': f'{child_name}年纪尚幼（需满{CHONGHUA_TUTOR_MIN_AGE}岁）'}), 400
+        tutor_level = int(child.get('tutor_level', 0) or 0)
+        if tutor_level >= CHONGHUA_TUTOR_MAX_LEVEL:
+            return jsonify({'success': False, 'error': f'{child_name}已学至{tutor_level}级，师傅无可再教'}), 400
+        tutored = ch.setdefault('tutored', {})
+        period = chonghua_period_key(game_state)
+        if tutored.get(child_uid) == period:
+            return jsonify({'success': False, 'error': f'{child_name}本旬已授业，且待下旬'}), 400
+        cost = CHONGHUA_TUTOR_COST + tutor_level * 5
+        # 优先动用重华宫用度，不足再自掏银两
+        from_budget = min(int(ch.get('budget', 0) or 0), cost)
+        need_silver = cost - from_budget
+        if game_state.silver < need_silver:
+            return jsonify({'success': False, 'error': f'束脩需{cost}两（宫中用度可抵{from_budget}两），银两不足'}), 400
+        ch['budget'] = int(ch.get('budget', 0) or 0) - from_budget
+        game_state.silver -= need_silver
+        tutored[child_uid] = period
+        child['tutor_level'] = tutor_level + 1
+        talent_gain = random.randint(2, 5)
+        wit_gain = random.randint(1, 4)
+        child['talent'] = min(100, int(child.get('talent', 50) or 50) + talent_gain)
+        child['wit'] = min(100, int(child.get('wit', 40) or 40) + wit_gain)
+        child['emperor_favor'] = min(100, int(child.get('emperor_favor', 30) or 30) + random.randint(0, 2))
+        add_child_event(child, f'📖 在重华宫延师授业，才情+{talent_gain}、机敏+{wit_gain}')
         add_log(f'{child_name}授业（束脩{cost}两）')
-        return ok(f'为{child_name}延师授业，才学有进，耗费{cost}两')
+        source = f'用度支{from_budget}两' + (f'、自付{need_silver}两' if need_silver else '')
+        return ok(f'为{child_name}延师授业，才情+{talent_gain}、机敏+{wit_gain}（{source}）',
+                  {'child': chonghua_serialize_child(game_state, owner, owner_type, idx, child, perm)})
 
     # action == 'adopt'：将在馆皇嗣收作己出，交由自己抚养
     if not chonghua_is_inside(child):
@@ -6621,10 +6905,42 @@ def chonghua_action():
     existing_guardian = child.get('guardian') or ''
     if existing_guardian and existing_guardian != game_state.name:
         return jsonify({'success': False, 'error': f'{child_name}已由{existing_guardian}抚养'}), 400
+    my_rank_idx = RANK_LEVELS.get(chonghua_rank_name(game_state), 0)
+    cost = 0
     if not is_own:
+        # 亲养他人皇嗣，等同过继：沿用宗人府那套规矩，仅仪银减半（宫中共育，礼从简）
         if count_living_children(game_state.children) >= ADOPT_MAX_CHILDREN:
             return jsonify({'success': False, 'error': f'膝下子嗣已满（上限{ADOPT_MAX_CHILDREN}人）'}), 400
-        npc = (getattr(game_state, 'npcs', {}) or {}).get(owner)
+        if child_age > ADOPT_MAX_AGE:
+            return jsonify({'success': False, 'error': f'{child_name}已{int(child_age)}岁，年长不宜再过继'}), 400
+        if my_rank_idx < RANK_LEVELS.get(ADOPT_MIN_RANK, 0):
+            return jsonify({'success': False, 'error': f'须{ADOPT_MIN_RANK}及以上位份方可亲养他人皇嗣'}), 400
+        if int(child.get('adopted_count', 0) or 0) >= ADOPT_MAX_TRANSFERS:
+            return jsonify({'success': False, 'error': '此子已被过继多次，宗人府不许再行转继'}), 400
+        birth_mother_npc = (getattr(game_state, 'npcs', {}) or {}).get(owner)
+        is_orphan = isinstance(birth_mother_npc, dict) and not birth_mother_npc.get('alive', True)
+        if child.get('gender') == '皇子':
+            if my_rank_idx < RANK_LEVELS.get(ADOPT_PRINCE_MIN_RANK, 0):
+                return jsonify({'success': False, 'error': f'皇嗣尊贵，须{ADOPT_PRINCE_MIN_RANK}及以上位份方可亲养'}), 400
+            favor = game_state.attributes.get('宠爱', 0)
+            if favor < ADOPT_PRINCE_EMPEROR_FAVOR:
+                return jsonify({'success': False, 'error': f'圣宠不足（需宠爱≥{ADOPT_PRINCE_EMPEROR_FAVOR}），皇帝不忍皇子旁落'}), 400
+            approved, note = should_use_emperor_approval(game_state, child, 'in')
+            if not approved:
+                return jsonify({'success': False, 'error': f'奏请亲养皇子{child_name}，{note}，只得作罢'}), 400
+        # 生母在世且情分浅薄时，未必愿意割舍
+        if isinstance(birth_mother_npc, dict) and birth_mother_npc.get('alive', True):
+            willingness = adoption_willingness(game_state, birth_mother_npc, child)
+            if willingness < 35:
+                return jsonify({'success': False, 'error': f'{owner}割舍不下亲子{child_name}，亲养未成'}), 400
+        base_cost = ADOPT_IN_COST_PRINCE if child.get('gender') == '皇子' else ADOPT_IN_COST
+        cost = max(10, base_cost // 2)
+        if is_orphan:
+            cost = max(10, cost // 2)
+        if game_state.silver < cost:
+            return jsonify({'success': False, 'error': f'银两不足，亲养仪需{cost}两'}), 400
+        game_state.silver -= cost
+        npc = birth_mother_npc
         if isinstance(npc, dict) and 0 <= idx < len(npc.get('children', []) or []):
             npc['children'].pop(idx)
         child['adopted'] = True
@@ -6635,18 +6951,19 @@ def chonghua_action():
         add_adoption_history(child, '重华宫亲养', owner, game_state.name, '重华宫共育', getattr(game_state, 'day', 0))
         game_state.children.append(child)
         game_state.has_children = True
+        if owner in game_state.relationships:
+            game_state.relationships[owner]['好感'] = max(-100, game_state.relationships[owner].get('好感', 0) - random.randint(3, 10))
+    chonghua_remove_child(game_state, ch, child)
     child['guardian'] = game_state.name
-    child['in_chonghua'] = False
-    if child.get('palace') == CHONGHUA_PALACE_NAME:
-        child['palace'] = ''
-    child.pop('chonghua_since', None)
-    if child_uid in ch['children']:
-        ch['children'].remove(child_uid)
-    gain = 10
+    gain = CHONGHUA_ADOPT_PRESTIGE if not is_own else 3
     game_state.attributes['威望'] = min(game_state.get_attr_max('威望'),
                                       game_state.attributes.get('威望', 0) + gain)
     add_log(f'{game_state.name}亲养{child_name}')
-    return ok(f'{child_name}已归你抚养，威望+{gain}')
+    verb = '亲养' if is_own else f'自{owner}处亲养'
+    game_state.add_memory(f'👶 你{verb}{child_name}，自重华宫接回宫中抚养')
+    tail = f'，仪银{cost}两' if cost else ''
+    return ok(f'{child_name}已归你抚养，威望+{gain}{tail}')
+
 
 
 
