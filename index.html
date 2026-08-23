@@ -1499,7 +1499,7 @@ function randomEmperorName(){return EMPEROR_SURNAMES[Math.floor(Math.random()*EM
 const ATTR_KEYS=['容貌','才情','心计','宠爱','威望','健康','才艺','谋略','魅力','福运','倾向'];
 const CREATION_ATTR_KEYS=['容貌','才情','心计','健康','才艺','谋略','魅力','福运','倾向'];
 const TOTAL_POINTS=100;
-const RANK_ORDER=['宫女','更衣','官女子','秀女','答应','常在','贵人','才人','美人','婕妤','嫔','妃','淑妃','德妃','贤妃','宸妃','贵妃','皇贵妃','皇后'];
+const RANK_ORDER=['宫女','更衣','官女子','秀女','答应','常在','贵人','才人','美人','婕妤','嫔','妃','贵妃','皇贵妃','皇后'];
 
 let playerId=null, isProcessing=false, selectedBackground=null, eventLogs=[], flipTriggeredThisRound=false;
 let currentCharData={
@@ -1918,15 +1918,9 @@ opts:[{txt:'主动向皇后请缨，协助管理选秀事务',eff:{威望:8,心�
 opts:[{txt:'向皇帝进献边疆地图，献上治国良策',eff:{威望:12,谋略:8},correct:true,msg:'你的见解令皇帝惊叹，认为你是难得的贤内助，晋封你为妃。'},{txt:'精心打扮，以美色邀宠',eff:{容貌:5,宠爱:5},correct:false,msg:'皇帝认为你以色侍人，不是长久之计。'},{txt:'联合几位妃嫔共同上书为皇帝庆贺',eff:{威望:3,宠爱:3},correct:false,msg:'你随波逐流，没有展现出独特价值，晋升机会被他人抢走。'}]},
 '妃→封妃':{title:'赐号之仪',desc:'你晋封妃位后圣宠渐隆，皇帝有意赐你封号，以彰恩宠。能否得号，关乎你在六宫中的体面。',
 opts:[{txt:'呈上亲手所绣吉字，以谦德请号',eff:{威望:8,才情:5},correct:true,msg:'皇帝嘉许你的谦德，亲赐封号，册为带号之妃。'},{txt:'暗示娘家出资修缮宫殿以邀封号',eff:{心计:6,威望:-8},correct:false,msg:'皇帝厌恶后宫与朝臣勾连，未赐封号。'},{txt:'当众哭诉位份低微，求皇帝垂怜',eff:{宠爱:3,威望:-6},correct:false,msg:'哭闹失仪，皇帝觉得你难当表率。'}]},
-'封妃→淑妃':{title:'册立四妃',desc:'你已位尊带号之妃，四妃之位悬空。皇帝欲从妃位中择贤册立，你须证明自己堪列四妃。',
-opts:[{txt:'协理六宫琐事，以贤德服众',eff:{威望:12,宠爱:8},correct:true,msg:'你的贤德传遍六宫，皇帝下旨晋封淑妃，位列四妃。'},{txt:'借子嗣之功在宴上争宠',eff:{宠爱:6,威望:-5},correct:false,msg:'你的张扬惹来非议，册立之事被搁置。'},{txt:'托人向外臣传扬你的美名',eff:{心计:8,威望:-10},correct:false,msg:'后宫干政之嫌惹怒皇帝。'}]},
-'淑妃→德妃':{title:'六宫表率',desc:'你入主淑妃宫后行事有度，太后与皇后皆有所闻。皇帝欲以晋封德妃嘉奖你的贤德，但后宫暗流未平。',
-opts:[{txt:'整顿内务、抚恤宫女，以德行服众',eff:{威望:10,宠爱:6},correct:true,msg:'你的贤德传遍六宫，皇帝下旨晋封德妃。'},{txt:'借机打压曾与你不和的嫔位',eff:{心计:8,威望:-6},correct:false,msg:'皇帝不喜你恃宠弄权，晋封之事被搁置。'},{txt:'只向皇帝撒娇讨赏，不问宫中事',eff:{宠爱:4,威望:-4},correct:false,msg:'皇帝认为你难当表率，未予晋封。'}]},
-'德妃→贤妃':{title:'慈晖殿前',desc:'宫中设宴庆贺皇子周岁，你需在众多妃嫔面前展现母仪之姿。皇帝暗中观察，看谁堪晋贤妃之位。',
-opts:[{txt:'悉心照料皇子，礼数周全不失威仪',eff:{威望:11,宠爱:7},correct:true,msg:'你的端庄贤淑令皇帝满意，晋封贤妃。'},{txt:'在宴上炫耀皇子聪慧，压过他人',eff:{宠爱:5,威望:-5},correct:false,msg:'你的张扬惹来非议，皇帝觉得你不够谦逊。'},{txt:'推说身体不适缺席宴饮',eff:{健康:3,威望:-6},correct:false,msg:'你错失在御前露脸之机，晋封落空。'}]},
-'贤妃→宸妃':{title:'凤阁论政',desc:'皇帝近日常召你至凤阁议事，后宫议论纷纷。能否晋封宸妃，取决于你能否在干政之嫌与贤内助之间拿捏分寸。',
-opts:[{txt:'只献良策不涉权柄，以才智佐君',eff:{威望:12,谋略:8},correct:true,msg:'你的分寸令皇帝放心，下旨晋封宸妃。'},{txt:'趁机为娘家族人请官',eff:{心计:6,威望:-10},correct:false,msg:'皇帝察觉你私心太重，大怒。'},{txt:'刻意避谈政事，只谈风月',eff:{宠爱:4,威望:-3},correct:false,msg:'皇帝觉得你难当大任，未予晋封。'}]},
-'宸妃→贵妃':{title:'宫廷政变',desc:'皇帝病重，太子之位悬而未决。后宫暗流涌动，各方势力都在布局。你的一举一动都可能影响大局。',
+'封妃→四妃':{title:'册立四妃',desc:'你已位尊带号之妃，四妃之位（淑德贤宸）有空缺。皇帝欲从妃位中择贤册立，你须证明自己堪列四妃。',
+opts:[{txt:'协理六宫琐事，以贤德服众',eff:{威望:12,宠爱:8},correct:true,msg:'你的贤德传遍六宫，皇帝下旨册你入四妃之列。'},{txt:'借子嗣之功在宴上争宠',eff:{宠爱:6,威望:-5},correct:false,msg:'你的张扬惹来非议，册立之事被搁置。'},{txt:'托人向外臣传扬你的美名',eff:{心计:8,威望:-10},correct:false,msg:'后宫干政之嫌惹怒皇帝。'}]},
+'四妃→贵妃':{title:'宫廷政变',desc:'皇帝病重，太子之位悬而未决。后宫暗流涌动，各方势力都在布局。你位列四妃，一举一动都可能影响大局。',
 opts:[{txt:'坚守中立，以皇帝病情为重，尽心侍疾',eff:{威望:15,宠爱:10,健康:-5},correct:true,msg:'你的忠诚和体贴感动了皇帝，病愈后晋封你为贵妃。'},{txt:'暗中支持某位皇子，提前布局',eff:{心计:10,威望:-8},correct:false,msg:'皇帝病愈后得知你结党营私，大怒。'},{txt:'联合皇后，共同把持后宫',eff:{威望:5,心计:5},correct:false,msg:'你的野心太过明显，皇帝对你不满。'}]},
 '贵妃→皇贵妃':{title:'皇后之争',desc:'皇后因病退位，后位悬空。你是贵妃，是继后的热门人选。但此事关乎国本，必须慎之又慎。',
 opts:[{txt:'向皇帝进言，以国家社稷为重，推荐合适人选',eff:{威望:20,谋略:10},correct:true,msg:'你的大公无私让皇帝感动，最终决定晋封你为皇贵妃，统摄六宫。'},{txt:'私下拉拢大臣，为自己造势',eff:{心计:10,威望:-15},correct:false,msg:'皇帝最忌讳后宫干政，你的行为触怒了皇帝。'},{txt:'以退为进，主动推辞后位，以示谦逊',eff:{威望:5,宠爱:5},correct:false,msg:'你的推辞被皇帝认为是虚伪，反而失去了机会。'}]},
@@ -1935,8 +1929,10 @@ opts:[{txt:'以最隆重的礼仪准备立后大典，展现国母风范',eff:{�
 };
 
 function getPromotionStory(rank,nobletitle){
+const FOUR_TITLES=['淑','德','贤','宸'];
 if(rank.name==='妃'&&!nobletitle)return PROMOTION_STORIES['妃→封妃'];
-if(rank.name==='妃'&&nobletitle)return PROMOTION_STORIES['封妃→淑妃'];
+if(rank.name==='妃'&&nobletitle&&!FOUR_TITLES.includes(nobletitle))return PROMOTION_STORIES['封妃→四妃'];
+if(rank.name==='妃'&&FOUR_TITLES.includes(nobletitle))return PROMOTION_STORIES['四妃→贵妃'];
 const key=`${rank.name}→${RANK_ORDER[RANK_ORDER.indexOf(rank.name)+1]}`;
 return PROMOTION_STORIES[key]||null;
 }
@@ -2017,7 +2013,7 @@ function updateHaremPage(data){
         if (npcs[n]?.rank === '皇后') queen = n;
         else others.push(n);
     });
-    const rankOrder = {'皇贵妃':0,'贵妃':1,'宸妃':2,'贤妃':3,'德妃':4,'淑妃':5,'妃':6,'嫔':7,'婕妤':8,'美人':9,'才人':10,'贵人':11,'常在':12,'答应':13,'官女子':14,'更衣':15};
+    const rankOrder = {'皇贵妃':0,'贵妃':1,'妃':2,'嫔':3,'婕妤':4,'美人':5,'才人':6,'贵人':7,'常在':8,'答应':9,'官女子':10,'更衣':11};
     others.sort((a,b) => (rankOrder[npcs[a]?.rank] ?? 99) - (rankOrder[npcs[b]?.rank] ?? 99));
     const sorted = queen ? [queen, ...others] : others;
     const deadList = sorted.filter(n => npcs[n]?.alive === false);
@@ -2064,7 +2060,7 @@ function updateHaremPage(data){
                 <span style="font-size:${isQueen ? '16' : '12'}px;">${npc.icon || '🌸'}</span>
                 <span style="font-weight:600;color:var(--text-dark);${isQueen ? 'font-size:12px;' : ''}">${displayName}</span>
                 ${isQueen ? `<span class="queen-badge" style="margin-left:auto;">👑六宫之主</span>` :
-                    `<span style="font-size:6px;color:var(--gold);background:var(--gold-light);padding:1px 4px;border-radius:6px;margin-left:auto;">${npc.rank || '妃嫔'}</span>`}
+                    `<span style="font-size:6px;color:var(--gold);background:var(--gold-light);padding:1px 4px;border-radius:6px;margin-left:auto;">${(npc.nobletitle && npc.rank==='妃') ? npc.nobletitle+'妃' : (npc.rank || '妃嫔')}</span>`}
             </div>
             <div style="font-size:7px;color:var(--text-light);display:flex;justify-content:space-between;flex-wrap:wrap;">
                 <span style="color:var(--text-mid);">${rel ? `好感 ${rel.好感 || 0}` : '未知'}</span>
@@ -3500,7 +3496,7 @@ async function triggerFlip(data){
                             <div class="edict-body">
                                 皇帝听闻你身怀龙嗣，<br>
                                 特前来探望，关怀备至。<br>
-                                <span class="sub">宠爱 +${d.favor_gain}，健康 +${d.prestige_gain || 0}</span>
+                                <span class="sub">宠爱 +${d.favor_gain}${d.health_gain ? '，健康 +'+d.health_gain : ''}</span>
                                 ${d.pregnancy && !d.pregnancy.includes('有喜') ? `<br><span style="color:#e91e63;">${d.pregnancy}</span>` : ''}
                             </div>
                             <div class="edict-seal">🔴</div>

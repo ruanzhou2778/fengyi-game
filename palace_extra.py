@@ -23,7 +23,7 @@ DRAIN_OPTIONS = {
 
 from models import get_rank_power
 
-RANK_ORDER_LOCAL = ["更衣", "官女子", "答应", "常在", "贵人", "才人", "美人", "婕妤", "嫔", "妃", "淑妃", "德妃", "贤妃", "宸妃", "贵妃", "皇贵妃", "皇后"]
+RANK_ORDER_LOCAL = ["更衣", "官女子", "答应", "常在", "贵人", "才人", "美人", "婕妤", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
 
 
 def _rank_level(rank_name, nobletitle=None):

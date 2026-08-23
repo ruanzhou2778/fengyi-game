@@ -18,7 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 load_dotenv()
-from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor, default_heir_race, normalize_heir_race
+from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, FOUR_CONSORT_TITLES, ORDINARY_NOBLETITLES, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, is_four_consort_title, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor, default_heir_race, normalize_heir_race
 from scenarios import START_SCENARIOS, apply_scenario
 from events import get_daily_actions, apply_daily_action
 from names import (
@@ -259,7 +259,7 @@ def restore_sessions_on_startup():
 
 RANK_ORDER = [
     "宫女", "更衣", "官女子", "秀女", "答应", "常在", "贵人", "才人", "美人", "婕妤",
-    "嫔", "妃", "淑妃", "德妃", "贤妃", "宸妃", "贵妃", "皇贵妃", "皇后",
+    "嫔", "妃", "贵妃", "皇贵妃", "皇后",
 ]
 RANK_LEVELS = {name: i for i, name in enumerate(RANK_ORDER)}
 
@@ -276,22 +276,20 @@ RANK_BONUS = {
     "婕妤": {"容貌": 18, "才情": 18, "心计": 12, "威望": 11},
     "嫔": {"容貌": 21, "才情": 21, "心计": 14, "威望": 13},
     "妃": {"容貌": 25, "才情": 25, "心计": 17, "威望": 16},
-    "淑妃": {"容貌": 28, "才情": 28, "心计": 20, "威望": 19},
-    "德妃": {"容貌": 26, "才情": 26, "心计": 18, "威望": 17},
-    "贤妃": {"容貌": 27, "才情": 27, "心计": 19, "威望": 18},
-    "宸妃": {"容貌": 28, "才情": 28, "心计": 20, "威望": 19},
     "贵妃": {"容貌": 30, "才情": 30, "心计": 20, "威望": 20},
     "皇贵妃": {"容貌": 36, "才情": 36, "心计": 24, "威望": 24},
     "皇后": {"容貌": 42, "才情": 42, "心计": 28, "威望": 28},
 }
 
+# 四妃现为「妃」位份下的专属封号（淑/德/贤/宸），各限 1 人；
+# 位份数量限制只按真正的 Rank 名统计，四妃名额单独由 FOUR_CONSORT_TITLE_LIMIT 控制。
 RANK_LIMITS = {
     "皇后": 1, "皇贵妃": 1, "贵妃": 2,
-    "淑妃": 1, "德妃": 1, "贤妃": 1, "宸妃": 1,
     "妃": 5, "嫔": 6,
     "婕妤": 8, "美人": 8, "才人": 10, "贵人": 12, "常在": 15,
     "答应": 18, "秀女": 22, "官女子": 28, "更衣": 32, "宫女": 40,
 }
+FOUR_CONSORT_TITLE_LIMIT = 1  # 每个四妃封号（淑/德/贤/宸）各限 1 人
 
 PROMOTION_THRESHOLDS = {
     "宫女": {"宠爱": 20, "威望": 15},
@@ -305,21 +303,29 @@ PROMOTION_THRESHOLDS = {
     "美人": {"宠爱": 205, "威望": 142, "才情": 76, "心计": 66},
     "婕妤": {"宠爱": 245, "威望": 168, "才情": 78, "心计": 70},
     "嫔": {"宠爱": 290, "威望": 195, "才情": 80, "心计": 74},
-    "妃": {"宠爱": 340, "威望": 225, "才情": 82, "心计": 78},
-    "淑妃": {"宠爱": 400, "威望": 268, "才情": 85, "心计": 81},
-    "德妃": {"宠爱": 360, "威望": 240, "才情": 83, "心计": 79},
-    "贤妃": {"宠爱": 380, "威望": 255, "才情": 84, "心计": 80},
-    "宸妃": {"宠爱": 400, "威望": 268, "才情": 85, "心计": 81},
-    "贵妃": {"宠爱": 420, "威望": 275, "才情": 85, "心计": 80},
-    "皇贵妃": {"宠爱": 540, "威望": 350, "才情": 88, "心计": 82},
+    "妃": {"宠爱": 400, "威望": 265, "才情": 84, "心计": 80},
+    "贵妃": {"宠爱": 460, "威望": 300, "才情": 86, "心计": 82},
+    "皇贵妃": {"宠爱": 560, "威望": 360, "才情": 88, "心计": 84},
+}
+
+# 「妃」位份内的封号晋升门槛（在位份为「妃」时按当前封号阶段校验）：
+#   无号妃 → 普通封号妃 → 四妃封号妃（淑/德/贤/宸）→ 才可晋贵妃。
+# 键为「当前所处封号阶段」。
+CONSORT_TITLE_THRESHOLDS = {
+    "none": {"宠爱": 340, "威望": 225, "才情": 82, "心计": 78},      # 无号妃 → 请普通封号
+    "ordinary": {"宠爱": 380, "威望": 250, "才情": 84, "心计": 80},  # 普通封号妃 → 册立四妃
 }
 
 MIN_RANK_TENURE = {
     "宫女": 2, "更衣": 2, "官女子": 3, "秀女": 3, "答应": 5,
     "常在": 5, "贵人": 6, "才人": 6, "美人": 7, "婕妤": 7,
     "嫔": 8, "妃": 10,
-    "淑妃": 12, "德妃": 12, "贤妃": 12, "宸妃": 12,
     "贵妃": 14, "皇贵妃": 16,
+}
+# 「妃」位份内两级封号晋升所需的额外历练旬数（在妃位上累计）。
+CONSORT_TITLE_TENURE = {
+    "none": 4,       # 晋妃后须历练若干旬方可请普通封号
+    "ordinary": 8,   # 得普通封号后须再历练方可册立四妃
 }
 
 SPECIAL_FAVOR_RATIO = 1.70   # 宠爱达门槛 170% → 可破格跳过资历（专宠）
@@ -330,7 +336,7 @@ DEMOTION_SEVERE_CONFLICTS = {"陷害", "告发"}
 DEMOTION_MODERATE_CONFLICTS = {"谣言", "争辩", "争宠"}
 
 PROMOTION_EXTRA_REQUIREMENTS = {
-    "淑妃": {"min_children": 1, "hint": "晋封淑妃须至少诞下一名皇嗣（母凭子贵）"},
+    "四妃封号": {"min_children": 1, "hint": "册立四妃（淑德贤宸）须至少诞下一名皇嗣（母凭子贵）"},
     "贵妃": {"min_children": 1, "hint": "晋封贵妃须至少诞下一名皇嗣"},
     "皇贵妃": {"min_children": 2, "hint": "晋封皇贵妃须至少诞下两名皇嗣"},
     "皇后": {"hint": "册立皇后除圣宠外，还需母家势力与朝臣请立中宫的时机"},
@@ -370,30 +376,61 @@ def get_prev_rank(rank_name):
         return None
     return RANK_ORDER[idx - 1]
 
-def pick_available_four_consort(game_state):
-    for name in FOUR_CONSORTS:
-        if can_promote_to_rank(game_state, name):
-            return name
+def pick_available_four_consort_title(game_state):
+    """挑一个尚空缺的四妃封号（淑/德/贤/宸），无空缺返回 None。"""
+    for title in FOUR_CONSORT_TITLES:
+        if can_use_four_consort_title(game_state, title):
+            return title
     return None
 
+def count_four_consort_title(game_state, title):
+    """统计当前后宫（含玩家）持某四妃封号的人数。"""
+    count = 0
+    for name, npc in game_state.npcs.items():
+        if normalize_rank_name(npc.get("rank")) == "妃" and npc.get("nobletitle") == title:
+            count += 1
+    if game_state.rank.name == "妃" and game_state.nobletitle == title:
+        count += 1
+    return count
+
+def can_use_four_consort_title(game_state, title):
+    """四妃封号是否仍有名额（各限 FOUR_CONSORT_TITLE_LIMIT）。"""
+    if title not in FOUR_CONSORT_TITLES:
+        return False
+    return count_four_consort_title(game_state, title) < FOUR_CONSORT_TITLE_LIMIT
+
 def grant_consort_nobletitle(game_state):
-    """妃位赐封号 → 带封号的妃（位份仍为妃）。"""
+    """无号妃 → 普通封号妃（位份仍为妃，封号取自普通封号池）。"""
     if game_state.rank.name != "妃" or game_state.nobletitle:
         return None
-    four_chars = {c.replace("妃", "") for c in FOUR_CONSORTS}
-    candidates = [t for t in NOBLETITLES if t not in four_chars]
-    if not candidates:
-        candidates = list(NOBLETITLES)
+    candidates = list(ORDINARY_NOBLETITLES) or list(NOBLETITLES)
     game_state.nobletitle = random.choice(candidates)
     return f"皇帝赐封号：『{game_state.nobletitle}』，册为「{game_state.get_display_rank()}」"
 
+def consort_stage(game_state):
+    """妃位内的封号阶段：'none'（无号）/'ordinary'（普通封号）/'four'（四妃封号）；非妃位返回 None。"""
+    if game_state.rank.name != "妃":
+        return None
+    if not game_state.nobletitle:
+        return "none"
+    if is_four_consort_title(game_state.nobletitle):
+        return "four"
+    return "ordinary"
+
 def get_promotion_step(game_state):
     rank = game_state.rank.name
-    if rank == "妃" and not game_state.nobletitle:
-        return {"type": "赐封号"}
-    if rank == "妃" and game_state.nobletitle:
-        target = pick_available_four_consort(game_state) or FOUR_CONSORTS[0]
-        return {"type": "位份", "target": target}
+    if rank == "妃":
+        stage = consort_stage(game_state)
+        if stage == "none":
+            return {"type": "赐封号"}
+        if stage == "ordinary":
+            target = pick_available_four_consort_title(game_state)
+            return {"type": "四妃封号", "target": target}
+        # stage == "four"：四妃封号妃 → 贵妃
+        next_rank = get_next_rank_name(rank)
+        if next_rank:
+            return {"type": "位份", "target": next_rank}
+        return None
     next_rank = get_next_rank_name(rank)
     if next_rank:
         return {"type": "位份", "target": next_rank}
@@ -605,22 +642,26 @@ def apply_promotion_step(game_state, step):
         if not title_msg:
             return None
         return f"📜 圣旨到！{title_msg}"
+    if step["type"] == "四妃封号":
+        # 普通封号妃 → 四妃封号妃（位份仍为妃，仅换封号）
+        target = step.get("target")
+        if not target or not can_use_four_consort_title(game_state, target):
+            return None
+        game_state.nobletitle = target
+        game_state.rank_periods = 0
+        return f"📜 圣旨到！册立为四妃之「{game_state.get_display_rank()}」！"
     target = step.get("target")
     if not target:
         return None
-    if target in FOUR_CONSORTS:
-        if not can_promote_to_rank(game_state, target):
-            return None
-        old_title = game_state.nobletitle
-        game_state.nobletitle = None
-        if not set_player_rank(game_state, target):
-            game_state.nobletitle = old_title
-            return None
-        return f"📜 圣旨到！恭喜晋升为「{game_state.get_display_rank()}」！"
     if not can_promote_to_rank(game_state, target):
         return None
+    old_title = game_state.nobletitle
+    # 晋位份（如四妃封号妃→贵妃）时清空妃位封号
+    if game_state.rank.name == "妃":
+        game_state.nobletitle = None
     if set_player_rank(game_state, target):
         return f"📜 圣旨到！恭喜晋升为「{game_state.get_display_rank()}」！"
+    game_state.nobletitle = old_title
     return None
 
 def set_player_rank(game_state, rank_name):
@@ -639,25 +680,27 @@ def demote_player(game_state, reason=""):
     current = game_state.rank.name
     if current == "宫女":
         return None
-    if current in FOUR_CONSORTS:
+    if current == "妃" and game_state.nobletitle:
+        # 四妃封号妃 → 普通封号妃；普通封号妃 → 无号妃
         old_display = game_state.get_display_rank()
-        prefix = current.replace("妃", "")
-        set_player_rank(game_state, "妃")
-        game_state.nobletitle = prefix if prefix in NOBLETITLES else random.choice(NOBLETITLES)
+        if is_four_consort_title(game_state.nobletitle):
+            game_state.nobletitle = random.choice(list(ORDINARY_NOBLETITLES) or list(NOBLETITLES))
+            new_display = game_state.get_display_rank()
+        else:
+            game_state.nobletitle = None
+            new_display = "妃"
         game_state._promotion_done = False
         game_state.rank_periods = 0
-        msg = f"📉 降位旨意：由「{old_display}」降为「{game_state.get_display_rank()}」"
-    elif current == "妃" and game_state.nobletitle:
-        old_display = game_state.get_display_rank()
-        game_state.nobletitle = None
-        game_state._promotion_done = False
-        game_state.rank_periods = 0
-        msg = f"📉 降位旨意：由「{old_display}」降为「妃」"
+        msg = f"📉 降位旨意：由「{old_display}」降为「{new_display}」"
     else:
         prev = get_prev_rank(current)
         if not prev or not set_player_rank(game_state, prev):
             return None
-        if game_state.rank.value < Rank.妃.value and game_state.nobletitle:
+        # 贵妃降为妃时，给一个四妃封号（贴合「妃位顶层」）
+        if current == "贵妃":
+            title = pick_available_four_consort_title(game_state) or random.choice(FOUR_CONSORT_TITLES)
+            game_state.nobletitle = title
+        elif game_state.rank.value < Rank.妃.value and game_state.nobletitle:
             game_state.nobletitle = None
         game_state._promotion_done = False
         game_state.rank_periods = 0
@@ -706,22 +749,27 @@ def demote_npc(game_state, npc_name, reason=""):
     current = normalize_rank_name(npc.get("rank", "答应"))
     if current in ("宫女", "秀女"):
         return None
-    if current in FOUR_CONSORTS:
-        prefix = current.replace("妃", "")
-        npc["rank"] = "妃"
-        npc["nobletitle"] = prefix if prefix in NOBLETITLES else random.choice(NOBLETITLES)
-        prev = f"{npc['nobletitle']}妃"
-        msg = f"📉 {npc_name}由「{current}」降为「{prev}」"
-    elif current == "妃" and npc.get("nobletitle"):
-        old_display = f"{npc['nobletitle']}妃"
-        npc["nobletitle"] = None
-        msg = f"📉 {npc_name}由「{old_display}」降为「妃」"
+    if current == "妃" and npc.get("nobletitle"):
+        # 四妃封号妃 → 普通封号妃；普通封号妃 → 无号妃
+        old_display = npc_display_rank(npc)
+        if is_four_consort_title(npc.get("nobletitle")):
+            npc["nobletitle"] = random.choice(list(ORDINARY_NOBLETITLES) or list(NOBLETITLES))
+            msg = f"📉 {npc_name}由「{old_display}」降为「{npc_display_rank(npc)}」"
+        else:
+            npc["nobletitle"] = None
+            msg = f"📉 {npc_name}由「{old_display}」降为「妃」"
     else:
         prev = get_prev_rank(current)
         if not prev:
             return None
         npc["rank"] = prev
-        msg = f"📉 {npc_name}由「{current}」降为「{prev}」"
+        # 贵妃降为妃时补一个四妃封号
+        if current == "贵妃":
+            title = pick_available_four_consort_title(game_state) or random.choice(FOUR_CONSORT_TITLES)
+            npc["nobletitle"] = title
+            msg = f"📉 {npc_name}由「贵妃」降为「{npc_display_rank(npc)}」"
+        else:
+            msg = f"📉 {npc_name}由「{current}」降为「{prev}」"
     attrs = npc.setdefault("attributes", {})
     attrs["宠爱"] = max(0, attrs.get("宠爱", 0) - random.randint(5, 15))
     attrs["威望"] = max(0, attrs.get("威望", 0) - random.randint(3, 10))
@@ -823,9 +871,8 @@ def _player_conflict_view(initiator, target, effects, initiator_win, game_state)
     return None, None
 
 def get_next_rank_name(current_rank_name):
+    current_rank_name = normalize_rank_name(current_rank_name)
     if current_rank_name not in RANK_LEVELS:
-        return None
-    if current_rank_name == "妃":
         return None
     idx = RANK_LEVELS[current_rank_name]
     if idx >= len(RANK_ORDER) - 1:
@@ -835,26 +882,43 @@ def get_next_rank_name(current_rank_name):
 def get_min_tenure(rank_name):
     return MIN_RANK_TENURE.get(rank_name, 2)
 
+def get_active_min_tenure(game_state):
+    """妃位内按封号阶段返回历练旬数，其余按位份返回。"""
+    if game_state.rank.name == "妃":
+        stage = consort_stage(game_state)
+        if stage in CONSORT_TITLE_TENURE:
+            return CONSORT_TITLE_TENURE[stage]
+        # stage == "four"：四妃封号妃 → 贵妃，用「妃」的历练要求
+        return MIN_RANK_TENURE.get("妃", 2)
+    return get_min_tenure(game_state.rank.name)
+
 def get_rank_periods(game_state):
     return getattr(game_state, "rank_periods", 0)
 
 def check_tenure_met(game_state):
-    return get_rank_periods(game_state) >= get_min_tenure(game_state.rank.name)
+    return get_rank_periods(game_state) >= get_active_min_tenure(game_state)
 
 def get_favor_threshold(rank_name):
     return PROMOTION_THRESHOLDS.get(rank_name, {}).get("宠爱", 999)
 
+def get_active_favor_threshold(game_state):
+    """当前晋升目标的宠爱门槛（妃位内按封号阶段）。"""
+    threshold = get_active_promotion_threshold(game_state)
+    if not threshold:
+        return 999
+    return threshold.get("宠爱", 999)
+
 def is_special_favor(game_state):
     """皇帝专宠：宠爱远超当阶门槛，可破格跳过资历限制。"""
     favor = game_state.attributes.get("宠爱", 0)
-    required = get_favor_threshold(game_state.rank.name)
+    required = get_active_favor_threshold(game_state)
     ratio_req = int(required * SPECIAL_FAVOR_RATIO)
     return favor >= max(ratio_req, SPECIAL_FAVOR_ABSOLUTE_MIN)
 
 def is_super_favor(game_state):
     """圣宠无极：属性要求亦略降。"""
     favor = game_state.attributes.get("宠爱", 0)
-    required = get_favor_threshold(game_state.rank.name)
+    required = get_active_favor_threshold(game_state)
     ratio_req = int(required * SUPER_FAVOR_RATIO)
     return favor >= max(ratio_req, SPECIAL_FAVOR_ABSOLUTE_MIN + 40)
 
@@ -863,6 +927,16 @@ def get_promotion_block_reason(game_state):
     if not step:
         return None
     if step["type"] == "赐封号":
+        return None
+    if step["type"] == "四妃封号":
+        if not step.get("target"):
+            return "四妃（淑德贤宸）封号已满，暂无空缺"
+        req = PROMOTION_EXTRA_REQUIREMENTS.get("四妃封号")
+        if req:
+            min_children = req.get("min_children", 0)
+            living = [c for c in game_state.children if c.get("alive", True)]
+            if min_children > 0 and len(living) < min_children:
+                return req.get("hint", "晋升条件未满足")
         return None
     target = step.get("target")
     if not target:
@@ -887,16 +961,28 @@ def get_promotion_block_reason(game_state):
     return None
 
 def check_promotion_thresholds_met(game_state, attr_ratio=1.0):
-    current_rank_name = game_state.rank.name
-    if current_rank_name not in PROMOTION_THRESHOLDS:
+    threshold = get_active_promotion_threshold(game_state)
+    if threshold is None:
         return False
-    threshold = PROMOTION_THRESHOLDS[current_rank_name]
     attrs = game_state.attributes
     for attr, value in threshold.items():
         required = max(1, int(value * attr_ratio))
         if attrs.get(attr, 0) < required:
             return False
     return True
+
+def get_active_promotion_threshold(game_state):
+    """返回当前晋升目标对应的属性门槛：
+    - 妃位内不同封号阶段用 CONSORT_TITLE_THRESHOLDS；
+    - 其余位份用 PROMOTION_THRESHOLDS。
+    无匹配返回 None。"""
+    if game_state.rank.name == "妃":
+        stage = consort_stage(game_state)
+        if stage in CONSORT_TITLE_THRESHOLDS:
+            return CONSORT_TITLE_THRESHOLDS[stage]
+        # stage == "four"：四妃封号妃 → 贵妃，用「妃」的位份门槛
+        return PROMOTION_THRESHOLDS.get("妃")
+    return PROMOTION_THRESHOLDS.get(game_state.rank.name)
 
 def npc_meets_rank_requirements(npc, target_rank):
     req = PROMOTION_EXTRA_REQUIREMENTS.get(target_rank)
@@ -973,15 +1059,11 @@ def generate_reward(game_state, source="emperor"):
         amount = random.randint(30, 80)
         return {"type": "银两", "name": f"白银{amount}两", "desc": f"赏赐白银{amount}两（暂未能晋封）", "silver": amount, "effects": {}}
     elif reward_type == "封号":
+        # 无号妃 → 普通封号妃（不含四妃封号，四妃需走册立流程）
         if game_state.rank.name == "妃" and not game_state.nobletitle:
             title_msg = grant_consort_nobletitle(game_state)
             if title_msg:
                 return {"type": "封号", "name": game_state.nobletitle, "desc": title_msg, "silver": 0, "effects": {"宠爱": 8, "威望": 12}}
-        from models import NOBLETITLES
-        if game_state.rank.name != "妃":
-            new_title = random.choice(NOBLETITLES)
-            game_state.nobletitle = new_title
-            return {"type": "封号", "name": new_title, "desc": f"赐封号『{new_title}』", "silver": 0, "effects": {"宠爱": 8, "威望": 12}}
         amount = random.randint(30, 80)
         return {"type": "银两", "name": f"白银{amount}两", "desc": f"赏赐白银{amount}两（暂未能赐封号）", "silver": amount, "effects": {}}
     else:
@@ -1220,17 +1302,21 @@ def _player_relationship_promotion(game_state):
     if game_state._promotion_done:
         return None
     step = get_promotion_step(game_state)
-    if not step or step.get("type") != "位份":
+    if not step or step.get("type") not in ("位份", "四妃封号"):
         return None
     if get_promotion_block_reason(game_state):
         return None
     target_rank = step.get("target")
-    if not target_rank or not can_promote_to_rank(game_state, target_rank):
+    if not target_rank:
+        return None
+    if step.get("type") == "位份" and not can_promote_to_rank(game_state, target_rank):
+        return None
+    if step.get("type") == "四妃封号" and not can_use_four_consort_title(game_state, target_rank):
         return None
     # 盟友美言的底层晋升逻辑不可以大于（放宽于）晋升必须条件：宠爱与属性等硬门槛
     # 必须先行达标，与 check_promotion_condition 采用同一套门槛（含专宠折扣）。
     # 盟友美言仅能帮衬资历（免除历练旬数），不能绕过圣宠与才德等晋升必须条件。
-    favor_req = get_favor_threshold(game_state.rank.name)
+    favor_req = get_active_favor_threshold(game_state)
     favor = game_state.attributes.get("宠爱", 0)
     favor_ratio = 0.92 if is_super_favor(game_state) else 1.0
     if favor < int(favor_req * favor_ratio):
@@ -1250,7 +1336,7 @@ def _player_relationship_promotion(game_state):
         chance += 0.14
     if emperor_rel >= 45:
         chance += 0.10
-    if game_state.attributes.get("宠爱", 0) >= max(40, int(get_favor_threshold(game_state.rank.name) * 0.7)):
+    if game_state.attributes.get("宠爱", 0) >= max(40, int(get_active_favor_threshold(game_state) * 0.7)):
         chance += 0.08
     if chance <= 0:
         return None
@@ -1774,11 +1860,19 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
 
 def try_npc_birth_promotion(game_state, npc):
     rank = normalize_rank_name(npc.get("rank", "答应"))
-    if rank == "妃" and not npc.get("nobletitle"):
-        return promote_npc_one_step(game_state, npc)
-    if rank == "妃" and npc.get("nobletitle"):
-        target = pick_available_four_consort(game_state)
-        if not target or not npc_meets_rank_requirements(npc, target):
+    if rank == "妃":
+        # 妃位内：无号→普通封号→四妃封号→贵妃
+        if not npc.get("nobletitle"):
+            return promote_npc_one_step(game_state, npc)
+        if not is_four_consort_title(npc.get("nobletitle")):
+            # 普通封号 → 四妃封号（需满足四妃母凭子贵门槛与空缺）
+            if not npc_meets_rank_requirements(npc, "四妃封号"):
+                return None
+            if not pick_available_four_consort_title(game_state):
+                return None
+            return promote_npc_one_step(game_state, npc)
+        # 四妃封号妃 → 贵妃
+        if not can_promote_to_rank(game_state, "贵妃") or not npc_meets_rank_requirements(npc, "贵妃"):
             return None
         return promote_npc_one_step(game_state, npc)
     next_rank = get_next_rank_name(rank)
@@ -1789,18 +1883,25 @@ def try_npc_birth_promotion(game_state, npc):
 
 def promote_npc_one_step(game_state, npc):
     rank = normalize_rank_name(npc.get("rank", "答应"))
-    if rank == "妃" and not npc.get("nobletitle"):
-        four_chars = {c.replace("妃", "") for c in FOUR_CONSORTS}
-        candidates = [t for t in NOBLETITLES if t not in four_chars]
-        npc["nobletitle"] = random.choice(candidates or NOBLETITLES)
-        return f"{npc['nobletitle']}妃"
-    if rank == "妃" and npc.get("nobletitle"):
-        target = pick_available_four_consort(game_state)
-        if not target:
+    if rank == "妃":
+        if not npc.get("nobletitle"):
+            # 无号妃 → 普通封号妃
+            candidates = list(ORDINARY_NOBLETITLES) or list(NOBLETITLES)
+            npc["nobletitle"] = random.choice(candidates)
+            return f"{npc['nobletitle']}妃"
+        if not is_four_consort_title(npc.get("nobletitle")):
+            # 普通封号妃 → 四妃封号妃
+            title = pick_available_four_consort_title(game_state)
+            if not title:
+                return None
+            npc["nobletitle"] = title
+            return f"{title}妃"
+        # 四妃封号妃 → 贵妃
+        if not can_promote_to_rank(game_state, "贵妃"):
             return None
         npc["nobletitle"] = None
-        npc["rank"] = target
-        return target
+        npc["rank"] = "贵妃"
+        return "贵妃"
     next_rank = get_next_rank_name(rank)
     if not next_rank:
         return None
@@ -1829,8 +1930,7 @@ def generate_npc_rank():
     rank_weights = {
         "宫女": 14, "更衣": 12, "官女子": 11, "秀女": 10, "答应": 9, "常在": 8,
         "贵人": 7, "才人": 5, "美人": 4, "婕妤": 3, "嫔": 2,
-        "嫔": 2, "妃": 1,
-        "淑妃": 1, "德妃": 1, "贤妃": 1, "宸妃": 1,
+        "妃": 3,
         "贵妃": 0, "皇贵妃": 0, "皇后": 0,
     }
     weights = [rank_weights.get(r, 0) for r in RANK_ORDER]
@@ -2891,7 +2991,7 @@ def find_child_by_uid(game_state, uid):
 HEIR_RACE_MIN_AGE = 8          # 参与夺嫡的最低年龄
 HEIR_RACE_MOTHER_WEIGHT = {    # 生母位份权重
     "皇后": 20, "皇贵妃": 15, "贵妃": 10,
-    "妃": 5, "淑妃": 5, "德妃": 5, "贤妃": 5, "宸妃": 5,
+    "妃": 5,
 }
 
 
@@ -3796,7 +3896,7 @@ def check_promotion_condition(game_state):
         return False
     if game_state.rank.name == "皇后":
         return False
-    favor_req = get_favor_threshold(game_state.rank.name)
+    favor_req = get_active_favor_threshold(game_state)
     favor = game_state.attributes.get("宠爱", 0)
     # 宠爱单独校验：专宠折扣仅略降，不能靠威望/才情绕过
     favor_ratio = 0.92 if is_super_favor(game_state) else 1.0
@@ -3816,7 +3916,7 @@ def check_birth_promotion_eligible(game_state):
     """诞子晋封：略减属性门槛，但仍须宠爱达标且至少有基本资历。"""
     if game_state.rank.name == "皇后":
         return False
-    favor_req = get_favor_threshold(game_state.rank.name)
+    favor_req = get_active_favor_threshold(game_state)
     favor = game_state.attributes.get("宠爱", 0)
     if favor < int(favor_req * 0.85):
         return False
@@ -3824,7 +3924,7 @@ def check_birth_promotion_eligible(game_state):
         return False
     if get_promotion_block_reason(game_state):
         return False
-    if get_rank_periods(game_state) < max(2, get_min_tenure(game_state.rank.name) // 2):
+    if get_rank_periods(game_state) < max(2, get_active_min_tenure(game_state) // 2):
         return False
     return True
 
@@ -3840,6 +3940,8 @@ def try_player_promotion(game_state, allow_birth=False):
     if not step:
         return None
     if step["type"] == "位份" and not can_promote_to_rank(game_state, step.get("target", "")):
+        return None
+    if step["type"] == "四妃封号" and not can_use_four_consort_title(game_state, step.get("target", "")):
         return None
     promo_msg = apply_promotion_step(game_state, step)
     if promo_msg:
@@ -3859,14 +3961,14 @@ def get_promotion_wait_message(game_state):
     if not check_promotion_thresholds_met(game_state, attr_ratio):
         if is_special_favor(game_state):
             return "⚠️ 虽有圣宠，但威望才情等尚不足以服众，还需历练"
-        favor_req = get_favor_threshold(game_state.rank.name)
+        favor_req = get_active_favor_threshold(game_state)
         favor = game_state.attributes.get("宠爱", 0)
         if favor < favor_req:
             return f"⚠️ 圣宠不足（需宠爱≥{favor_req}，当前{favor}），还需邀宠"
         return None
     if not check_tenure_met(game_state) and not is_special_favor(game_state):
-        need = get_min_tenure(game_state.rank.name) - get_rank_periods(game_state)
-        return f"⚠️ 位份资历不足，还需在「{game_state.rank.name}」位上历练 {max(1, need)} 旬"
+        need = get_active_min_tenure(game_state) - get_rank_periods(game_state)
+        return f"⚠️ 位份资历不足，还需在「{game_state.get_display_rank()}」位上历练 {max(1, need)} 旬"
     return None
 
 def is_exceptional_promotion(game_state):
@@ -4365,6 +4467,7 @@ def emperor_flip():
         pregnant_month = npc.get("pregnancy_month", 0)
     
     visit_mode = False
+    health_gain = 0
     if is_pregnant:
         visit_mode = True
         favor_gain = random.randint(5, 12)
@@ -4418,6 +4521,7 @@ def emperor_flip():
         "visit_mode": visit_mode,
         "is_pregnant_target": is_pregnant,
         "pregnant_month": pregnant_month,
+        "health_gain": health_gain,
         "attributes": game_state.attributes,
         "relationships": game_state.relationships,
         "message": f"皇帝{'前来探望' if visit_mode else '翻了'}{pai_name}的牌子！{'宠爱+'+str(favor_gain) if favor_gain>0 else ''}{'健康+'+str(health_gain) if visit_mode else ''}{'威望+'+str(prestige_gain) if prestige_gain>0 else ''}",
@@ -4692,9 +4796,16 @@ def next_period():
             promoted_this_period = True
         else:
             step = get_promotion_step(game_state)
-            target_label = (step.get("target") or "赐封号") if step else ""
+            if step and step["type"] == "赐封号":
+                target_label = "赐封号"
+            elif step and step["type"] == "四妃封号":
+                target_label = (f"{step.get('target')}妃" if step.get("target") else "四妃封号")
+            else:
+                target_label = (step.get("target") if step else "") or ""
             if step and step["type"] == "位份" and not can_promote_to_rank(game_state, step.get("target", "")):
                 promotion_message = f"⚠️ {target_label} 人数已满，暂无法晋升。"
+            elif step and step["type"] == "四妃封号" and not step.get("target"):
+                promotion_message = "⚠️ 四妃（淑德贤宸）封号已满，暂无空缺。"
             elif step:
                 promotion_message = f"⚠️ 晋封「{target_label}」条件未满足，请继续历练。"
             else:
@@ -4745,20 +4856,21 @@ def next_period():
             current_rank = normalize_rank_name(npc.get("rank", "答应"))
             rank_power = get_rank_power(current_rank, npc.get("nobletitle"))
             if rank_power < 19 and favor > 50 + rank_power * 10 and prestige > 40 + rank_power * 8:
-                if current_rank == "妃" and not npc.get("nobletitle"):
-                    next_label = promote_npc_one_step(game_state, npc)
-                    if next_label and random.random() < 0.25:
-                        npc["attributes"]["宠爱"] = min(100, favor + random.randint(5, 12))
-                        npc["attributes"]["威望"] = min(100, prestige + random.randint(5, 10))
-                        other_promotions.append(f"✨ {name} 晋封为 {next_label}！")
-                elif current_rank == "妃" and npc.get("nobletitle"):
-                    target = pick_available_four_consort(game_state)
-                    if target and npc_meets_rank_requirements(npc, target) and random.random() < 0.25:
+                if current_rank == "妃":
+                    # 妃位内封号晋升（无号→普通→四妃→贵妃），统一走 promote_npc_one_step
+                    stage_ok = True
+                    if npc.get("nobletitle") and is_four_consort_title(npc.get("nobletitle")):
+                        # 四妃封号 → 贵妃，需名额与母凭子贵
+                        stage_ok = can_promote_to_rank(game_state, "贵妃") and npc_meets_rank_requirements(npc, "贵妃")
+                    elif npc.get("nobletitle"):
+                        # 普通封号 → 四妃封号，需空缺与母凭子贵
+                        stage_ok = bool(pick_available_four_consort_title(game_state)) and npc_meets_rank_requirements(npc, "四妃封号")
+                    if stage_ok and random.random() < 0.25:
                         next_label = promote_npc_one_step(game_state, npc)
                         if next_label:
                             npc["attributes"]["宠爱"] = min(100, favor + random.randint(5, 12))
                             npc["attributes"]["威望"] = min(100, prestige + random.randint(5, 10))
-                            other_promotions.append(f"✨ {name} 晋升为 {next_label}！")
+                            other_promotions.append(f"✨ {name} 晋封为 {next_label}！")
                 elif current_rank in RANK_LEVELS:
                     idx = RANK_LEVELS[current_rank]
                     if idx < len(RANK_ORDER) - 1:

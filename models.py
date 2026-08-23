@@ -4,12 +4,16 @@ import random
 from datetime import datetime
 
 FOUR_CONSORTS = ["淑妃", "德妃", "贤妃", "宸妃"]
-TITLED_CONSORT_POWER = 12  # 带封号的妃（位份仍为妃）
+# 方案 B：四妃改为「妃」位份下的专属封号（各限 1 人），不再是独立位份。
+FOUR_CONSORT_TITLES = ["淑", "德", "贤", "宸"]
+# 旧存档兼容：把旧的四妃「位份」迁移为 妃 + 对应封号。
+_LEGACY_FOUR_CONSORT_RANKS = {"淑妃": "淑", "德妃": "德", "贤妃": "贤", "宸妃": "宸"}
+TITLED_CONSORT_POWER = 12   # 妃 + 普通封号（位份仍为妃）
+FOUR_CONSORT_POWER = 13     # 妃 + 四妃封号（正牌四妃：淑/德/贤/宸）
 
 RANK_POWER = {
     "宫女": 0, "更衣": 1, "官女子": 2, "秀女": 3, "答应": 4, "常在": 5,
     "贵人": 6, "才人": 7, "美人": 8, "婕妤": 9, "嫔": 10, "妃": 11,
-    "淑妃": 13, "德妃": 14, "贤妃": 15, "宸妃": 16,
     "贵妃": 17, "皇贵妃": 18, "皇后": 19,
 }
 
@@ -40,15 +44,24 @@ def normalize_court_faction_favor(data):
 
 
 def normalize_rank_name(rank_name):
-    if rank_name in RANK_POWER or rank_name == "妃":
-        return rank_name
+    """把旧的四妃「位份」名归一化为「妃」（方案 B：四妃改为妃的封号）。"""
+    if rank_name in _LEGACY_FOUR_CONSORT_RANKS:
+        return "妃"
     return rank_name
 
+def legacy_four_consort_title(rank_name):
+    """旧四妃位份名 → 对应封号字（用于存档迁移）。非四妃返回 None。"""
+    return _LEGACY_FOUR_CONSORT_RANKS.get(rank_name)
+
+def is_four_consort_title(nobletitle):
+    """封号是否为四妃专属封号（淑/德/贤/宸）。"""
+    return nobletitle in FOUR_CONSORT_TITLES
+
 def get_rank_power(rank_name, nobletitle=None):
-    """位份实力：妃 < 带封号的妃 < 四妃。"""
+    """位份实力：妃 < 带普通封号的妃 < 四妃封号的妃（淑/德/贤/宸）。"""
     rank_name = normalize_rank_name(rank_name)
     if rank_name == "妃" and nobletitle:
-        return TITLED_CONSORT_POWER
+        return FOUR_CONSORT_POWER if is_four_consort_title(nobletitle) else TITLED_CONSORT_POWER
     return RANK_POWER.get(rank_name, 0)
 
 def is_titled_consort(rank_name, nobletitle=None):
@@ -67,13 +80,9 @@ class Rank(Enum):
     婕妤 = 9
     嫔 = 10
     妃 = 11
-    淑妃 = 12
-    德妃 = 13
-    贤妃 = 14
-    宸妃 = 15
-    贵妃 = 16
-    皇贵妃 = 17
-    皇后 = 18
+    贵妃 = 12
+    皇贵妃 = 13
+    皇后 = 14
 
 class EmperorPersonality(Enum):
     明君 = "明君"
@@ -92,6 +101,9 @@ NOBLETITLES = [
     "惠", "康", "庄", "和", "顺", "慈", "宁", "昭", "敬", "端",
     "良", "懿", "敏", "慧", "安", "宁", "禧", "纯", "瑾", "瑜"
 ]
+
+# 普通封号池（排除四妃专属封号：淑/德/贤/宸），供「妃 + 普通封号」阶段随机取用。
+ORDINARY_NOBLETITLES = [t for t in NOBLETITLES if t not in FOUR_CONSORT_TITLES]
 
 
 def default_heir_status():
@@ -351,7 +363,7 @@ class GameState:
         prestige = self.attributes.get("威望", 0)
         rank_order = [
             "宫女", "更衣", "官女子", "秀女", "答应", "常在", "贵人", "才人", "美人", "婕妤",
-            "嫔", "妃", "淑妃", "德妃", "贤妃", "宸妃", "贵妃", "皇贵妃", "皇后",
+            "嫔", "妃", "贵妃", "皇贵妃", "皇后",
         ]
         current_idx = rank_order.index(self.rank.name) if self.rank.name in rank_order else 0
         if current_idx >= rank_order.index("贵人") and favor >= 65 and prestige >= 55:
@@ -485,7 +497,10 @@ class GameState:
     def from_save_data(cls, save_data):
         try:
             data = save_data.get("game_state", save_data)
-            rank_name = normalize_rank_name(data.get("rank", "秀女"))
+            raw_rank_name = data.get("rank", "秀女")
+            # 方案 B 迁移：旧四妃「位份」→ 妃 + 对应封号
+            migrated_four_title = legacy_four_consort_title(raw_rank_name)
+            rank_name = normalize_rank_name(raw_rank_name)
             try:
                 rank = Rank[rank_name]
             except KeyError:
@@ -511,6 +526,9 @@ class GameState:
             game_state.month = data.get("month", 1)
             game_state.year = data.get("year", 1)
             game_state.nobletitle = data.get("nobletitle")
+            # 方案 B 迁移：旧四妃位份的玩家，其封号改为对应四妃封号
+            if migrated_four_title:
+                game_state.nobletitle = migrated_four_title
             game_state.honorary_title = data.get("honorary_title")
             game_state.romance_mode = data.get("romance_mode", False)
             game_state.custom_prompt = data.get("custom_prompt", "")
@@ -530,6 +548,10 @@ class GameState:
             game_state.npcs = data.get("npcs", {})
             for npc in game_state.npcs.values():
                 if "rank" in npc:
+                    # 方案 B 迁移：旧四妃位份的 NPC → 妃 + 对应封号
+                    _legacy_title = legacy_four_consort_title(npc["rank"])
+                    if _legacy_title and not npc.get("nobletitle"):
+                        npc["nobletitle"] = _legacy_title
                     npc["rank"] = normalize_rank_name(npc["rank"])
             servants_data = data.get("servants", [])
             game_state.servants = []

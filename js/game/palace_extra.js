@@ -38,11 +38,15 @@
         '以理服人': { self: 'all', target: 'all', favor: -8, desc: '同时吸取心计、威望与倾向' },
     };
 
-    const RANK_ORDER_LOCAL = ['更衣', '官女子', '答应', '常在', '贵人', '才人', '美人', '婕妤', '嫔', '妃', '淑妃', '德妃', '贤妃', '宸妃', '贵妃', '皇贵妃', '皇后'];
-    const TITLED_CONSORT_POWER = 12;
-    const RANK_POWER = { '更衣':1,'官女子':2,'答应':4,'常在':5,'贵人':6,'才人':7,'美人':8,'婕妤':9,'嫔':10,'妃':11,'淑妃':13,'德妃':14,'贤妃':15,'宸妃':16,'贵妃':17,'皇贵妃':18,'皇后':19 };
+    const RANK_ORDER_LOCAL = ['更衣', '官女子', '答应', '常在', '贵人', '才人', '美人', '婕妤', '嫔', '妃', '贵妃', '皇贵妃', '皇后'];
+    const TITLED_CONSORT_POWER = 12;   // 妃 + 普通封号
+    const FOUR_CONSORT_POWER = 13;     // 妃 + 四妃封号（淑/德/贤/宸）
+    const FOUR_CONSORT_TITLES = ['淑', '德', '贤', '宸'];
+    const RANK_POWER = { '更衣':1,'官女子':2,'答应':4,'常在':5,'贵人':6,'才人':7,'美人':8,'婕妤':9,'嫔':10,'妃':11,'贵妃':17,'皇贵妃':18,'皇后':19 };
     function _rankPower(rankName, nobletitle) {
-        if (rankName === '妃' && nobletitle) return TITLED_CONSORT_POWER;
+        if (rankName === '妃' && nobletitle) {
+            return FOUR_CONSORT_TITLES.includes(nobletitle) ? FOUR_CONSORT_POWER : TITLED_CONSORT_POWER;
+        }
         return RANK_POWER[rankName] !== undefined ? RANK_POWER[rankName] : 3;
     }
 
