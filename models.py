@@ -117,7 +117,131 @@ def default_heir_status():
         "last_event": "",
         "deposed": [],
         "regent_active": False,
+        # ---- 监国政务 ----
+        "regency_active": False,        # 是否已激活监国
+        "regency_merit": 0,             # 贤明值 -100 ~ 100
+        "regency_events": [],           # 历次政务决策流水（最多留 20 条）
+        "pending_regency_event": None,  # 当前待决政务事件
+        "last_regency_input": None,     # 上次玩家进言的旬标记
+        # ---- 太子成长 ----
+        "heir_traits": [],              # 太子特质标签（贤明/圣君/昏聩/暴虐/爱兽…）
+        "heir_affection": 50,           # 太子对玩家的亲近 0-100
+        "heir_consort": None,           # 太子妃对象
+        "heir_ruling_style": None,      # 治国倾向：儒家/法家/道家
+        # ---- 趣味与危机事件 ----
+        "heir_counters": {},            # 计数器：truancy/pets/incognito/cooking/beast…
+        "pending_heir_event": None,     # 当前待决的叛逆/特殊/内宅事件
+        "heir_event_log": [],           # 趣味事件流水（最多留 20 条）
+        "last_special_period": None,    # 上次特殊事件的旬序号
+        # ---- 不孝 / 逼宫事件链 ----
+        "defiance_stage": 0,            # 0 未启动，1 冷落，2 顶撞，3 私建府邸，4 密谋逼宫
+        "defiance_log": [],
+        # ---- 内宅 ----
+        "consort_selection": None,      # 选妃事件（候选人列表）
+        "consort_harmony": 60,          # 内宅和睦度 0-100
+        "consort_events": [],           # 内宅事件日志（最多留 10 条）
+        "pending_consort_event": None,  # 当前待决的内宅宫斗/趣味事件
     }
+
+
+def default_heir_consorts():
+    """太子内宅：太子妃 1 位（dict 或 None），其余位份各为列表。"""
+    return {
+        "太子妃": None,
+        "良娣": [],
+        "良媛": [],
+        "承徽": [],
+        "昭训": [],
+        "奉仪": [],
+    }
+
+
+def default_heir_consort_member(name, family="", personality="", favor=50, rank="奉仪"):
+    """内宅成员标准结构。"""
+    return {
+        "name": name,
+        "rank": rank,
+        "family": family,
+        "personality": personality,
+        "favor": max(0, min(100, int(favor))),
+        "alive": True,
+        "children": [],       # 子嗣 uid 列表
+        "is_pregnant": False,
+        "pregnancy_period": 0,
+        "faction": "",
+        "fun_tag": "",
+        "talent": 50,
+        "looks": 50,
+        "entered_at": "",
+    }
+
+
+def normalize_heir_consorts(data):
+    """归一化内宅字典，兼容旧存档缺字段 / 结构错乱。"""
+    base = default_heir_consorts()
+    if not isinstance(data, dict):
+        return base
+
+    def clean_member(raw, rank):
+        if not isinstance(raw, dict):
+            return None
+        member = default_heir_consort_member(str(raw.get("name") or "无名"), rank=rank)
+        member.update({k: v for k, v in raw.items() if k in member})
+        member["rank"] = rank
+        try:
+            member["favor"] = max(0, min(100, int(raw.get("favor", 50))))
+        except (TypeError, ValueError):
+            member["favor"] = 50
+        member["alive"] = bool(raw.get("alive", True))
+        member["children"] = [str(x) for x in raw.get("children", [])] if isinstance(raw.get("children"), list) else []
+        member["is_pregnant"] = bool(raw.get("is_pregnant", False))
+        try:
+            member["pregnancy_period"] = max(0, int(raw.get("pregnancy_period", 0) or 0))
+        except (TypeError, ValueError):
+            member["pregnancy_period"] = 0
+        return member
+
+    consort = clean_member(data.get("太子妃"), "太子妃")
+    base["太子妃"] = consort
+    for rank in ("良娣", "良媛", "承徽", "昭训", "奉仪"):
+        raw_list = data.get(rank, [])
+        if not isinstance(raw_list, list):
+            raw_list = []
+        cleaned = []
+        for raw in raw_list:
+            member = clean_member(raw, rank)
+            if member:
+                cleaned.append(member)
+        base[rank] = cleaned
+    return base
+
+
+def normalize_heir_status(data):
+    """归一化储君状态，缺失字段一律补默认值（旧存档兼容）。"""
+    base = default_heir_status()
+    if isinstance(data, dict):
+        base.update({k: v for k, v in data.items() if k in base})
+    # 列表 / 字典型字段防御
+    for key in ("deposed", "regency_events", "heir_traits", "heir_event_log",
+                "defiance_log", "consort_events"):
+        if not isinstance(base.get(key), list):
+            base[key] = []
+    if not isinstance(base.get("heir_counters"), dict):
+        base["heir_counters"] = {}
+    for key, lo, hi, default in (
+        ("regency_merit", -100, 100, 0),
+        ("heir_affection", 0, 100, 50),
+        ("consort_harmony", 0, 100, 60),
+        ("defiance_stage", 0, 4, 0),
+    ):
+        try:
+            base[key] = max(lo, min(hi, int(base.get(key, default))))
+        except (TypeError, ValueError):
+            base[key] = default
+    base["regency_active"] = bool(base.get("regency_active", False))
+    if base.get("heir_ruling_style") not in ("儒家", "法家", "道家", None):
+        base["heir_ruling_style"] = None
+    return base
 
 
 def default_heir_race():
@@ -257,6 +381,8 @@ class GameState:
         self.honorary_title = None
         self.child_uid_seq = 1
         self.heir_status = default_heir_status()
+        # 东宫内宅（太子妃 + 五级侧室）
+        self.heir_consorts = default_heir_consorts()
         # 重华宫与陷害系统新属性
         # chonghua.children 保存在馆子嗣的 uid 列表；log/events 为流水记录
         self.chonghua = {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}
@@ -467,7 +593,8 @@ class GameState:
             "queen_assistance_count": getattr(self, "queen_assistance_count", 0),
             "six_palace_assistant": getattr(self, "six_palace_assistant", None),
             "child_uid_seq": getattr(self, "child_uid_seq", 1),
-            "heir_status": getattr(self, "heir_status", default_heir_status()),
+            "heir_status": normalize_heir_status(getattr(self, "heir_status", None)),
+            "heir_consorts": normalize_heir_consorts(getattr(self, "heir_consorts", None)),
             "chonghua": getattr(self, "chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
             "court_faction_favor": normalize_court_faction_favor(getattr(self, "court_faction_favor", None)),
@@ -586,10 +713,8 @@ class GameState:
             except (TypeError, ValueError):
                 game_state.child_uid_seq = 1
             heir_status = data.get("heir_status") if isinstance(data.get("heir_status"), dict) else default_heir_status()
-            merged_heir_status = default_heir_status()
-            merged_heir_status.update(heir_status)
-            merged_heir_status["deposed"] = merged_heir_status.get("deposed", []) if isinstance(merged_heir_status.get("deposed", []), list) else []
-            game_state.heir_status = merged_heir_status
+            game_state.heir_status = normalize_heir_status(heir_status)
+            game_state.heir_consorts = normalize_heir_consorts(data.get("heir_consorts"))
             game_state.created_at = data.get("created_at", datetime.now().isoformat())
             game_state.updated_at = datetime.now().isoformat()
             game_state.max_actions = data.get("max_actions", 7)

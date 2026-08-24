@@ -1,6 +1,12 @@
 # events.py
 import random
 
+from heir_content import (
+    REGENCY_EVENT_POOL, HEIR_REBELLION_POOL, HEIR_SPECIAL_POOL,
+    INCOGNITO_POOL, CONSORT_CANDIDATES, CONSORT_CONFLICT_POOL,
+    CONSORT_FUN_POOL,
+)
+
 # ============================================================
 #  转旬事件模板（共 79 条，涵盖争宠、陷害、拉拢、意外、日常）
 # ============================================================
@@ -326,3 +332,122 @@ def apply_daily_action(game_state, action_key):
             effects[attr] = change
     game_state.add_memory(f"进行了每日行动：{action['desc']}")
     return effects
+
+
+# ============================================================
+#  太子系统事件生成器
+# ============================================================
+#  素材池全部来自 heir_content.py；这里只负责「随机取一条 + 补齐运行期字段」。
+#  返回的事件字典都带 kind 字段，供 app.py 分派处理。
+
+def _copy_event(template):
+    """浅拷贝模板并深拷贝 choices/options，避免运行期修改污染素材池。"""
+    import copy
+    return copy.deepcopy(template)
+
+
+def generate_regency_event(exclude_ids=None):
+    """随机返回一条监国政务事件。
+
+    exclude_ids: 近期已出现过的事件 id 集合，尽量不重复。
+    返回 {kind, id, category, description, flavor, choices:{A:{text,effect,bias,merit}, B:{...}}}
+    """
+    exclude = set(exclude_ids or [])
+    pool = [e for e in REGENCY_EVENT_POOL if e["id"] not in exclude] or REGENCY_EVENT_POOL
+    tpl = _copy_event(random.choice(pool))
+    tpl["kind"] = "regency"
+    return tpl
+
+
+def find_regency_event(event_id):
+    """按 id 取政务事件模板（进言 API 校验用）。"""
+    for e in REGENCY_EVENT_POOL:
+        if e["id"] == event_id:
+            return _copy_event(e)
+    return None
+
+
+def generate_heir_rebellion_event(heir_age, chance=0.20):
+    """太子 ≥14 岁时，每旬 chance 概率触发一条叛逆期事件。不触发返回 None。"""
+    try:
+        age = float(heir_age or 0)
+    except (TypeError, ValueError):
+        age = 0
+    if age < 14:
+        return None
+    if random.random() >= chance:
+        return None
+    idx = random.randrange(len(HEIR_REBELLION_POOL))
+    tpl = _copy_event(HEIR_REBELLION_POOL[idx])
+    tpl["kind"] = "rebellion"
+    tpl["id"] = f"reb_{idx}"
+    return tpl
+
+
+def generate_heir_special_event(chance=0.25):
+    """太子特殊危机事件（调用方负责 3-5 旬的间隔控制）。"""
+    if random.random() >= chance:
+        return None
+    idx = random.randrange(len(HEIR_SPECIAL_POOL))
+    tpl = _copy_event(HEIR_SPECIAL_POOL[idx])
+    tpl["kind"] = "special"
+    tpl["id"] = f"sp_{idx}"
+    return tpl
+
+
+def generate_incognito_adventure():
+    """微服私访奇遇：必定返回一条（由 API 侧校验银两与行动点）。"""
+    idx = random.randrange(len(INCOGNITO_POOL))
+    tpl = _copy_event(INCOGNITO_POOL[idx])
+    tpl["kind"] = "incognito"
+    tpl["id"] = f"inc_{idx}"
+    return tpl
+
+
+def generate_consort_selection_event():
+    """太子选妃事件：一次性给出三位候选（文官党 / 武官党 / 宗室党）。"""
+    candidates = [_copy_event(c) for c in CONSORT_CANDIDATES]
+    random.shuffle(candidates)
+    return {
+        "kind": "consort_selection",
+        "id": "consort_selection",
+        "name": "东宫选妃",
+        "description": "礼部呈上三家名册：文官清流、边镇将门、宗室嫡脉。太子妃之位只有一个，选谁，便等于选了东宫将来倚靠哪一方。",
+        "flavor": "三位姑娘同日入宫觐见，衣裳、举止、连行礼的深浅都是各家掰算了半月的结果。太子坐在帘后，一个也没有先开口问。",
+        "candidates": candidates,
+    }
+
+
+def find_consort_candidate(name):
+    """按姓名取太子妃候选人模板。"""
+    for c in CONSORT_CANDIDATES:
+        if c["name"] == name:
+            return _copy_event(c)
+    return None
+
+
+def generate_consort_conflict_event(available_ranks=None):
+    """侧室宫斗对话事件。
+
+    available_ranks: 当前内宅实际存在的位份集合；若提供，则只取双方位份都在场的事件。
+    """
+    pool = CONSORT_CONFLICT_POOL
+    if available_ranks:
+        ranks = set(available_ranks)
+        filtered = [e for e in pool if set(e.get("roles", [])) <= ranks]
+        if filtered:
+            pool = filtered
+    idx = CONSORT_CONFLICT_POOL.index(random.choice(pool))
+    tpl = _copy_event(CONSORT_CONFLICT_POOL[idx])
+    tpl["kind"] = "consort_conflict"
+    tpl["id"] = f"cc_{idx}"
+    return tpl
+
+
+def generate_consort_fun_event():
+    """内宅趣味事件。"""
+    idx = random.randrange(len(CONSORT_FUN_POOL))
+    tpl = _copy_event(CONSORT_FUN_POOL[idx])
+    tpl["kind"] = "consort_fun"
+    tpl["id"] = f"cf_{idx}"
+    return tpl

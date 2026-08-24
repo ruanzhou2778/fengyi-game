@@ -10,6 +10,7 @@
 import random
 
 from models import RANK_POWER, get_rank_power
+from heir_content import HEIR_ABSURD_ENDINGS
 
 # ---- 触发阈值 ----
 NEGLECT_FAVOR_THRESHOLD = 10   # 宠爱低于此值算失宠
@@ -117,6 +118,59 @@ ENDINGS = {
         "epitaph": "一生守着一堵墙，墙外不曾有人来。",
     },
 }
+
+# ---- 太子登基后的「不正经」结局（素材见 heir_content.HEIR_ABSURD_ENDINGS） ----
+# 这些结局仍属登顶线：你确实成了太后，只是你养出来的皇帝不太正经。
+for _key, _cfg in HEIR_ABSURD_ENDINGS.items():
+    ENDINGS[_key] = dict(_cfg, category=ENDING_CATEGORY_TRIUMPH)
+del _key, _cfg
+
+
+# ---- 不正经结局的触发阈值 ----
+ABSURD_BANQUET_MERIT = -30      # 贤明值低于此值且沉溺享乐 → 昏君传
+ABSURD_INCOGNITO_COUNT = 5      # 微服私访次数达此值 → 隐士皇帝
+ABSURD_COOKING_COUNT = 3        # 下厨/膳事次数达此值 → 厨神皇帝
+ABSURD_PET_COUNT = 3            # 养兽次数达此值 → 驯兽师皇帝
+
+
+def resolve_heir_succession_ending(game_state):
+    """太子登基时决定落哪一个结局。
+
+    返回 (ending_key, reason)。默认「母仪天下」；
+    若太子的成长轨迹已经跑偏（特质 / 计数器 / 贤明值），改判 4 个不正经结局之一。
+    判定按「跑偏程度」排序：兽 > 厨 > 隐 > 昏，同时满足时取最先命中的一条。
+    """
+    hs = getattr(game_state, "heir_status", None) or {}
+    traits = hs.get("heir_traits") or []
+    counters = hs.get("heir_counters") or {}
+    try:
+        merit = int(hs.get("regency_merit", 0) or 0)
+    except (TypeError, ValueError):
+        merit = 0
+
+    def cnt(key):
+        try:
+            return int(counters.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    heir_name = hs.get("heir_name") or "太子"
+
+    # ---- 1. 驯兽师皇帝：痴于禽兽 ----
+    if "爱兽" in traits or cnt("pets") >= ABSURD_PET_COUNT:
+        return "驯兽师皇帝", f"{heir_name}登基后广辟兽苑，朝臣入见须先过虎鹰之侧"
+    # ---- 2. 厨神皇帝：耽于庖厨 ----
+    if "庖厨" in traits or cnt("cooking") >= ABSURD_COOKING_COUNT:
+        return "厨神皇帝", f"{heir_name}登基后亲执勺于御膳房，朝会常不及半个时辰"
+    # ---- 3. 隐士皇帝：恋慕市井 ----
+    if "市井" in traits or cnt("incognito") >= ABSURD_INCOGNITO_COUNT:
+        return "隐士皇帝", f"{heir_name}登基未及三年，挂冠而去，只留下一张字条"
+    # ---- 4. 昏君传：荒政享乐 ----
+    if merit <= ABSURD_BANQUET_MERIT or "昏聩" in traits or "暴虐" in traits:
+        return "昏君传", f"{heir_name}登基后沉溺声乐，奏本一日堆过一日，无人上朝"
+
+    return "母仪天下", ""
+
 
 
 # ============================================================

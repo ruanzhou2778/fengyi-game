@@ -19,8 +19,25 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 load_dotenv()
 from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, FOUR_CONSORT_TITLES, ORDINARY_NOBLETITLES, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, is_four_consort_title, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor, default_heir_race, normalize_heir_race
+from models import (
+    default_heir_consorts, default_heir_consort_member,
+    normalize_heir_consorts, normalize_heir_status,
+)
 from scenarios import START_SCENARIOS, apply_scenario
-from events import get_daily_actions, apply_daily_action
+from events import (
+    get_daily_actions, apply_daily_action,
+    generate_regency_event, find_regency_event,
+    generate_heir_rebellion_event, generate_heir_special_event,
+    generate_incognito_adventure, generate_consort_selection_event,
+    find_consort_candidate, generate_consort_conflict_event,
+    generate_consort_fun_event,
+)
+from heir_content import (
+    HEIR_CONSORT_RANKS, HEIR_CONSORT_LIMITS, HEIR_CONSORT_GRADE,
+    HEIR_CONSORT_MAX_TOTAL, HEIR_CONSORT_PERSONALITIES,
+    HEIR_CONSORT_FUN_TAGS, HEIR_CONSORT_ENTRY_FLAVOR,
+    HEIR_DEFIANCE_CHAIN,
+)
 from names import (
     generate_female_name, generate_emperor_name_local, generate_child_name,
     generate_servant_name, extract_surname, NPC_SURNAMES,
@@ -47,6 +64,7 @@ from endings import (
     ENDINGS, ensure_ending_fields, is_game_over, ending_payload,
     evaluate_period_endings, check_player_childbirth_death,
     check_player_poison_death, build_life_summary, trigger_ending,
+    resolve_heir_succession_ending,
 )
 from openai import OpenAI
 import httpx
@@ -384,9 +402,11 @@ def pick_available_four_consort_title(game_state):
     return None
 
 def count_four_consort_title(game_state, title):
-    """统计当前后宫（含玩家）持某四妃封号的人数。"""
+    """统计当前后宫（含玩家）持某四妃封号的人数。已故者不占名额。"""
     count = 0
     for name, npc in game_state.npcs.items():
+        if not npc.get("alive", True):
+            continue
         if normalize_rank_name(npc.get("rank")) == "妃" and npc.get("nobletitle") == title:
             count += 1
     if game_state.rank.name == "妃" and game_state.nobletitle == title:
@@ -1005,6 +1025,8 @@ def can_promote_to_rank(game_state, target_rank_name):
     limit = RANK_LIMITS[target_rank_name]
     count = 0
     for name, npc in game_state.npcs.items():
+        if not npc.get("alive", True):
+            continue
         if normalize_rank_name(npc.get("rank")) == target_rank_name:
             count += 1
     if game_state.rank.name == target_rank_name:
@@ -3246,17 +3268,16 @@ def _heir_race_settle(game_state, uid, child, mother_name):
         game_state.heir_status = default_heir_status()
     child["is_heir"] = True
     child["mood"] = "意气风发"
-    game_state.heir_status = {
+    prev = game_state.heir_status if isinstance(game_state.heir_status, dict) else {}
+    game_state.heir_status = normalize_heir_status({
+        "deposed": prev.get("deposed", []),
         "heir_id": str(uid),
         "heir_name": child.get("name", "皇子"),
         "heir_mother": child.get("birth_mother") or mother_name,
-        "regent": "",
-        "regent_title": "",
         "established_at": f"建元{game_state.year}年{game_state.month}月",
         "last_event": "夺嫡定储",
-        "deposed": (game_state.heir_status or {}).get("deposed", []) if isinstance((game_state.heir_status or {}).get("deposed", []), list) else [],
-        "regent_active": False,
-    }
+    })
+    game_state.heir_consorts = default_heir_consorts()
     if mother_name == game_state.name:
         game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 15)
 
@@ -3373,6 +3394,793 @@ def process_heir_race(game_state):
             race["outcome"] = "settled"
 
     return events
+
+# ============================================================
+#  太子系统：监国政务 / 成长特质 / 微服私访 / 内宅
+# ============================================================
+
+HEIR_REGENCY_MIN_AGE = 12          # 太子满此岁数方可监国
+HEIR_REBELLION_MIN_AGE = 14        # 叛逆期起始年龄
+HEIR_SPECIAL_MIN_GAP = 3           # 特殊危机事件的最小间隔（旬）
+HEIR_CONSORT_SELECT_AGE = 16       # 选妃年龄
+HEIR_INCOGNITO_COST = 30           # 微服私访耗银
+HEIR_INCOGNITO_ACTION = 1          # 微服私访耗行动点
+HEIR_REGENCY_EVENT_CHANCE = 0.55   # 每旬出现政务的概率
+HEIR_LOG_LIMIT = 20                # 各类日志保留条数
+
+# 贤明值 → 特质阈值（(下限, 上限, 特质名)）
+HEIR_MERIT_TRAITS = [
+    (60, 101, "圣君"),
+    (25, 60, "贤明"),
+    (-60, -25, "昏聩"),
+    (-101, -60, "暴虐"),
+]
+
+
+def heir_state(game_state):
+    """取（并就地归一化）储君状态字典。所有太子系统读写都先走这里。"""
+    hs = getattr(game_state, "heir_status", None)
+    if not isinstance(hs, dict) or "regency_merit" not in hs:
+        hs = normalize_heir_status(hs)
+        game_state.heir_status = hs
+    hs.setdefault("heir_counters", {})
+    hs.setdefault("heir_traits", [])
+    return hs
+
+
+def heir_consorts_state(game_state):
+    """取（并就地归一化）东宫内宅字典。"""
+    hc = getattr(game_state, "heir_consorts", None)
+    if not isinstance(hc, dict) or set(HEIR_CONSORT_RANKS) - set(hc.keys()):
+        hc = normalize_heir_consorts(hc)
+        game_state.heir_consorts = hc
+    return hc
+
+
+def heir_consort_members(game_state, include_primary=True):
+    """按位份从高到低返回内宅成员列表（仅在世者）。"""
+    hc = heir_consorts_state(game_state)
+    members = []
+    if include_primary and isinstance(hc.get("太子妃"), dict) and hc["太子妃"].get("alive", True):
+        members.append(hc["太子妃"])
+    for rank in HEIR_CONSORT_RANKS[1:]:
+        for m in hc.get(rank, []):
+            if m.get("alive", True):
+                members.append(m)
+    return members
+
+
+def heir_consort_total(game_state):
+    return len(heir_consort_members(game_state))
+
+
+def heir_counter_bump(hs, key, step=1):
+    """累加太子行为计数器（供不正经结局阈值判定）。"""
+    if not key:
+        return 0
+    counters = hs.setdefault("heir_counters", {})
+    try:
+        cur = int(counters.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        cur = 0
+    counters[key] = cur + step
+    return counters[key]
+
+
+def heir_add_trait(hs, trait):
+    """为太子添加特质标签（去重）。返回是否新增。"""
+    if not trait:
+        return False
+    traits = hs.setdefault("heir_traits", [])
+    if trait in traits:
+        return False
+    traits.append(trait)
+    return True
+
+
+def heir_clamp_merit(hs, delta):
+    """调整贤明值并返回实际变化量。"""
+    try:
+        cur = int(hs.get("regency_merit", 0) or 0)
+    except (TypeError, ValueError):
+        cur = 0
+    updated = max(-100, min(100, cur + int(delta)))
+    hs["regency_merit"] = updated
+    return updated - cur
+
+
+def heir_clamp_affection(hs, delta):
+    try:
+        cur = int(hs.get("heir_affection", 50) or 50)
+    except (TypeError, ValueError):
+        cur = 50
+    updated = max(0, min(100, cur + int(delta)))
+    hs["heir_affection"] = updated
+    return updated - cur
+
+
+def heir_clamp_harmony(hs, delta):
+    try:
+        cur = int(hs.get("consort_harmony", 60) or 60)
+    except (TypeError, ValueError):
+        cur = 60
+    updated = max(0, min(100, cur + int(delta)))
+    hs["consort_harmony"] = updated
+    return updated - cur
+
+
+def heir_refresh_merit_traits(game_state):
+    """按贤明值区间刷新「圣君 / 贤明 / 昏聩 / 暴虐」标签（四者互斥）。"""
+    hs = heir_state(game_state)
+    try:
+        merit = int(hs.get("regency_merit", 0) or 0)
+    except (TypeError, ValueError):
+        merit = 0
+    traits = hs.setdefault("heir_traits", [])
+    exclusive = {name for _lo, _hi, name in HEIR_MERIT_TRAITS}
+    target = None
+    for lo, hi, name in HEIR_MERIT_TRAITS:
+        if lo <= merit < hi:
+            target = name
+            break
+    for name in list(traits):
+        if name in exclusive and name != target:
+            traits.remove(name)
+    if target and target not in traits:
+        traits.append(target)
+        return target
+    return None
+
+
+def heir_log_push(hs, key, entry, limit=HEIR_LOG_LIMIT):
+    """写入太子系统日志（新的在前，超出上限截断）。"""
+    log = hs.setdefault(key, [])
+    if not isinstance(log, list):
+        log = []
+        hs[key] = log
+    log.insert(0, entry)
+    del log[limit:]
+    return log
+
+
+def heir_period_label(game_state):
+    return f"{getattr(game_state, 'year', 1)}年{getattr(game_state, 'month', 1)}月"
+
+
+def heir_apply_choice(game_state, choice, notify_prefix=""):
+    """统一结算一个太子事件选项。
+
+    支持字段：merit / affection / attrs / counter / traits / silver / harmony / favor。
+    返回 (变化描述列表, 结算摘要 dict)。
+    """
+    hs = heir_state(game_state)
+    notes = []
+    summary = {"merit": 0, "affection": 0, "attrs": {}, "silver": 0, "harmony": 0, "traits": []}
+
+    merit_delta = int(choice.get("merit", 0) or 0)
+    if merit_delta:
+        actual = heir_clamp_merit(hs, merit_delta)
+        summary["merit"] = actual
+        if actual:
+            notes.append(f"贤明{'+' if actual > 0 else ''}{actual}")
+
+    aff_delta = int(choice.get("affection", 0) or 0)
+    if aff_delta:
+        actual = heir_clamp_affection(hs, aff_delta)
+        summary["affection"] = actual
+        if actual:
+            notes.append(f"太子亲近{'+' if actual > 0 else ''}{actual}")
+
+    harmony_delta = int(choice.get("harmony", 0) or 0)
+    if harmony_delta:
+        actual = heir_clamp_harmony(hs, harmony_delta)
+        summary["harmony"] = actual
+        if actual:
+            notes.append(f"内宅和睦{'+' if actual > 0 else ''}{actual}")
+
+    for attr, delta in (choice.get("attrs") or {}).items():
+        if attr not in game_state.attributes:
+            continue
+        actual = _clamp_attr(game_state, attr, int(delta))
+        if actual:
+            summary["attrs"][attr] = actual
+            notes.append(f"{attr}{'+' if actual > 0 else ''}{actual}")
+
+    silver_delta = int(choice.get("silver", 0) or 0)
+    if silver_delta:
+        game_state.silver = max(0, game_state.silver + silver_delta)
+        summary["silver"] = silver_delta
+        notes.append(f"银两{'+' if silver_delta > 0 else ''}{silver_delta}")
+
+    heir_counter_bump(hs, choice.get("counter"))
+
+    for trait in (choice.get("traits") or []):
+        if heir_add_trait(hs, trait):
+            summary["traits"].append(trait)
+            notes.append(f"太子习性「{trait}」")
+
+    # 内宅好感变化（favor: {位份或姓名: 增量}）
+    for key, delta in (choice.get("favor") or {}).items():
+        for member in heir_consort_members(game_state):
+            if member.get("rank") == key or member.get("name") == key:
+                member["favor"] = max(0, min(100, int(member.get("favor", 50)) + int(delta)))
+                break
+
+    trait_changed = heir_refresh_merit_traits(game_state)
+    if trait_changed:
+        notes.append(f"太子已有「{trait_changed}」之名")
+    if notify_prefix and notes:
+        notes[0] = notify_prefix + notes[0]
+    return notes, summary
+
+
+def get_heir_ruling_style(game_state):
+    """推定/初始化太子治国倾向（儒家 / 法家 / 道家）。
+
+    优先取已固化的 heir_ruling_style；未定时按太子妃出身 + 太子天赋随机定调并写回。
+    """
+    hs = heir_state(game_state)
+    style = hs.get("heir_ruling_style")
+    if style in ("儒家", "法家", "道家"):
+        return style
+
+    weights = {"儒家": 1.0, "法家": 1.0, "道家": 1.0}
+    # 太子妃出身影响：其 ruling_style 权重翻倍
+    consort = (heir_consorts_state(game_state) or {}).get("太子妃")
+    if isinstance(consort, dict):
+        cand = find_consort_candidate(consort.get("name", "")) or {}
+        cand_style = cand.get("ruling_style") or consort.get("ruling_style")
+        if cand_style in weights:
+            weights[cand_style] += 2.0
+    # 太子天赋：才学高偏儒，机敏高偏法，健康好、心宽偏道
+    child = get_heir_child(game_state)
+    if isinstance(child, dict):
+        ensure_child_fields(child)
+        weights["儒家"] += int(child.get("talent", 50) or 50) / 50.0
+        weights["法家"] += int(child.get("wit", 50) or 50) / 50.0
+        weights["道家"] += int(child.get("health", 70) or 70) / 70.0
+
+    pool = list(weights.keys())
+    style = random.choices(pool, weights=[weights[k] for k in pool], k=1)[0]
+    hs["heir_ruling_style"] = style
+    return style
+
+
+def heir_activate_regency(game_state, reason="册立太子"):
+    """立储后激活监国：写入初始状态并投放第一件政务。返回提示文案列表。"""
+    hs = heir_state(game_state)
+    msgs = []
+    if hs.get("regency_active"):
+        return msgs
+    child = get_heir_child(game_state)
+    if not child:
+        return msgs
+    ensure_child_fields(child)
+    try:
+        age = float(child.get("age", 0) or 0)
+    except (TypeError, ValueError):
+        age = 0
+    if age < HEIR_REGENCY_MIN_AGE:
+        msgs.append(f"📜 {child.get('name', '太子')}年方{int(age)}，尚幼，待满{HEIR_REGENCY_MIN_AGE}岁方可监国听政。")
+        return msgs
+
+    hs["regency_active"] = True
+    hs["last_event"] = reason
+    style = get_heir_ruling_style(game_state)
+    msg = (f"⚖️ 皇帝下诏令{child.get('name', '太子')}入文华殿监国听政，"
+           f"六部奏本自此先过东宫。太傅评其秉性偏于{style}之道。")
+    msgs.append(msg)
+    game_state.add_memory(msg)
+    heir_log_push(hs, "regency_events", {
+        "period": heir_period_label(game_state),
+        "title": "开府监国",
+        "detail": msg,
+    })
+
+    # 开府即投放第一件政务，令玩家立刻有事可议
+    if not isinstance(hs.get("pending_regency_event"), dict):
+        first = generate_regency_event(exclude_ids=heir_recent_regency_ids(hs))
+        if first:
+            hs["pending_regency_event"] = first
+            first_msg = (f"📜 东宫开府第一桩{first.get('category', '')}政务已呈："
+                         f"{first.get('description', '')}")
+            msgs.append(first_msg)
+    return msgs
+
+
+def heir_recent_regency_ids(hs, keep=6):
+    """近 keep 条政务的 id，避免短期重复。"""
+    ids = []
+    for entry in (hs.get("regency_events") or [])[:keep]:
+        if isinstance(entry, dict) and entry.get("event_id"):
+            ids.append(entry["event_id"])
+    return ids
+
+
+def heir_auto_decide(game_state, event):
+    """太子按治国倾向自行决断一件政务，返回 (选项键, 选项字典)。
+
+    倾向匹配的选项权重更高；亲近度低时更可能任性择另一项。
+    """
+    hs = heir_state(game_state)
+    style = get_heir_ruling_style(game_state)
+    choices = event.get("choices") or {}
+    keys = list(choices.keys())
+    if not keys:
+        return None, None
+    weights = []
+    for k in keys:
+        w = 1.0
+        if choices[k].get("bias") == style:
+            w += 2.5
+        # 亲近度越低越叛逆：偏向贤明值更低的那一项
+        try:
+            aff = int(hs.get("heir_affection", 50) or 50)
+        except (TypeError, ValueError):
+            aff = 50
+        if aff < 40 and int(choices[k].get("merit", 0) or 0) < 0:
+            w += 1.5
+        weights.append(w)
+    pick = random.choices(keys, weights=weights, k=1)[0]
+    return pick, choices[pick]
+
+
+def heir_resolve_pending_regency(game_state, hs):
+    """上一旬玩家未进言的政务，由太子自行决断并结算。返回消息列表。"""
+    msgs = []
+    pending = hs.get("pending_regency_event")
+    if not isinstance(pending, dict):
+        return msgs
+    key, choice = heir_auto_decide(game_state, pending)
+    hs["pending_regency_event"] = None
+    if not choice:
+        return msgs
+    heir_name = hs.get("heir_name") or "太子"
+    notes, _summary = heir_apply_choice(game_state, choice)
+    detail = f"🖋️ 你未及进言，{heir_name}已自行批红：「{choice.get('text', '')}」"
+    if notes:
+        detail += "（" + "，".join(notes) + "）"
+    msgs.append(detail)
+    game_state.add_memory(detail)
+    heir_log_push(hs, "regency_events", {
+        "period": heir_period_label(game_state),
+        "event_id": pending.get("id"),
+        "title": pending.get("category", "政务"),
+        "decided_by": "太子自决",
+        "choice": choice.get("text", ""),
+        "detail": detail,
+    })
+    return msgs
+
+
+def process_heir_regency(game_state):
+    """监国政务的转旬结算：结算上旬遗留 → 投放新政务。返回消息列表。"""
+    msgs = []
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return msgs
+
+    child = get_heir_child(game_state)
+    if not child or not child.get("alive", True):
+        return msgs
+    ensure_child_fields(child)
+
+    # 太子成年后自动开府监国
+    if not hs.get("regency_active"):
+        msgs.extend(heir_activate_regency(game_state, reason="太子成年监国"))
+        if not hs.get("regency_active"):
+            return msgs
+
+    # 1. 上旬未处置的政务由太子自决
+    msgs.extend(heir_resolve_pending_regency(game_state, hs))
+
+    # 2. 投放本旬新政务
+    if random.random() < HEIR_REGENCY_EVENT_CHANCE:
+        event = generate_regency_event(exclude_ids=heir_recent_regency_ids(hs))
+        hs["pending_regency_event"] = event
+        msg = f"📜 东宫呈上{event.get('category', '')}政务：{event.get('description', '')}"
+        msgs.append(msg)
+    return msgs
+
+
+def process_heir_growth_events(game_state):
+    """太子叛逆期 / 特殊危机事件的转旬投放。返回消息列表。"""
+    msgs = []
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return msgs
+    child = get_heir_child(game_state)
+    if not child or not child.get("alive", True):
+        return msgs
+    ensure_child_fields(child)
+    try:
+        age = float(child.get("age", 0) or 0)
+    except (TypeError, ValueError):
+        age = 0
+
+    # 已有待决事件时不再叠加
+    if isinstance(hs.get("pending_heir_event"), dict):
+        return msgs
+
+    period_no = int(getattr(game_state, "year", 1)) * 12 + int(getattr(game_state, "month", 1))
+
+    # 1. 特殊危机（间隔 ≥ HEIR_SPECIAL_MIN_GAP 旬）
+    last_special = hs.get("last_special_period")
+    gap_ok = not isinstance(last_special, int) or (period_no - last_special) >= HEIR_SPECIAL_MIN_GAP
+    if hs.get("regency_active") and gap_ok:
+        event = generate_heir_special_event()
+        if event:
+            hs["pending_heir_event"] = event
+            hs["last_special_period"] = period_no
+            msgs.append(f"⚠️ 东宫急报「{event.get('name')}」：{event.get('description', '')}")
+            return msgs
+
+    # 2. 叛逆期事件
+    if age >= HEIR_REBELLION_MIN_AGE:
+        event = generate_heir_rebellion_event(age)
+        if event:
+            hs["pending_heir_event"] = event
+            msgs.append(f"🧒 太子又生事端「{event.get('name')}」：{event.get('description', '')}")
+    return msgs
+
+def heir_consort_rank_full(game_state, rank):
+    """该位份是否已满编。"""
+    hc = heir_consorts_state(game_state)
+    limit = HEIR_CONSORT_LIMITS.get(rank, 0)
+    if rank == "太子妃":
+        return isinstance(hc.get("太子妃"), dict) and hc["太子妃"].get("alive", True)
+    return len([m for m in hc.get(rank, []) if m.get("alive", True)]) >= limit
+
+
+def heir_consort_add(game_state, rank, name=None, family="", personality="",
+                     favor=None, faction="", fun_tag="", talent=None, looks=None,
+                     ruling_style=None):
+    """向内宅添加一名成员。位份满编或总数超上限时返回 None。"""
+    hc = heir_consorts_state(game_state)
+    if rank not in HEIR_CONSORT_RANKS:
+        return None
+    if heir_consort_rank_full(game_state, rank):
+        return None
+    if heir_consort_total(game_state) >= HEIR_CONSORT_MAX_TOTAL:
+        return None
+
+    if not name:
+        name, bg = generate_concubine_identity()
+        family = family or bg.get("summary") or bg.get("official_name") or ""
+    member = default_heir_consort_member(
+        name,
+        family=family,
+        personality=personality or random.choice(HEIR_CONSORT_PERSONALITIES),
+        favor=random.randint(35, 65) if favor is None else favor,
+        rank=rank,
+    )
+    member["faction"] = faction
+    member["fun_tag"] = fun_tag or random.choice(HEIR_CONSORT_FUN_TAGS)
+    member["talent"] = random.randint(35, 80) if talent is None else int(talent)
+    member["looks"] = random.randint(45, 85) if looks is None else int(looks)
+    member["entered_at"] = heir_period_label(game_state)
+    if ruling_style:
+        member["ruling_style"] = ruling_style
+
+    if rank == "太子妃":
+        hc["太子妃"] = member
+    else:
+        hc.setdefault(rank, []).append(member)
+    return member
+
+
+def heir_consort_fill(game_state, count=None):
+    """按位份从低到高自动填充侧室（礼部按例送人）。返回新增成员列表。"""
+    hs = heir_state(game_state)
+    if not isinstance(heir_consorts_state(game_state).get("太子妃"), dict):
+        return []          # 未册太子妃则不进侧室
+    added = []
+    if count is None:
+        count = random.randint(1, 2)
+    for _ in range(max(0, int(count))):
+        # 从低位份往高位份找空缺：奉仪 → 昭训 → 承徽 → 良媛 → 良娣
+        target_rank = None
+        for rank in reversed(HEIR_CONSORT_RANKS[1:]):
+            if not heir_consort_rank_full(game_state, rank):
+                target_rank = rank
+                break
+        if not target_rank:
+            break
+        member = heir_consort_add(game_state, target_rank)
+        if not member:
+            break
+        added.append(member)
+    if added:
+        flavor = random.choice(HEIR_CONSORT_ENTRY_FLAVOR)
+        names = "、".join(f"{m['name']}（{m['rank']}）" for m in added)
+        msg = f"🎐 东宫新添内眷：{names}。{flavor}"
+        heir_log_push(hs, "consort_events", {
+            "period": heir_period_label(game_state),
+            "title": "内官入册",
+            "detail": msg,
+        }, limit=10)
+        game_state.add_memory(msg)
+    return added
+
+
+def process_heir_consorts(game_state):
+    """内宅转旬结算：选妃触发 → 侧室填充 → 宠爱波动 → 内宅事件投放。"""
+    msgs = []
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return msgs
+    child = get_heir_child(game_state)
+    if not child or not child.get("alive", True):
+        return msgs
+    ensure_child_fields(child)
+    try:
+        age = float(child.get("age", 0) or 0)
+    except (TypeError, ValueError):
+        age = 0
+    hc = heir_consorts_state(game_state)
+    heir_name = hs.get("heir_name") or child.get("name") or "太子"
+
+    # 1. 到龄选妃：只投一次，等玩家在面板上择定
+    if age >= HEIR_CONSORT_SELECT_AGE and not isinstance(hc.get("太子妃"), dict):
+        if not isinstance(hs.get("consort_selection"), dict):
+            selection = generate_consort_selection_event()
+            hs["consort_selection"] = selection
+            msgs.append(f"💐 {heir_name}已及婚龄，礼部呈上三家名册待你择定：" +
+                        "、".join(f"{c['name']}（{c['faction']}）" for c in selection["candidates"]))
+        return msgs
+
+    # 2. 已册太子妃：礼部按例续送侧室
+    if isinstance(hc.get("太子妃"), dict):
+        if heir_consort_total(game_state) < HEIR_CONSORT_MAX_TOTAL and random.random() < 0.30:
+            added = heir_consort_fill(game_state)
+            if added:
+                names = "、".join(f"{m['name']}（{m['rank']}）" for m in added)
+                msgs.append(f"🎐 礼部按例为东宫添置内眷：{names}")
+
+    members = heir_consort_members(game_state)
+    if not members:
+        return msgs
+
+    # 3. 宠爱自然波动：和睦度越低，波动越剧烈
+    try:
+        harmony = int(hs.get("consort_harmony", 60) or 60)
+    except (TypeError, ValueError):
+        harmony = 60
+    swing = 3 if harmony >= 60 else 6
+    for member in members:
+        member["favor"] = max(0, min(100, int(member.get("favor", 50)) + random.randint(-swing, swing)))
+
+    # 4. 内宅事件（宫斗 / 趣味），已有待决则跳过
+    if not isinstance(hs.get("pending_consort_event"), dict) and random.random() < 0.35:
+        ranks_present = {m.get("rank") for m in members}
+        if len(members) >= 2 and random.random() < 0.6:
+            event = generate_consort_conflict_event(available_ranks=ranks_present)
+            msgs.append(f"🏮 东宫内宅起了风波「{event.get('name')}」：{event.get('scene', '')}")
+        else:
+            event = generate_consort_fun_event()
+            msgs.append(f"🎋 东宫内宅趣事「{event.get('name')}」：{event.get('description', '')}")
+        hs["pending_consort_event"] = event
+    return msgs
+
+
+def process_heir_defiance(game_state):
+    """不孝 / 逼宫四阶段事件链：按亲近度递降推进。返回消息列表。"""
+    msgs = []
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return msgs
+    child = get_heir_child(game_state)
+    if not child or not child.get("alive", True):
+        return msgs
+    ensure_child_fields(child)
+    try:
+        age = float(child.get("age", 0) or 0)
+    except (TypeError, ValueError):
+        age = 0
+    if age < HEIR_REBELLION_MIN_AGE:
+        return msgs
+    # 已有待决事件时不叠加（不孝事件与叛逆/危机共用 pending_heir_event 槽位）
+    if isinstance(hs.get("pending_heir_event"), dict):
+        return msgs
+
+    try:
+        affection = int(hs.get("heir_affection", 50) or 50)
+        stage = int(hs.get("defiance_stage", 0) or 0)
+    except (TypeError, ValueError):
+        affection, stage = 50, 0
+
+    for entry in HEIR_DEFIANCE_CHAIN:
+        if entry["stage"] != stage + 1:
+            continue
+        if affection > entry["threshold"]:
+            break
+        if random.random() >= 0.6:      # 达到阈值后每旬 60% 概率推进
+            break
+        event = {
+            "kind": "defiance",
+            "id": f"def_{entry['stage']}",
+            "stage": entry["stage"],
+            "name": entry["name"],
+            "description": entry["description"],
+            "flavor": entry.get("flavor", ""),
+            "choices": {k: dict(v) for k, v in entry["choices"].items()},
+        }
+        hs["pending_heir_event"] = event
+        hs["defiance_stage"] = entry["stage"]
+        msg = f"💔 母子之间生了嫌隙「{entry['name']}」：{entry['description']}"
+        msgs.append(msg)
+        heir_log_push(hs, "defiance_log", {
+            "period": heir_period_label(game_state),
+            "stage": entry["stage"],
+            "title": entry["name"],
+            "detail": msg,
+        })
+        break
+    return msgs
+
+
+def heir_resolve_pending_heir_event(game_state, hs):
+    """上旬玩家未处置的叛逆/危机/不孝事件：视作放任，按 A/B 随机落定并结算。"""
+    msgs = []
+    pending = hs.get("pending_heir_event")
+    if not isinstance(pending, dict):
+        return msgs
+    choices = pending.get("choices") or {}
+    if not choices:
+        hs["pending_heir_event"] = None
+        return msgs
+    key = random.choice(list(choices.keys()))
+    choice = choices[key]
+    hs["pending_heir_event"] = None
+    notes, _summary = heir_apply_choice(game_state, choice)
+    heir_name = hs.get("heir_name") or "太子"
+    detail = f"🕯️ 「{pending.get('name', '东宫之事')}」你未曾插手，{heir_name}身边的人自行做了处置：{choice.get('detail', '')}"
+    if notes:
+        detail += "（" + "，".join(notes) + "）"
+    msgs.append(detail)
+    game_state.add_memory(detail)
+    heir_log_push(hs, "heir_event_log", {
+        "period": heir_period_label(game_state),
+        "event_id": pending.get("id"),
+        "kind": pending.get("kind", ""),
+        "title": pending.get("name", ""),
+        "decided_by": "放任",
+        "choice": choice.get("text", ""),
+        "detail": detail,
+    })
+    return msgs
+
+
+def heir_resolve_pending_consort_event(game_state, hs):
+    """上旬玩家未处置的内宅事件：太子妃自行料理，随机落定。"""
+    msgs = []
+    pending = hs.get("pending_consort_event")
+    if not isinstance(pending, dict):
+        return msgs
+    options = pending.get("options") or pending.get("choices") or {}
+    if not options:
+        hs["pending_consort_event"] = None
+        return msgs
+    key = random.choice(list(options.keys()))
+    choice = options[key]
+    hs["pending_consort_event"] = None
+    notes, _summary = heir_apply_choice(game_state, choice)
+    detail = f"🏮 「{pending.get('name', '内宅之事')}」你未曾过问，太子妃自行料理了：{choice.get('detail', '')}"
+    if notes:
+        detail += "（" + "，".join(notes) + "）"
+    msgs.append(detail)
+    heir_log_push(hs, "consort_events", {
+        "period": heir_period_label(game_state),
+        "event_id": pending.get("id"),
+        "title": pending.get("name", ""),
+        "decided_by": "太子妃自决",
+        "choice": choice.get("text", ""),
+        "detail": detail,
+    }, limit=10)
+    return msgs
+
+
+def process_heir_system(game_state):
+    """太子系统总入口（转旬调用）。
+
+    顺序：结算上旬遗留 → 监国政务 → 成长/危机事件 → 不孝事件链 → 内宅。
+    返回消息列表，由 next_period 写入 intelligence。
+    """
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return []
+    msgs = []
+    msgs.extend(heir_resolve_pending_heir_event(game_state, hs))
+    msgs.extend(heir_resolve_pending_consort_event(game_state, hs))
+    msgs.extend(process_heir_regency(game_state))
+    msgs.extend(process_heir_growth_events(game_state))
+    msgs.extend(process_heir_defiance(game_state))
+    msgs.extend(process_heir_consorts(game_state))
+    return msgs
+
+
+def heir_consort_payload(game_state):
+    """内宅前端载荷：按位份分组 + 编制统计。"""
+    hc = heir_consorts_state(game_state)
+    groups = []
+    for rank in HEIR_CONSORT_RANKS:
+        if rank == "太子妃":
+            members = [hc["太子妃"]] if isinstance(hc.get("太子妃"), dict) else []
+        else:
+            members = list(hc.get(rank, []))
+        groups.append({
+            "rank": rank,
+            "grade": HEIR_CONSORT_GRADE.get(rank, ""),
+            "limit": HEIR_CONSORT_LIMITS.get(rank, 0),
+            "count": len([m for m in members if m.get("alive", True)]),
+            "members": [{
+                "name": m.get("name", ""),
+                "rank": rank,
+                "family": m.get("family", ""),
+                "personality": m.get("personality", ""),
+                "fun_tag": m.get("fun_tag", ""),
+                "favor": m.get("favor", 50),
+                "faction": m.get("faction", ""),
+                "talent": m.get("talent", 50),
+                "looks": m.get("looks", 50),
+                "alive": m.get("alive", True),
+                "is_pregnant": m.get("is_pregnant", False),
+                "children": m.get("children", []),
+                "entered_at": m.get("entered_at", ""),
+            } for m in members],
+        })
+    return {
+        "groups": groups,
+        "total": heir_consort_total(game_state),
+        "max_total": HEIR_CONSORT_MAX_TOTAL,
+        "limits": HEIR_CONSORT_LIMITS,
+        "grades": HEIR_CONSORT_GRADE,
+    }
+
+
+def heir_panel_payload(game_state):
+    """储君面板总载荷：监国 + 成长 + 内宅，供 /api/heir/state 与转旬返回。"""
+    hs = heir_state(game_state)
+    child = get_heir_child(game_state)
+    if child:
+        ensure_child_fields(child)
+    try:
+        age = float(child.get("age", 0) or 0) if child else 0
+    except (TypeError, ValueError):
+        age = 0
+    period_key_now = chonghua_period_key(game_state)
+    return {
+        "heir_status": hs,
+        "has_heir": bool(hs.get("heir_id")),
+        "heir_name": hs.get("heir_name", ""),
+        "heir_age": int(age),
+        "regency_active": bool(hs.get("regency_active")),
+        "regency_merit": hs.get("regency_merit", 0),
+        "ruling_style": hs.get("heir_ruling_style"),
+        "heir_traits": hs.get("heir_traits", []),
+        "heir_affection": hs.get("heir_affection", 50),
+        "heir_counters": hs.get("heir_counters", {}),
+        "defiance_stage": hs.get("defiance_stage", 0),
+        "consort_harmony": hs.get("consort_harmony", 60),
+        "pending_regency_event": hs.get("pending_regency_event"),
+        "pending_heir_event": hs.get("pending_heir_event"),
+        "pending_consort_event": hs.get("pending_consort_event"),
+        "consort_selection": hs.get("consort_selection"),
+        "regency_events": (hs.get("regency_events") or [])[:8],
+        "heir_event_log": (hs.get("heir_event_log") or [])[:8],
+        "defiance_log": (hs.get("defiance_log") or [])[:5],
+        "consort_events": (hs.get("consort_events") or [])[:6],
+        "consorts": heir_consort_payload(game_state),
+        "can_advise": bool(hs.get("pending_regency_event")) and hs.get("last_regency_input") != period_key_now,
+        "incognito_cost": HEIR_INCOGNITO_COST,
+        "incognito_action_cost": HEIR_INCOGNITO_ACTION,
+        "silver": game_state.silver,
+        "remaining_actions": game_state.remaining_actions,
+    }
+
+
+
+
 
 
 def serialize_npcs_for_client(game_state):
@@ -4927,6 +5735,10 @@ def next_period():
     heir_race_events = process_heir_race(game_state)
     for evt in heir_race_events:
         intelligence.append(evt)
+    # ---- 太子系统：监国政务 / 叛逆危机 / 不孝事件链 / 东宫内宅 ----
+    heir_system_events = process_heir_system(game_state)
+    for evt in heir_system_events:
+        intelligence.append(evt)
     if prince_events:
         for evt in prince_events:
             game_state.add_memory(evt)
@@ -5174,10 +5986,16 @@ def next_period():
                 if heir_child:
                     heir_mother = heir_child.get("adoptive_mother") or heir_child.get("birth_mother") or ""
                     if heir_mother == game_state.name:
-                        # 你的子嗣继位 → 太后结局
-                        ending = trigger_ending(game_state, "母仪天下",
+                        # 你的子嗣继位 → 太后结局；太子若已长歪，改判不正经结局
+                        ending_key, absurd_reason = resolve_heir_succession_ending(game_state)
+                        reason = absurd_reason or (
                             f"皇帝驾崩，你的子嗣{heir_child.get('name','皇嗣')}继位为帝，尊你为太后")
-                        intelligence.append(f"👑 新帝登基，尊你为太后，母仪天下！")
+                        ending = trigger_ending(game_state, ending_key, reason)
+                        if ending_key == "母仪天下":
+                            intelligence.append("👑 新帝登基，尊你为太后，母仪天下！")
+                        else:
+                            headline = (ENDINGS.get(ending_key) or {}).get("headline", ending_key)
+                            intelligence.append(f"👑 新帝登基，尊你为太后——只是这位新君，{headline}。")
                         game_state.add_memory(f"👑 你的子嗣{heir_child.get('name','皇嗣')}登基为帝")
                     else:
                         # 他人子嗣继位 → 无依靠结局
@@ -5294,6 +6112,7 @@ def next_period():
         "game_over": bool(ending),
         "ending_warnings": ending_warnings,
         "heir_status": game_state.heir_status,
+        "heir_panel": heir_panel_payload(game_state),
         "palaces": PALACE_LIST,
         "emperor": game_state.emperor,
         "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)),
@@ -5744,7 +6563,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None))})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state)})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -6976,14 +7795,29 @@ def set_heir():
 
     if action == 'clear':
         old = get_heir_child(game_state)
-        game_state.heir_status = default_heir_status()
+        prev = heir_state(game_state)
+        deposed = list(prev.get("deposed", []))
+        if old and old.get("name"):
+            deposed.append({
+                "name": old.get("name"),
+                "period": heir_period_label(game_state),
+                "merit": prev.get("regency_merit", 0),
+            })
+        game_state.heir_status = normalize_heir_status({"deposed": deposed})
+        game_state.heir_consorts = default_heir_consorts()
         message = "📜 皇帝降旨废储，储君之位悬空。" if old else "储君之位本为空悬，无需废立。"
         if old:
             game_state.add_memory(f"📜 {old.get('name','皇子')}被废黜储君之位")
             for c in game_state.children:
                 if c.get("name") == old.get("name"):
                     c["mood"] = "低落"
-        return jsonify({"success": True, "narration": message, "heir_status": game_state.heir_status})
+                    c["is_heir"] = False
+        return jsonify({
+            "success": True,
+            "narration": message,
+            "heir_status": game_state.heir_status,
+            "heir_panel": heir_panel_payload(game_state),
+        })
 
     if not child_uid:
         return jsonify({"error": "缺少子嗣标识 child_uid", "success": False}), 400
@@ -7030,17 +7864,17 @@ def set_heir():
 
     # 立储成功
     child_uid_str = str(child.get("uid") or child.get("name") or "")
-    game_state.heir_status = {
+    prev_hs = heir_state(game_state)
+    hs = normalize_heir_status({
+        "deposed": prev_hs.get("deposed", []),
         "heir_id": child_uid_str,
         "heir_name": child.get("name", "皇子"),
         "heir_mother": child.get("birth_mother") or child_mother,
-        "regent": "",
-        "regent_title": "",
         "established_at": f"建元{game_state.year}年{game_state.month}月",
         "last_event": "册立太子",
-        "deposed": (game_state.heir_status or {}).get("deposed", []) if isinstance((game_state.heir_status or {}).get("deposed", []), list) else [],
-        "regent_active": False,
-    }
+    })
+    game_state.heir_status = hs
+    game_state.heir_consorts = default_heir_consorts()
     child["is_heir"] = True
     child["mood"] = "意气风发"
     # 威望与宠爱变化
@@ -7052,13 +7886,426 @@ def set_heir():
     if child_mother == game_state.name:
         message += "，阖宫侧目"
     game_state.add_memory(message)
+    # 立储即尝试激活监国（未及岁数则只给提示）
+    regency_msgs = heir_activate_regency(game_state, reason="册立太子")
+    narration = message
+    if regency_msgs:
+        narration += "\n" + "\n".join(regency_msgs)
     return jsonify({
         "success": True,
-        "narration": message,
+        "narration": narration,
         "heir_status": game_state.heir_status,
+        "heir_panel": heir_panel_payload(game_state),
+        "regency_messages": regency_msgs,
         "child": child,
         "attributes": game_state.attributes,
     })
+
+# ============================================================
+#  太子系统 API：储君面板 / 监国进言 / 事件处置 / 微服私访 / 选妃
+# ============================================================
+
+@app.route('/api/heir/state', methods=['GET'])
+def heir_state_api():
+    """只读查询储君面板（监国 / 成长 / 内宅）。"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    return jsonify({"success": True, **heir_panel_payload(game_state)})
+
+
+@app.route('/api/heir/regency', methods=['POST'])
+def heir_regency_advise():
+    """向监国太子进言。choice: 'A' / 'B'。
+
+    进言成功率 = 50% 基线
+        + 20%（宠爱 ≥ 60）
+        + 10%（威望 ≥ 60）
+        + 5%（心计 ≥ 60）
+        + 10%（太子亲近 ≥ 70）
+    成功则按你选的项落定，失败则太子仍按自己的倾向批红。每旬限一次。
+    """
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    choice_key = (data.get('choice') or '').strip().upper()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return jsonify({"success": False, "error": "储君之位空悬，无从进言"}), 400
+    if not hs.get("regency_active"):
+        return jsonify({"success": False, "error": "太子尚未监国听政"}), 400
+    event = hs.get("pending_regency_event")
+    if not isinstance(event, dict):
+        return jsonify({"success": False, "error": "东宫本旬并无待议政务"}), 400
+    choices = event.get("choices") or {}
+    if choice_key not in choices:
+        return jsonify({"success": False, "error": "请择定一项进言"}), 400
+
+    period_now = chonghua_period_key(game_state)
+    if hs.get("last_regency_input") == period_now:
+        return jsonify({"success": False, "error": "本旬你已进言一次，政事不可反复"}), 400
+
+    attrs = game_state.attributes
+    rate = 0.50
+    breakdown = ["基线50%"]
+    if attrs.get("宠爱", 0) >= 60:
+        rate += 0.20
+        breakdown.append("圣宠+20%")
+    if attrs.get("威望", 0) >= 60:
+        rate += 0.10
+        breakdown.append("威望+10%")
+    if attrs.get("心计", 0) >= 60:
+        rate += 0.05
+        breakdown.append("心计+5%")
+    try:
+        affection = int(hs.get("heir_affection", 50) or 50)
+    except (TypeError, ValueError):
+        affection = 50
+    if affection >= 70:
+        rate += 0.10
+        breakdown.append("母子亲厚+10%")
+    rate = min(0.95, rate)
+
+    accepted = random.random() < rate
+    hs["last_regency_input"] = period_now
+    hs["pending_regency_event"] = None
+    heir_name = hs.get("heir_name") or "太子"
+
+    if accepted:
+        final_key = choice_key
+        final_choice = dict(choices[choice_key])
+        # 进言被采纳，母子亲近略增
+        final_choice["affection"] = int(final_choice.get("affection", 0) or 0) + 3
+        lead = f"🖋️ {heir_name}听罢沉吟片刻，依你所言批了红：「{choices[choice_key].get('text','')}」"
+    else:
+        final_key, auto_choice = heir_auto_decide(game_state, event)
+        final_choice = dict(auto_choice) if auto_choice else None
+        if final_choice:
+            # 逆你之意，亲近略降
+            final_choice["affection"] = int(final_choice.get("affection", 0) or 0) - 2
+        lead = (f"🖋️ {heir_name}听完只道「儿臣自有主张」，仍按己意批红："
+                f"「{(final_choice or {}).get('text','')}」")
+
+    if not final_choice:
+        return jsonify({"success": False, "error": "政务选项异常"}), 400
+
+    notes, summary = heir_apply_choice(game_state, final_choice)
+    narration = lead
+    if notes:
+        narration += "（" + "，".join(notes) + "）"
+    game_state.add_memory(narration)
+    heir_log_push(hs, "regency_events", {
+        "period": heir_period_label(game_state),
+        "event_id": event.get("id"),
+        "title": event.get("category", "政务"),
+        "decided_by": "从谏" if accepted else "太子自决",
+        "choice": final_choice.get("text", ""),
+        "detail": narration,
+    })
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "accepted": accepted,
+        "rate": round(rate, 3),
+        "rate_breakdown": breakdown,
+        "choice_key": final_key,
+        "narration": narration,
+        "changes": notes,
+        "summary": summary,
+        "attributes": game_state.attributes,
+        **heir_panel_payload(game_state),
+    })
+
+
+@app.route('/api/heir/event', methods=['POST'])
+def heir_event_resolve():
+    """处置太子叛逆 / 危机 / 不孝事件。choice: 'A' / 'B'。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    choice_key = (data.get('choice') or '').strip().upper()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+
+    hs = heir_state(game_state)
+    event = hs.get("pending_heir_event")
+    if not isinstance(event, dict):
+        return jsonify({"success": False, "error": "东宫眼下并无待处置之事"}), 400
+    choices = event.get("choices") or {}
+    if choice_key not in choices:
+        return jsonify({"success": False, "error": "请择定一项处置"}), 400
+
+    choice = choices[choice_key]
+    hs["pending_heir_event"] = None
+    notes, summary = heir_apply_choice(game_state, choice)
+    narration = f"「{event.get('name', '东宫之事')}」你选择了：{choice.get('text', '')}。{choice.get('detail', '')}"
+    if notes:
+        narration += "（" + "，".join(notes) + "）"
+    game_state.add_memory(narration)
+    heir_log_push(hs, "heir_event_log", {
+        "period": heir_period_label(game_state),
+        "event_id": event.get("id"),
+        "kind": event.get("kind", ""),
+        "title": event.get("name", ""),
+        "decided_by": "你",
+        "choice": choice.get("text", ""),
+        "detail": narration,
+    })
+    if event.get("kind") == "defiance":
+        heir_log_push(hs, "defiance_log", {
+            "period": heir_period_label(game_state),
+            "stage": event.get("stage"),
+            "title": event.get("name", ""),
+            "choice": choice.get("text", ""),
+            "detail": narration,
+        })
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "narration": narration,
+        "changes": notes,
+        "summary": summary,
+        "attributes": game_state.attributes,
+        **heir_panel_payload(game_state),
+    })
+
+@app.route('/api/heir/incognito', methods=['POST'])
+def heir_incognito():
+    """陪太子微服私访。耗银 30 两 + 1 行动点，必定触发一条市井奇遇。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return jsonify({"success": False, "error": "储君之位空悬，无人可陪你出宫"}), 400
+    child = get_heir_child(game_state)
+    if not child or not child.get("alive", True):
+        return jsonify({"success": False, "error": "太子不在，无法出宫"}), 400
+    ensure_child_fields(child)
+    try:
+        age = float(child.get("age", 0) or 0)
+    except (TypeError, ValueError):
+        age = 0
+    if age < HEIR_REBELLION_MIN_AGE:
+        return jsonify({"success": False, "error": f"太子年方{int(age)}，尚不宜出宫涉险"}), 400
+    if game_state.silver < HEIR_INCOGNITO_COST:
+        return jsonify({"success": False, "error": f"银两不足，出宫打点需{HEIR_INCOGNITO_COST}两"}), 400
+    if game_state.remaining_actions < HEIR_INCOGNITO_ACTION:
+        return jsonify({"success": False, "error": "本旬行动点不足"}), 400
+
+    game_state.silver -= HEIR_INCOGNITO_COST
+    game_state.remaining_actions -= HEIR_INCOGNITO_ACTION
+
+    event = generate_incognito_adventure()
+    notes, summary = heir_apply_choice(game_state, event)
+    narration = (f"🏮 你与{hs.get('heir_name') or '太子'}换了便装出宫，遇上「{event.get('name')}」。"
+                 f"{event.get('description', '')}{event.get('result', '')}")
+    detail = f"出宫打点耗银{HEIR_INCOGNITO_COST}两"
+    if notes:
+        detail += "，" + "，".join(notes)
+    narration += f"（{detail}）"
+    game_state.add_memory(narration)
+    heir_log_push(hs, "heir_event_log", {
+        "period": heir_period_label(game_state),
+        "event_id": event.get("id"),
+        "kind": "incognito",
+        "title": event.get("name", ""),
+        "decided_by": "你",
+        "detail": narration,
+    })
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "event": event,
+        "narration": narration,
+        "changes": notes,
+        "summary": summary,
+        "silver": game_state.silver,
+        "attributes": game_state.attributes,
+        **heir_panel_payload(game_state),
+    })
+
+
+@app.route('/api/heir/consort', methods=['POST'])
+def heir_consort_api():
+    """东宫内宅操作。
+
+    action:
+        'select'  —— 择定太子妃（candidate 传姓名）
+        'resolve' —— 处置内宅事件（choice 传 'A' / 'B'）
+        'fill'    —— 依例添置侧室（count 可选，默认 1-2 人）
+    """
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    action = (data.get('action') or 'select').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+
+    hs = heir_state(game_state)
+    if not hs.get("heir_id"):
+        return jsonify({"success": False, "error": "储君之位空悬，东宫无内宅可言"}), 400
+    hc = heir_consorts_state(game_state)
+
+    # ---- 择定太子妃 ----
+    if action == 'select':
+        selection = hs.get("consort_selection")
+        if not isinstance(selection, dict):
+            return jsonify({"success": False, "error": "眼下并无待选名册"}), 400
+        if isinstance(hc.get("太子妃"), dict):
+            return jsonify({"success": False, "error": "太子妃已册，不可轻易更立"}), 400
+        cand_name = (data.get('candidate') or '').strip()
+        candidate = find_consort_candidate(cand_name)
+        if not candidate:
+            return jsonify({"success": False, "error": "名册上并无此人"}), 400
+
+        member = heir_consort_add(
+            game_state, "太子妃",
+            name=candidate.get("name"),
+            family=candidate.get("family", ""),
+            personality=candidate.get("personality", ""),
+            favor=70,
+            faction=candidate.get("faction", ""),
+            fun_tag=candidate.get("fun_tag", ""),
+            talent=candidate.get("talent"),
+            looks=candidate.get("looks"),
+            ruling_style=candidate.get("ruling_style"),
+        )
+        if not member:
+            return jsonify({"success": False, "error": "册立未成，内宅编制有异"}), 400
+
+        hs["consort_selection"] = None
+        hs["heir_consort"] = member.get("name")
+        # 太子妃出身定调治国倾向
+        style = candidate.get("ruling_style")
+        if style:
+            hs["heir_ruling_style"] = style
+        # 贤明与和睦起手加成
+        heir_clamp_merit(hs, int(candidate.get("style_bonus", 0) or 0))
+        heir_clamp_harmony(hs, 5)
+        # 朝堂派系好感联动
+        favor_map = normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None))
+        for faction, delta in (candidate.get("faction_bonus") or {}).items():
+            if faction in favor_map:
+                favor_map[faction] = max(0, min(100, int(favor_map[faction]) + int(delta)))
+        game_state.court_faction_favor = favor_map
+        # 首批侧室随册入宫
+        added = heir_consort_fill(game_state, count=random.randint(1, 3))
+
+        narration = (f"💐 你为{hs.get('heir_name') or '太子'}择定{member['name']}为太子妃"
+                     f"（{candidate.get('faction', '')}·{candidate.get('ruling_style', '')}）。"
+                     f"{candidate.get('flavor', '')}")
+        if added:
+            narration += "礼部随即依例添置内眷：" + "、".join(f"{m['name']}（{m['rank']}）" for m in added) + "。"
+        game_state.add_memory(narration)
+        heir_log_push(hs, "consort_events", {
+            "period": heir_period_label(game_state),
+            "title": "册立太子妃",
+            "choice": member["name"],
+            "detail": narration,
+        }, limit=10)
+        autosave_session(player_id)
+        return jsonify({
+            "success": True,
+            "narration": narration,
+            "consort": member,
+            "new_members": added,
+            "court_faction_favor": favor_map,
+            **heir_panel_payload(game_state),
+        })
+
+    # ---- 处置内宅事件 ----
+    if action == 'resolve':
+        event = hs.get("pending_consort_event")
+        if not isinstance(event, dict):
+            return jsonify({"success": False, "error": "内宅眼下并无待决之事"}), 400
+        options = event.get("options") or event.get("choices") or {}
+        choice_key = (data.get('choice') or '').strip().upper()
+        if choice_key not in options:
+            return jsonify({"success": False, "error": "请择定一项处置"}), 400
+        choice = options[choice_key]
+        hs["pending_consort_event"] = None
+        notes, summary = heir_apply_choice(game_state, choice)
+        # 部分趣味事件会带来新成员（如宫女晋为奉仪）
+        new_member = None
+        if choice.get("new_member") in HEIR_CONSORT_RANKS:
+            new_member = heir_consort_add(game_state, choice["new_member"])
+        narration = f"🏮 「{event.get('name', '内宅之事')}」你选择了：{choice.get('text', '')}。{choice.get('detail', '')}"
+        if new_member:
+            narration += f"（{new_member['name']}自此列入{new_member['rank']}）"
+        if notes:
+            narration += "（" + "，".join(notes) + "）"
+        game_state.add_memory(narration)
+        heir_log_push(hs, "consort_events", {
+            "period": heir_period_label(game_state),
+            "event_id": event.get("id"),
+            "title": event.get("name", ""),
+            "decided_by": "你",
+            "choice": choice.get("text", ""),
+            "detail": narration,
+        }, limit=10)
+        autosave_session(player_id)
+        return jsonify({
+            "success": True,
+            "narration": narration,
+            "changes": notes,
+            "summary": summary,
+            "new_member": new_member,
+            "attributes": game_state.attributes,
+            **heir_panel_payload(game_state),
+        })
+
+    # ---- 依例添置侧室 ----
+    if action == 'fill':
+        if not isinstance(hc.get("太子妃"), dict):
+            return jsonify({"success": False, "error": "太子妃未册，侧室不得先入东宫"}), 400
+        if heir_consort_total(game_state) >= HEIR_CONSORT_MAX_TOTAL:
+            return jsonify({"success": False, "error": f"东宫内宅已满{HEIR_CONSORT_MAX_TOTAL}人，不宜再添"}), 400
+        try:
+            count = max(1, min(3, int(data.get('count') or random.randint(1, 2))))
+        except (TypeError, ValueError):
+            count = 1
+        added = heir_consort_fill(game_state, count=count)
+        if not added:
+            return jsonify({"success": False, "error": "各位份均已满编，无从添置"}), 400
+        narration = "🎐 东宫依例添置内眷：" + "、".join(f"{m['name']}（{m['rank']}）" for m in added)
+        autosave_session(player_id)
+        return jsonify({
+            "success": True,
+            "narration": narration,
+            "new_members": added,
+            **heir_panel_payload(game_state),
+        })
+
+    return jsonify({"success": False, "error": "未知的内宅操作"}), 400
+
 
 @app.route('/api/honor', methods=['POST'])
 def grant_honor():
