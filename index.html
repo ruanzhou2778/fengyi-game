@@ -2871,6 +2871,7 @@ if(data.other_birth_msgs && data.other_birth_msgs.length>0){data.other_birth_msg
 if(data.prince_events && data.prince_events.length>0){data.prince_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'👑'),'prince');showToast(formatEventMsg(msg,'👑'));});}
 if(data.growth_events && data.growth_events.length>0){data.growth_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'🌱'),'prince');showToast(formatEventMsg(msg,'🌱'));});}
 if(data.chonghua_events && data.chonghua_events.length>0){data.chonghua_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'🏛️'),'prince');showToast(formatEventMsg(msg,'🏛️'));});}
+if(data.draft_events && data.draft_events.length>0){data.draft_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'📜'),'new-concubine');showToast(formatEventMsg(msg,'📜'));});}
 if(data.death_events && data.death_events.length>0){data.death_events.forEach(msg=>{addLogEntry(`🕯️ ${msg}`,'demotion');showToast('🕯️ 宫闱噩耗','error');});}
 if(data.intrigue_events && data.intrigue_events.length>0){data.intrigue_events.forEach(msg=>addLogEntry(msg,'intel'));}
 }
@@ -3543,6 +3544,7 @@ function openEmperorInteract() {
                 <button onclick="emperorInteract('recite_poem')" class="interact-btn" style="background:#e8e8f0;">📝 献诗</button>
                 <button onclick="emperorInteract('ask_reward')" class="interact-btn" style="background:#f0e0d8;">🎁 求赏赐</button>
                 <button onclick="emperorAdviseDraft()" class="interact-btn" style="background:#e6e8f0;">🌺 劝选秀</button>
+                ${((window._lastGameData||{}).draft_panel)?'<button onclick="openDraftPanel()" class="interact-btn" style="background:#f5efe0;">📋 采选名册</button>':''}
                 <button onclick="petitionRankAction('任命协理')" class="interact-btn" style="background:#efe6d8;">👑 任命协理</button>
             </div>
             <div id="emperorResultArea" class="interact-result-area"></div>
@@ -3647,15 +3649,67 @@ async function emperorAdviseDraft() {
         const narration = d.narration || '操作完成';
         showInteractFeedback(narration, '皇帝', d.effects);
         setInteractResult('emperorResultArea', narration);
-        if (d.new_concubine && d.new_concubine.names && d.new_concubine.names.length) {
-            const msg = `${d.new_concubine.names.join('、')} 入宫！`;
-            addLogEntry(formatEventMsg(msg, '🌺'), 'new-concubine');
-            showToast('🌺 新人入宫！');
+        if (d.draft_panel) {
+            window._lastGameData = window._lastGameData || {};
+            window._lastGameData.draft_panel = d.draft_panel;
+            showToast('📜 选秀已开启，名册已呈');
         } else {
             showToast('📜 皇帝暂缓选秀');
         }
         const sr = await myFetch(`${API_BASE}/api/state/${playerId}`);
         updateUI(await sr.json());
+    } catch (e) { showToast('❌ 操作失败'); }
+}
+
+function openDraftPanel() {
+    if (!playerId) return;
+    const dp = (window._lastGameData||{}).draft_panel;
+    if (!dp) { showToast('📜 当前没有进行中的选秀'); return; }
+    const endorseTag = e => e==='太后' ? '<span style="background:#e8e0d8;color:#7a5a4a;padding:0 5px;border-radius:6px;">👵太后属意</span>'
+                        : e==='皇后' ? '<span style="background:#f0e0e8;color:#8a3a5a;padding:0 5px;border-radius:6px;">👑皇后属意</span>' : '';
+    const rows = dp.candidates.map(c=>{
+        const tags = c.endorsed_by.map(endorseTag).join(' ') + (c.influenced?' <span style="background:#e0e8f0;color:#3a5a8a;padding:0 5px;border-radius:6px;">🤝已打点</span>':'');
+        let ops = '';
+        if (dp.can_influence && !c.influenced) {
+            ops += `<button onclick="draftAct('influence','${c.name}')" class="interact-btn" style="background:#e0e8f0;padding:2px 6px;">🤝 打点(${dp.can_influence_cost}两)</button>`;
+        }
+        if (dp.queen_endorse_pending) {
+            ops += ` <button onclick="draftAct('endorse','${c.name.replace(/'/g,"\\'")}')" class="interact-btn" style="background:#f0e0e8;padding:2px 6px;">👑 举荐</button>`;
+        }
+        return `<div style="border:1px solid var(--border-light);border-radius:8px;padding:5px;margin-bottom:4px;background:var(--bg-card);">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-weight:600;">${c.icon} ${c.name} <span style="color:var(--text-light);">(${c.rank})</span></span>
+                <span>${tags}</span>
+            </div>
+            <div style="font-size:8px;color:var(--text-mid);margin-top:2px;">🏠 ${c.family_background}　容貌${c.attributes['容貌']}·才情${c.attributes['才情']}·心计${c.attributes['心计']}·健康${c.attributes['健康']}</div>
+            ${ops?`<div style="margin-top:3px;display:flex;gap:4px;">${ops}</div>`:''}
+        </div>`;
+    }).join('');
+    const hint = dp.is_player_queen
+        ? (dp.queen_endorse_pending?'👑 你执掌凤印：请举荐一名属意秀女（每届一次）':'👑 你已完成本届皇后举荐')
+        : '💡 三宫合议，下一转旬放榜；贵人及以上可打点内务府暗抬一人';
+    openModal(`📋 ${dp.scale}采选名册`, `
+        <div style="font-size:9px;color:var(--text-mid);">
+            ${rows}
+            <div style="font-size:7px;color:var(--text-light);text-align:center;margin-top:4px;">${hint}</div>
+        </div>`, '关闭', null, true);
+}
+
+async function draftAct(action, candidate) {
+    if (!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/draft/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId, action: action, candidate: candidate })
+        });
+        const d = await r.json();
+        if (d.error) { showToast('❌ '+d.error); return; }
+        showToast('✅ '+(d.narration||'操作完成').slice(0,40));
+        if (d.draft_panel !== undefined && window._lastGameData) window._lastGameData.draft_panel = d.draft_panel;
+        const sr = await myFetch(`${API_BASE}/api/state/${playerId}`);
+        updateUI(await sr.json());
+        if ((window._lastGameData||{}).draft_panel) openDraftPanel();
     } catch (e) { showToast('❌ 操作失败'); }
 }
 

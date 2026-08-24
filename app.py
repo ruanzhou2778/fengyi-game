@@ -5379,6 +5379,251 @@ def _current_period_index(game_state):
     """当前旬序：0=上旬 1=中旬 2=下旬。"""
     return 0 if game_state.day <= 10 else (1 if game_state.day <= 20 else 2)
 
+# ============================================================
+#  选秀系统：皇帝/太后/皇后三方共决 + 太后皇后举荐
+# ============================================================
+
+DRAFT_SCALES = {
+    "大选": {"candidates": 6, "admits": (3, 4)},
+    "小选": {"candidates": 3, "admits": (1, 2)},
+    "劝选": {"candidates": 4, "admits": (2, 3)},
+}
+DRAFT_INFLUENCE_COST = 30   # 打点内务府花费
+DRAFT_ENDORSE_BONUS = 12    # 太后/皇后举荐加成
+DRAFT_INFLUENCE_BONUS = 10  # 玩家打点加成
+
+
+def _draft_period_key(game_state):
+    return f"{game_state.year}-{game_state.month}-{_current_period_index(game_state)}"
+
+
+def _draft_emperor_factors(game_state):
+    emp = game_state.emperor or {}
+    factors = (emp.get("favor_factors") or {}).get(emp.get("personality", "明君"))
+    if not isinstance(factors, dict) or not factors:
+        factors = {"容貌": 0.3, "才情": 0.4, "心计": 0.3}
+    return factors
+
+
+def _draft_score_emperor(game_state, cand):
+    factors = _draft_emperor_factors(game_state)
+    total_w = sum(factors.values()) or 1.0
+    return sum(float(cand.get("attributes", {}).get(k, 50)) * w for k, w in factors.items()) / total_w
+
+
+def _draft_family_score(cand):
+    meta = cand.get("family_meta") or {}
+    try:
+        return float(meta.get("score", 50))
+    except (TypeError, ValueError):
+        return 50.0
+
+
+def _draft_score_dowager(cand):
+    a = cand.get("attributes", {})
+    # 太后重门第清白与品行，厌心机深重者
+    return (_draft_family_score(cand) * 0.45 + (100 - a.get("心计", 50)) * 0.25
+            + a.get("健康", 60) * 0.15 + a.get("才情", 50) * 0.15)
+
+
+def _draft_score_queen(cand):
+    a = cand.get("attributes", {})
+    # 皇后重后宫平衡：容貌过于出挑者视为威胁
+    return ((100 - abs(a.get("容貌", 60) - 65)) * 0.40 + a.get("才情", 50) * 0.25
+            + a.get("心计", 50) * 0.20 + a.get("健康", 60) * 0.15)
+
+
+def start_draft(game_state, scale="大选"):
+    """开启一届选秀：生成候选名册并公示太后/皇后举荐。返回消息列表。"""
+    msgs = []
+    cfg = DRAFT_SCALES.get(scale, DRAFT_SCALES["大选"])
+    candidates = []
+    for _ in range(cfg["candidates"]):
+        npc = generate_npc(is_queen=False)
+        while any(c["name"] == npc["name"] for c in candidates) or npc["name"] in game_state.npcs:
+            npc = generate_npc(is_queen=False)
+        npc["endorsed_by"] = []
+        npc["influenced"] = False
+        candidates.append(npc)
+
+    # 太后举荐（始终在）：偏好门第高、心计浅的秀女
+    dowager_pick = max(candidates, key=_draft_score_dowager)
+    dowager_pick.setdefault("endorsed_by", []).append("太后")
+
+    # 皇后举荐：皇后 NPC 在位时自动行使；玩家为皇后时留待玩家亲裁
+    queen_name = get_queen_name(game_state, include_player=True)
+    player_is_queen = getattr(game_state.rank, "name", "") == "皇后"
+    if player_is_queen:
+        queen_endorse_pending = True
+    elif queen_name:
+        queen_pick = max((c for c in candidates if "太后" not in c["endorsed_by"]),
+                         key=_draft_score_queen, default=None)
+        if queen_pick is None:
+            queen_pick = random.choice(candidates)
+        queen_pick.setdefault("endorsed_by", []).append("皇后")
+        queen_endorse_pending = False
+    else:
+        queen_endorse_pending = False  # 中宫虚悬，皇后票缺位
+
+    game_state.draft = {
+        "active": True,
+        "scale": scale,
+        "started_key": _draft_period_key(game_state),
+        "candidates": candidates,
+        "player_influenced": None,
+        "queen_endorse_pending": queen_endorse_pending,
+    }
+    names_desc = "、".join(f"{c['icon']}{c['name']}（{c['rank']}，{c.get('family_background', '出身不详')}）" for c in candidates)
+    msgs.append(f"📜 {scale}启程：礼部呈上采选名册——{names_desc}。")
+    endorsed_t = [c for c in candidates if "太后" in c["endorsed_by"]]
+    if endorsed_t:
+        msgs.append(f"👵 太后属意 {'、'.join(c['name'] for c in endorsed_t)}，谓其「门第清白，性子端方」。")
+    if player_is_queen:
+        msgs.append("👑 中宫之位在你，皇后属意之人尚待你亲裁（可在选秀名册中举荐）。")
+    elif any("皇后" in c["endorsed_by"] for c in candidates):
+        eq = [c for c in candidates if "皇后" in c["endorsed_by"]]
+        msgs.append(f"👑 皇后属意 {'、'.join(c['name'] for c in eq)}。")
+    game_state.add_memory(f"{scale}开选，共{len(candidates)}名秀女入册")
+    return msgs
+
+def draft_panel_payload(game_state):
+    """选秀名册面板数据（无进行中的选秀时为 None）。"""
+    d = getattr(game_state, "draft", None)
+    if not isinstance(d, dict) or not d.get("active"):
+        return None
+    player_is_queen = getattr(game_state.rank, "name", "") == "皇后"
+    cands = []
+    for c in d.get("candidates", []):
+        cands.append({
+            "name": c["name"], "icon": c.get("icon", "🌸"), "rank": c.get("rank", "秀女"),
+            "family_background": c.get("family_background", "出身不详"),
+            "attributes": {k: c.get("attributes", {}).get(k, 0) for k in ("容貌", "才情", "心计", "健康")},
+            "endorsed_by": c.get("endorsed_by", []),
+            "influenced": bool(c.get("influenced")),
+        })
+    can_influence = (d.get("player_influenced") is None
+                     and RANK_LEVELS.get(game_state.rank.name, 0) >= RANK_LEVELS.get("贵人", 6))
+    return {
+        "scale": d.get("scale", "大选"),
+        "candidates": cands,
+        "player_influenced": d.get("player_influenced"),
+        "queen_endorse_pending": bool(d.get("queen_endorse_pending")) and player_is_queen,
+        "can_influence": can_influence,
+        "can_influence_cost": DRAFT_INFLUENCE_COST,
+        "is_player_queen": player_is_queen,
+    }
+
+
+def process_draft(game_state):
+    """转旬结算选秀：跨旬后由皇帝/太后/皇后三方合议放榜，入选者入宫。
+
+    返回 (消息列表, new_concubine 或 None)。
+    """
+    d = getattr(game_state, "draft", None)
+    if not isinstance(d, dict) or not d.get("active"):
+        return [], None
+    if d.get("started_key") == _draft_period_key(game_state):
+        return [], None  # 开选当旬只公示，下一旬放榜
+
+    candidates = d.get("candidates", [])
+    if not candidates:
+        game_state.draft = None
+        return [], None
+
+    has_queen = get_queen_name(game_state, include_player=True) is not None
+    admits_lo, admits_hi = DRAFT_SCALES.get(d.get("scale", "大选"), DRAFT_SCALES["大选"])["admits"]
+
+    def total_score(c):
+        s_emp = _draft_score_emperor(game_state, c)
+        s_dow = _draft_score_dowager(c)
+        bonus = DRAFT_ENDORSE_BONUS * len([e for e in c.get("endorsed_by", []) if e in ("太后", "皇后")])
+        if c.get("influenced"):
+            bonus += DRAFT_INFLUENCE_BONUS
+        if has_queen:
+            return 0.45 * s_emp + 0.30 * s_dow + 0.25 * _draft_score_queen(c) + bonus
+        # 中宫虚悬：皇帝份额扩大
+        return 0.60 * s_emp + 0.40 * s_dow + bonus
+
+    ranked = sorted(candidates, key=total_score, reverse=True)
+    admit_n = min(random.randint(admits_lo, admits_hi), len(ranked))
+    admitted = ranked[:admit_n]
+
+    new_names = []
+    for npc in admitted:
+        npc.pop("endorsed_by", None)
+        npc.pop("influenced", None)
+        game_state.npcs[npc["name"]] = npc
+        game_state.relationships[npc["name"]] = {"好感": random.randint(-10, 30), "印象": "陌生", "互动次数": 0}
+        new_names.append(f"{npc['icon']}{npc['name']}（{npc['rank']}）")
+    new_concubine = {"names": new_names, "is_daxuan": d.get("scale") == "大选"} if new_names else None
+
+    joiner = "、皇后" if has_queen else ""
+    if new_names:
+        msgs = [f"🎊 {d.get('scale', '大选')}放榜：皇帝、太后{joiner}三宫合议，{'、'.join(new_names)} 入宫！"]
+        rejected = [c["name"] for c in ranked[admit_n:]]
+        if rejected:
+            msgs.append(f"🍂 落选归家：{'、'.join(rejected)}。")
+    else:
+        msgs = [f"📜 {d.get('scale', '大选')}放榜：诸秀皆不入三宫之眼，此届空手而归。"]
+    game_state.add_memory(f"{d.get('scale', '大选')}放榜，{'、'.join(n.split('（')[0] for n in new_names) or '无人'}入宫")
+    game_state.draft = None
+    return msgs, new_concubine
+
+
+@app.route('/api/draft/action', methods=['POST'])
+def draft_action():
+    """选秀期间的玩家动作：influence=打点内务府抬一人；endorse=玩家以皇后身份举荐。"""
+    data = request.get_json()
+    player_id = data.get('player_id')
+    action = data.get('action')
+    target = data.get('candidate')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    d = getattr(game_state, "draft", None)
+    if not isinstance(d, dict) or not d.get("active"):
+        return jsonify({"error": "当前没有进行中的选秀"}), 400
+    cand = next((c for c in d.get("candidates", []) if c.get("name") == target), None)
+    if cand is None:
+        return jsonify({"error": "名册上查无此人"}), 400
+
+    if action == 'endorse':
+        if getattr(game_state.rank, "name", "") != "皇后":
+            return jsonify({"error": "唯有中宫主位可行使皇后举荐之权"}), 403
+        if not d.get("queen_endorse_pending"):
+            return jsonify({"error": "本届选秀你已行过皇后举荐之权"}), 400
+        for c in d["candidates"]:
+            c["endorsed_by"] = [e for e in c.get("endorsed_by", []) if e != "皇后"]
+        cand.setdefault("endorsed_by", []).append("皇后")
+        d["queen_endorse_pending"] = False
+        game_state.add_memory(f"选秀举荐：你以皇后之名举荐了{target}")
+        return jsonify({"success": True, "narration": f"你以凤印之名，将「皇后属意」四字落在{target}名下。",
+                        "draft_panel": draft_panel_payload(game_state)})
+
+    if action == 'influence':
+        ok, err = guard_action(game_state)
+        if not ok:
+            return err
+        if d.get("player_influenced") is not None:
+            return jsonify({"error": "本届选秀已打点过，不宜再动"}), 400
+        if game_state.silver < DRAFT_INFLUENCE_COST:
+            return jsonify({"error": f"银两不足，打点需{DRAFT_INFLUENCE_COST}两"}), 400
+        game_state.silver -= DRAFT_INFLUENCE_COST
+        cand["influenced"] = True
+        d["player_influenced"] = target
+        game_state.add_memory(f"选秀打点：花{DRAFT_INFLUENCE_COST}两暗中照拂{target}")
+        return jsonify({"success": True,
+                        "narration": f"你托内务府的人给{target}递了一碗水，采选的秤，悄悄偏了半分。（-{DRAFT_INFLUENCE_COST}两）",
+                        "silver": game_state.silver,
+                        "remaining_actions": game_state.remaining_actions,
+                        "max_actions": game_state.max_actions,
+                        "draft_panel": draft_panel_payload(game_state)})
+
+    return jsonify({"error": "无效行为"}), 400
+
+
+
+
 
 @app.route('/api/emperor/advise_draft', methods=['POST'])
 def emperor_advise_draft():
@@ -5405,29 +5650,22 @@ def emperor_advise_draft():
     chance = min(chance, 0.9)
     changes = {}
     new_concubine = None
+    draft_panel = None
     if random.random() < chance:
-        count = random.randint(2, 4)
-        new_names = []
-        for _ in range(count):
-            new_npc = generate_npc(is_queen=False)
-            while new_npc["name"] in game_state.npcs:
-                new_npc = generate_npc(is_queen=False)
-            game_state.npcs[new_npc["name"]] = new_npc
-            game_state.relationships[new_npc["name"]] = {"好感": random.randint(-10, 30), "印象": "陌生", "互动次数": 0}
-            new_names.append(f"{new_npc['icon']}{new_npc['name']}（{new_npc['rank']}）")
-        new_concubine = {"names": new_names, "is_daxuan": False}
         prestige_gain = random.randint(3, 6)
         favor_gain = random.randint(3, 7)
         max_prestige = game_state.get_attr_max("威望")
         game_state.attributes["威望"] = min(max_prestige, prestige + prestige_gain)
         changes["威望"] = prestige_gain
         game_state.relationships["皇帝"]["好感"] = min(100, favor + favor_gain)
+        draft_msgs = start_draft(game_state, "劝选")
+        draft_panel = draft_panel_payload(game_state)
         narration = (
             f"你于御前进言，请皇帝广纳淑女、充盈后宫，以固国本。皇帝赞你贤德无妒，"
-            f"当即命礼部备选，{len(new_names)}位新人不日入宫。你的威望+{prestige_gain}，"
-            f"皇帝好感+{favor_gain}。"
+            f"当即准奏，命礼部备选。你的威望+{prestige_gain}，皇帝好感+{favor_gain}。"
         )
-        game_state.add_memory(f"劝皇帝选秀，{len(new_names)}位新人入宫（贤德无妒，威望+{prestige_gain}）")
+        narration += "\n" + "\n".join(draft_msgs)
+        game_state.add_memory(f"劝皇帝选秀获准（贤德无妒，威望+{prestige_gain}）")
         game_state.add_attr_change(changes, "劝皇帝选秀")
     else:
         favor_gain = random.randint(1, 3)
@@ -5439,6 +5677,7 @@ def emperor_advise_draft():
         "narration": narration,
         "effects": changes,
         "new_concubine": new_concubine,
+        "draft_panel": draft_panel,
         "attributes": game_state.attributes,
         "remaining_actions": game_state.remaining_actions,
         "max_actions": game_state.max_actions,
@@ -5972,34 +6211,19 @@ def next_period():
         if other_demotions:
             game_state.add_memory(f"妃嫔降位：{'; '.join(other_demotions)}")
 
-    # ---- 纳新人 ----
+    # ---- 选秀：开选与放榜（三方共决流程见 start_draft / process_draft） ----
     new_concubine = None
+    draft_events = []
     if game_state.year % 3 == 0 and game_state.month == 1 and game_state.day <= 10:
-        if random.random() < 0.8:
-            count = random.randint(3, 5)
-            new_names = []
-            for _ in range(count):
-                new_npc = generate_npc(is_queen=False)
-                while new_npc["name"] in game_state.npcs:
-                    new_npc = generate_npc(is_queen=False)
-                game_state.npcs[new_npc["name"]] = new_npc
-                game_state.relationships[new_npc["name"]] = {"好感": random.randint(-10, 30), "印象": "陌生", "互动次数": 0}
-                new_names.append(f"{new_npc['icon']}{new_npc['name']}（{new_npc['rank']}）")
-            new_concubine = {"names": new_names, "is_daxuan": True}
-            game_state.add_memory(f"三年一大选，{len(new_names)}位新人入宫")
+        if random.random() < 0.8 and not getattr(game_state, "draft", None):
+            draft_events.extend(start_draft(game_state, "大选"))
     elif game_state.month % 6 == 0 and game_state.day <= 10 and random.random() < 0.3:
-        count = random.randint(1, 2)
-        new_names = []
-        for _ in range(count):
-            new_npc = generate_npc(is_queen=False)
-            while new_npc["name"] in game_state.npcs:
-                new_npc = generate_npc(is_queen=False)
-            game_state.npcs[new_npc["name"]] = new_npc
-            game_state.relationships[new_npc["name"]] = {"好感": random.randint(-10, 30), "印象": "陌生", "互动次数": 0}
-            new_names.append(f"{new_npc['icon']}{new_npc['name']}（{new_npc['rank']}）")
-        if new_names:
-            new_concubine = {"names": new_names, "is_daxuan": False}
-            game_state.add_memory(f"{len(new_names)}位新人入宫")
+        if not getattr(game_state, "draft", None):
+            draft_events.extend(start_draft(game_state, "小选"))
+    _draft_msgs, _draft_new = process_draft(game_state)
+    draft_events.extend(_draft_msgs)
+    new_concubine = _draft_new
+
 
     # ===== 皇帝健康衰退与驾崩/继承判定 =====
     emperor = game_state.emperor or {}
@@ -6172,6 +6396,8 @@ def next_period():
         "prince_events": prince_events,
         "growth_events": growth_events,
         "chonghua_events": chonghua_events,
+        "draft_events": draft_events,
+        "draft_panel": draft_panel_payload(game_state),
         "chonghua": chonghua_state(game_state),
         "death_events": death_events,
         "intrigue": summarize_intrigue(game_state),
@@ -6633,7 +6859,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state)})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state)})
     except Exception as e:
         import traceback
         traceback.print_exc()

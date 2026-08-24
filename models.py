@@ -381,6 +381,8 @@ class GameState:
         self.honorary_title = None
         self.child_uid_seq = 1
         self.heir_status = default_heir_status()
+        # 选秀系统：None 或 {"active","scale","started_key","candidates","player_influenced"}
+        self.draft = None
         # 东宫内宅（太子妃 + 五级侧室）
         self.heir_consorts = default_heir_consorts()
         # 重华宫与陷害系统新属性
@@ -594,6 +596,7 @@ class GameState:
             "six_palace_assistant": getattr(self, "six_palace_assistant", None),
             "child_uid_seq": getattr(self, "child_uid_seq", 1),
             "heir_status": normalize_heir_status(getattr(self, "heir_status", None)),
+            "draft": getattr(self, "draft", None),
             "heir_consorts": normalize_heir_consorts(getattr(self, "heir_consorts", None)),
             "chonghua": getattr(self, "chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
@@ -713,6 +716,8 @@ class GameState:
             except (TypeError, ValueError):
                 game_state.child_uid_seq = 1
             heir_status = data.get("heir_status") if isinstance(data.get("heir_status"), dict) else default_heir_status()
+            draft = data.get("draft")
+            game_state.draft = draft if isinstance(draft, dict) else None
             game_state.heir_status = normalize_heir_status(heir_status)
             game_state.heir_consorts = normalize_heir_consorts(data.get("heir_consorts"))
             game_state.created_at = data.get("created_at", datetime.now().isoformat())
