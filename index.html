@@ -4954,7 +4954,7 @@ async function renderChonghuaInline(){
 
         if(statsEl){
             if(!ch.founded){
-                statsEl.innerHTML = `❌ 尚未开设 · 须皇后或协理六宫 · 威望≥${info.min_prestige||0} · ${info.found_cost||0}两`
+                statsEl.innerHTML = `❌ 尚未开设 · 宫中须有皇后方可开设 · 威望≥${info.min_prestige||0} · ${info.found_cost||0}两`
                     + (perm === 'full' ? '' : `<br><span style="color:#8a6a3a;">你现为${escapeHtmlText(info.rank_name||'')}，无权开设，可待晋位或受命协理六宫</span>`);
             }else{
                 const permLabel = perm === 'full' ? '👑 统管全宫'

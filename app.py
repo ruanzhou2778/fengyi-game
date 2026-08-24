@@ -9242,7 +9242,7 @@ def chonghua_period_tick(game_state):
             msgs.append(msg)
             chonghua_add_log(game_state, ch, f'{name}学成出馆')
 
-    # 2) 自动收容：年幼皇嗣（≤CHONGHUA_AUTO_ADMIT_AGE）且无监护人时入馆
+    # 2) 自动收容：嫔位以下且无监护人的年幼皇嗣（≤CHONGHUA_AUTO_ADMIT_AGE）入馆
     capacity = chonghua_capacity(ch)
     inside = sum(1 for _o, _t, _i, c in entries if chonghua_is_inside(c))
     for owner, _otype, _idx, c in entries:
@@ -9254,10 +9254,22 @@ def chonghua_period_tick(game_state):
             age = float(c.get('age', 0) or 0)
         except (TypeError, ValueError):
             age = 0
-        if age <= CHONGHUA_AUTO_ADMIT_AGE:
-            chonghua_admit_child(game_state, ch, c, '自动入馆')
-            msgs.append(f'🏛️ {c.get("name") or "皇嗣"}年幼无依，已入重华宫共育')
-            inside += 1
+        if age > CHONGHUA_AUTO_ADMIT_AGE:
+            continue
+        # 仅嫔位以下生母所出才自动送入
+        mother_name = c.get('birth_mother') or owner
+        mother_rank = ''
+        if mother_name == game_state.name:
+            mother_rank = chonghua_rank_name(game_state)
+        else:
+            npc = (game_state.npcs or {}).get(mother_name)
+            if isinstance(npc, dict):
+                mother_rank = normalize_rank_name(npc.get('rank', ''))
+        if RANK_LEVELS.get(mother_rank, 99) >= RANK_LEVELS.get('嫔', 0):
+            continue
+        chonghua_admit_child(game_state, ch, c, '自动入馆')
+        msgs.append(f'🏛️ {c.get("name") or "皇嗣"}生母位卑，已入重华宫共育')
+        inside += 1
 
     # 3) 用度支给：不足则欠饷，连欠三旬有皇嗣被生母领回
     due = inside * CHONGHUA_UPKEEP_PER_CHILD
@@ -9292,12 +9304,22 @@ def chonghua_period_tick(game_state):
     else:
         ch['arrears'] = 0
 
-    # 4) 在馆教养收益：等级越高，才情/机敏长进越快
+    # 4) 在馆教养收益 & 五岁以上自动开蒙
     level = max(1, min(CHONGHUA_MAX_LEVEL, int(ch.get('level', 1) or 1)))
     if not ch.get('arrears'):
         for _owner, _otype, _idx, c in entries:
             if not chonghua_is_inside(c):
                 continue
+            try:
+                age = float(c.get('age', 0) or 0)
+            except (TypeError, ValueError):
+                age = 0
+            # 五岁以上自动安排开蒙（tutor_level 至少为1）
+            if age >= 5 and int(c.get('tutor_level', 0) or 0) < 1:
+                c['tutor_level'] = 1
+                name = c.get('name') or '皇嗣'
+                msgs.append(f'📖 {name}年满五岁，已安排开蒙授业')
+                chonghua_add_log(game_state, ch, f'{name}开蒙')
             c['talent'] = min(100, int(c.get('talent', 50) or 50) + random.randint(0, level))
             c['wit'] = min(100, int(c.get('wit', 40) or 40) + random.randint(0, max(1, level - 1)))
             c['health'] = min(100, int(c.get('health', 70) or 70) + random.randint(0, 1))
@@ -9478,6 +9500,10 @@ def chonghua_action():
     if action == 'found':
         if ch.get('founded'):
             return jsonify({'success': False, 'error': '重华宫已开设'}), 400
+        # 只要宫中有皇后即可开设（不要求主控本人是皇后），仍需协理权限或皇后身份主持
+        queen_name = get_queen_name(game_state, include_player=True)
+        if not queen_name:
+            return jsonify({'success': False, 'error': '宫中尚无皇后，无法开设重华宫'}), 400
         if not can_manage_all:
             return jsonify({'success': False, 'error': '重华宫为六宫公器，须皇后或协理六宫者方可开设'}), 403
         if game_state.attributes.get('威望', 0) < CHONGHUA_MIN_PRESTIGE:
