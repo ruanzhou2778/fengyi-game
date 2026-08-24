@@ -993,6 +993,16 @@
                         <div id="princessList" style="display:flex;flex-direction:column;gap:3px;">加载中…</div>
                     </div>
                 </div>
+                <div class="stat-block">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="block-title">🐉 皇 子 开 府 与 择 妃</span>
+                        <button class="config-toggle-btn" id="princeToggleBtn" style="margin-top:0;" onclick="princeToggle()">收起</button>
+                    </div>
+                    <div id="princePanel" style="display:block;margin-top:2px;padding-top:2px;border-top:1px solid var(--border-light);font-size:8px;color:var(--text-mid);">
+                        <div id="princeFactionBar" style="font-size:7px;color:var(--text-light);margin-bottom:3px;line-height:1.5;"></div>
+                        <div id="princeList" style="display:flex;flex-direction:column;gap:3px;">加载中…</div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="page" id="pageConflict">
@@ -1980,12 +1990,50 @@ function openInventory() {
     const counts = {};
     inv.forEach(item => { counts[item] = (counts[item] || 0) + 1; });
     const html = Object.entries(counts).map(([name, count]) => `
-        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border-light);">
-            <span style="font-weight:500;color:var(--text-dark);">💎 ${name}</span>
-            <span style="color:var(--text-mid);">x${count}</span>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border-light);">
+            <span style="font-weight:500;color:var(--text-dark);">💎 ${name} <span style="color:var(--text-light);font-size:8px;">x${count}</span></span>
+            <button onclick="sellItem('${name.replace(/'/g, "\\'")}', ${count})" style="padding:2px 6px;border:1px solid #d48c7a;border-radius:3px;background:transparent;color:#8a3a2a;font-size:8px;cursor:pointer;font-family:inherit;">变卖</button>
         </div>
     `).join('');
     openModal('🎒 物品背包', `<div style="font-size:10px;max-height:60vh;overflow-y:auto;padding:4px;">${html}</div>`, '关闭', null, true);
+}
+
+async function sellItem(itemName, maxCount) {
+    let count = 1;
+    if (maxCount > 1) {
+        const input = prompt(`请输入要变卖「${itemName}」的数量（最多${maxCount}件）：`, '1');
+        if (input === null) return;
+        count = parseInt(input, 10);
+        if (!count || count < 1 || count > maxCount) {
+            showToast('❌ 数量无效');
+            return;
+        }
+    } else {
+        if (!confirm(`确定要变卖「${itemName}」吗？`)) return;
+    }
+    try {
+        const r = await myFetch(`${API_BASE}/api/inventory/sell`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId, item_name: itemName, count: count })
+        });
+        const d = await r.json();
+        if (d.success) {
+            showToast('✅ ' + d.message);
+            // 更新本地状态并刷新背包
+            if (window._lastGameData) {
+                window._lastGameData.inventory = d.inventory;
+                window._lastGameData.silver = d.silver;
+            }
+            const silverEl = document.getElementById('sSilver');
+            if (silverEl) silverEl.textContent = d.silver;
+            openInventory();
+        } else {
+            showToast('❌ ' + (d.error || '变卖失败'));
+        }
+    } catch (e) {
+        showToast('❌ 变卖请求失败：' + e.message);
+    }
 }
 
 // ============================================================
@@ -5295,6 +5343,171 @@ function princessMarry(uid, mode){
     princessApi('marry', {child_uid: uid, mode: mode});
 }
 function princessMansion(uid){ princessApi('mansion', {child_uid: uid, op:'upgrade'}); }
+
+// ============================================================
+//  皇子择妃面板
+// ============================================================
+let princeVisible = true;
+let princeLoading = false;
+let princeLastData = null;
+
+function princeToggle(){
+    const p = document.getElementById('princePanel');
+    const btn = document.getElementById('princeToggleBtn');
+    if(!p) return;
+    princeVisible = !princeVisible;
+    p.style.display = princeVisible ? 'block' : 'none';
+    if(btn) btn.textContent = princeVisible ? '收起' : '展开';
+    if(princeVisible) renderPrinceInline();
+}
+
+async function renderPrinceInline(){
+    if(princeLoading) return;
+    if(!playerId){
+        const el = document.getElementById('princeList');
+        if(el) el.innerHTML = '<span style="color:var(--text-light);font-size:7px;">请先开始游戏</span>';
+        return;
+    }
+    const listEl = document.getElementById('princeList');
+    const barEl = document.getElementById('princeFactionBar');
+    if(!listEl) return;
+    princeLoading = true;
+    try{
+        const r = await myFetch(`${API_BASE}/api/prince/list?player_id=${playerId}`, {skipLoading:true});
+        const d = await parseApiResponse(r, {allowError:true});
+        if(d.error){ listEl.innerHTML = `<span style="color:#8a3a2a;">❌ ${escapeHtmlText(d.error)}</span>`; return; }
+        princeLastData = d;
+        if(barEl){
+            const favor = d.court_faction_favor || {};
+            const parts = Object.keys(favor).map(k => {
+                const c = FACTION_COLOR[k] || 'var(--text-mid)';
+                return `<span style="color:${c};">${k} ${favor[k]}</span>`;
+            });
+            barEl.innerHTML = '⚖️ 朝堂势力：' + (parts.length ? parts.join(' · ') : '—');
+        }
+        const princes = d.princes || [];
+        if(princes.length === 0){
+            listEl.innerHTML = '<span style="color:var(--text-light);font-size:7px;">暂无已成年皇子</span>';
+            return;
+        }
+        listEl.innerHTML = princes.map(p => princeCardHtml(p, d)).join('');
+    }catch(e){
+        console.error(e);
+        if(listEl) listEl.innerHTML = '<span style="color:#8a3a2a;">❌ 加载失败</span>';
+    }finally{
+        princeLoading = false;
+    }
+}
+
+function princeCardHtml(p, meta){
+    const status = p.marriage_status || '未议';
+    const motherLine = p.mother ? `<span style="font-size:6px;color:var(--text-light);"> · 母${escapeHtmlText(p.mother)}${p.is_own?'':'（他抚）'}</span>` : '';
+    let inner = '';
+    if(status === '已婚'){
+        inner = princeMarriedHtml(p);
+    }else{
+        inner = princeMarriageHtml(p, meta);
+    }
+    return `<div style="background:var(--bg-card);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:5px 6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
+            <span style="font-size:9px;color:var(--text-dark);font-weight:600;">🐉 ${escapeHtmlText(p.title||'')} ${escapeHtmlText(p.name||'皇子')} <span style="font-size:7px;color:var(--text-light);">${p.age}岁</span>${motherLine}</span>
+            <span style="font-size:7px;color:var(--gold-dark);">${status}</span>
+        </div>
+        ${inner}
+    </div>`;
+}
+
+function princeMarriageHtml(p, meta){
+    const uid = p.uid;
+    const suitors = p.suitors || [];
+    let html = '';
+    if(p.marriage_status === '已定' && p.consort){
+        const c = p.consort || {};
+        html += `<div style="font-size:8px;color:var(--text-mid);margin-bottom:3px;">已定正妃：<strong>${escapeHtmlText(c.name||'')}</strong>（${escapeHtmlText(c.faction||'')}·${escapeHtmlText(c.father_title||'')}之女）</div>`;
+        html += `<div style="display:flex;gap:3px;flex-wrap:wrap;">
+            <button class="chonghua-btn" onclick="princeMarry('${uid}')">🎊 举行大婚</button>
+        </div>`;
+        return html;
+    }
+    if(suitors.length === 0){
+        html += `<button class="chonghua-btn" onclick="princeSuitors('${uid}')">💐 相看皇子妃</button>`;
+    }else{
+        html += `<div style="display:flex;flex-direction:column;gap:2px;margin-bottom:2px;">`;
+        html += suitors.map(s => princeSuitorRowHtml(uid, s)).join('');
+        html += `</div>`;
+        html += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+            <button class="chonghua-btn" onclick="princeSuitors('${uid}', true)">🔄 换一批</button>
+        </div>`;
+    }
+    return html;
+}
+
+function princeSuitorRowHtml(uid, s){
+    const fc = FACTION_COLOR[s.faction] || 'var(--text-mid)';
+    let hidden = '';
+    if(s.inspected){
+        const tags = (s.hidden_tag_descs || []).map(t => `<span style="color:#8a6a3a;">${escapeHtmlText(t)}</span>`).join(' · ');
+        hidden = `<div style="font-size:6px;color:var(--text-mid);margin-top:1px;">野心${s.ambition??'?'} · ${tags || '无特殊隐情'}</div>`;
+    }else{
+        hidden = `<div style="font-size:6px;color:var(--text-light);margin-top:1px;">野心/隐情未察</div>`;
+    }
+    return `<div style="border:1px solid var(--border-light);border-radius:4px;padding:3px 4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:8px;color:var(--text-dark);">${escapeHtmlText(s.name)} <span style="font-size:6px;color:${fc};">${escapeHtmlText(s.faction||'')}</span></span>
+            <span style="font-size:6px;color:var(--gold-dark);">圣意契合 ${princessFavorBadge(s.court_favor||0)}</span>
+        </div>
+        <div style="font-size:6px;color:var(--text-light);">${escapeHtmlText(s.father_title||'')}之女 · 家世${s.family} · 才学${s.talent} · 样貌${s.looks} · ${s.age}岁</div>
+        ${hidden}
+        <div style="display:flex;gap:2px;margin-top:2px;">
+            ${s.inspected ? '' : `<button class="chonghua-btn" onclick="princeInspect('${uid}','${s.uid}')">🔍 细察(1行动)</button>`}
+            <button class="chonghua-btn" onclick="princeBetroth('${uid}','${s.uid}')">💍 定亲</button>
+        </div>
+    </div>`;
+}
+
+function princeMarriedHtml(p){
+    const c = p.consort || {};
+    const m = p.mansion;
+    let html = `<div style="font-size:8px;color:var(--text-mid);margin-bottom:2px;">正妃：<strong>${escapeHtmlText(c.name||'')}</strong>（${escapeHtmlText(c.faction||'')}）</div>`;
+    if(m){
+        html += `<div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">🏯 ${escapeHtmlText(m.name||'王府')} ${m.level}进 · 进项${m.income}两/旬 · 声望${m.reputation}</div>`;
+    }
+    const evs = p.marriage_events || [];
+    if(evs.length){
+        html += `<div style="font-size:6px;color:var(--text-light);margin-top:2px;">${evs.slice(0,3).map(e=>`<div>${escapeHtmlText(e)}</div>`).join('')}</div>`;
+    }
+    return html;
+}
+
+async function princeApi(path, body){
+    if(!playerId) return null;
+    try{
+        const r = await myFetch(`${API_BASE}/api/prince/${path}`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({player_id: playerId, ...body}), skipLoading:true
+        });
+        const res = await parseApiResponse(r, {allowError:true});
+        if(!res.success){ showToast('❌ ' + (res.error||'操作失败'), 'error'); return null; }
+        if(res.message){ showToast('✅ ' + res.message); if(typeof addLogEntry==='function') addLogEntry('🐉 ' + res.message, 'prince'); }
+        await renderPrinceInline();
+        await chonghuaRefreshState();
+        return res;
+    }catch(e){ console.error(e); showToast('❌ 操作失败','error'); return null; }
+}
+
+function princeSuitors(uid, refresh){ princeApi('suitors', {child_uid: uid, refresh: !!refresh}); }
+function princeInspect(uid, sid){ princeApi('inspect', {child_uid: uid, suitor_uid: sid}); }
+function princeBetroth(uid, sid){
+    if(!confirm('确定为皇子定下此正妃？定亲后不可更改。')) return;
+    princeApi('betroth', {child_uid: uid, suitor_uid: sid});
+}
+function princeMarry(uid){
+    if(!confirm('确定举行皇子大婚？')) return;
+    princeApi('marry', {child_uid: uid});
+}
+
+// 初始化皇子面板
+if(typeof renderPrinceInline === 'function') setTimeout(renderPrinceInline, 800);
 
 
 </script>

@@ -1055,6 +1055,69 @@ TREASURES = [
     "夜明珠", "和田玉璧", "金漆妆奁", "银鎏金钗", "青玉笔洗"
 ]
 
+# 珍宝出售价格表（两）
+TREASURE_SELL_PRICES = {
+    "翡翠镯子": 25, "玛瑙项链": 20, "金镶玉簪": 30, "珊瑚摆件": 35,
+    "珍珠冠": 40, "白玉如意": 28, "碧玉屏风": 45, "金丝绣衣": 22,
+    "鎏金香炉": 38, "翡翠如意": 26, "点翠凤钗": 32, "东珠耳坠": 28,
+    "羊脂玉佩": 35, "红珊瑚珠": 18, "百花锦缎": 15, "夜明珠": 60,
+    "和田玉璧": 42, "金漆妆奁": 30, "银鎏金钗": 20, "青玉笔洗": 24,
+}
+DEFAULT_TREASURE_SELL_PRICE = 15
+
+
+def get_treasure_sell_price(name: str) -> int:
+    """返回指定珍宝的出售价格，未收录则使用默认价。"""
+    return TREASURE_SELL_PRICES.get(name, DEFAULT_TREASURE_SELL_PRICE)
+
+
+@app.route('/api/inventory/sell', methods=['POST'])
+def sell_inventory_item():
+    """出售背包中的珍宝换取银两。请求体：{player_id, item_name, count?}"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    item_name = (data.get('item_name') or '').strip()
+    count = max(1, int(data.get('count', 1) or 1))
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if not item_name:
+        return jsonify({"error": "未指定物品名称"}), 400
+    owned = sum(1 for n in game_state.inventory if n == item_name)
+    if owned <= 0:
+        return jsonify({"error": f"背包中没有「{item_name}」"}), 400
+    if count > owned:
+        return jsonify({"error": f"数量超出持有上限（持有{owned}件）"}), 400
+    price_each = get_treasure_sell_price(item_name)
+    total_silver = price_each * count
+    # 移除对应数量的物品
+    removed = 0
+    new_inv = []
+    for n in game_state.inventory:
+        if n == item_name and removed < count:
+            removed += 1
+            continue
+        new_inv.append(n)
+    game_state.inventory = new_inv
+    game_state.silver = max(0, game_state.silver + total_silver)
+    changes = {"银两": total_silver}
+    desc = f"变卖「{item_name}」×{count}，得银{total_silver}两"
+    game_state.add_attr_change(changes, f"变卖：{item_name}")
+    game_state.add_memory(desc)
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "message": desc,
+        "silver": game_state.silver,
+        "inventory": game_state.inventory,
+        "sold": {"name": item_name, "count": count, "price_each": price_each, "total": total_silver},
+        "remaining_actions": game_state.remaining_actions,
+        "max_actions": game_state.max_actions,
+    })
+
 def generate_reward(game_state, source="emperor"):
     if source == "emperor":
         reward_types = ["银两", "珍宝", "珍宝", "珍宝", "位份", "封号", "恩典"]
@@ -2095,6 +2158,13 @@ DECISION_WEIGHTS = {
 }
 
 
+PRINCE_MARRY_MIN_AGE = 18          # 皇子成年开府议婚年龄
+PRINCE_SUITOR_MIN = 3              # 每次相看皇子妃候选人下限
+PRINCE_SUITOR_MAX = 5              # 每次相看皇子妃候选人上限
+PRINCE_BETROTH_COST = 80           # 皇子定亲纳采礼（银两）
+PRINCE_MARRY_COST = 200            # 皇子大婚大典（银两）
+PRINCE_INSPECT_COST_ACTION = 1     # 细察皇子妃候选人耗行动点
+
 # —— 子嗣过继配置 ——
 ADOPT_MIN_RANK = "贵人"              # 收养他人子嗣所需最低位份
 ADOPT_TARGET_MIN_RANK = "嫔"         # 接受送养（被托付）所需最低位份
@@ -2493,6 +2563,28 @@ def process_child_milestones(child, prefix, game_state=None):
         else:
             child["wit"] = min(100, child.get("wit", 40) + random.randint(4, 10))
             events.append(f"🎓 {prefix}皇子 {child_name} 年已十五，学问渐成，可参赞政务。")
+    elif age_years == 18 and not child.get("eighteen_years", False):
+        child["eighteen_years"] = True
+        if gender == "皇子":
+            # ---- 皇子成年开府 & 择妃剧情 ----
+            title = child.get("title") or random.choice(["雍王", "晋王", "楚王", "齐王", "赵王", "魏王"])
+            child["title"] = title
+            mansion_name = f"{title}府"
+            child["mansion"] = {"name": mansion_name, "level": 1, "income": random.randint(20, 50), "reputation": 60, "log": []}
+            child["marriage_status"] = "议婚中"
+            # 不再自动指定正妃，改为生成候选人列表供交互面板使用
+            child["suitors"] = generate_prince_suitors(game_state, child)
+            child["suitors_period"] = period_stamp(game_state) if 'period_stamp' in globals() else None
+            flavor_open = (
+                f"🏛️ {prefix}皇子 {child_name} 年满十八，依制开府建牙，赐第{mansion_name}！"
+                f"圣上亲题匾额，内务府拨银三千两修缮，王府初具气象。"
+            )
+            events.append(flavor_open)
+            add_child_event(child, flavor_open)
+            child.setdefault("marriage_events", []).insert(0, flavor_open)
+            if game_state:
+                game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + 8)
+                game_state.attributes["宠爱"] = min(game_state.get_attr_max("宠爱"), game_state.attributes.get("宠爱", 0) + 5)
     return events
 
 def process_player_child_events(game_state):
@@ -2741,10 +2833,46 @@ def suitor_male_name():
     return surname + random_given(EMPEROR_GIVEN, 0.5)
 
 
+def suitor_female_name():
+    """生成皇子妃/秀女姓名：复用 names.py 中的女名生成逻辑。"""
+    from names import generate_female_name
+    return generate_female_name()
+
+
 def next_suitor_uid(game_state):
     seq = int(getattr(game_state, "child_uid_seq", 1) or 1)
     game_state.child_uid_seq = seq + 1
     return f"s{seq}"
+
+
+def generate_prince_suitors(game_state, child):
+    """为皇子生成一批候选正妃，返回列表。门第随皇子体面度上移。"""
+    tier = princess_prestige_tier(game_state, child)  # 复用公主体面度算法
+    weights = suitor_grade_weights(tier)
+    grades = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    count = random.randint(PRINCE_SUITOR_MIN, PRINCE_SUITOR_MAX)
+    suitors = []
+    for _ in range(count):
+        grade = random.choices(grades, weights=weights)[0]
+        faction = random.choice(list(COURT_FACTIONS.keys()))
+        base = GRADE_BASE_SCORE.get(grade, 45)
+        suitor = {
+            "uid": next_suitor_uid(game_state),
+            "name": suitor_female_name(),
+            "father_title": _pick_official_title(grade),
+            "faction": faction,
+            "grade": grade,
+            "family_score": base,
+            "family": base,
+            "talent": random.randint(35, 95),
+            "looks": random.randint(35, 95),
+            "age": random.randint(15, 22),
+            "ambition": random.randint(20, 90),
+            "hidden_tags": roll_hidden_tags(grade),
+            "inspected": False,
+        }
+        suitors.append(suitor)
+    return suitors
 
 
 def generate_suitors(game_state, child):
@@ -2858,6 +2986,51 @@ def suitor_court_favor_score(game_state, child, suitor):
     for k, w in weights.items():
         total += dims.get(k, 50) * w
     return max(0, min(100, int(total)))
+
+
+def find_player_prince(game_state, child_uid):
+    """按 uid 找到皇子，返回 (index, child) 或 (-1, None)。
+
+    先在玩家子嗣中查找；找不到时再遍历 NPC 妃嫔所出的皇子。
+    """
+    for idx, c in enumerate(getattr(game_state, "children", []) or []):
+        ensure_child_fields(c)
+        if str(c.get("uid")) == str(child_uid) and c.get("gender") == "皇子":
+            return idx, c
+    for name, npc in (getattr(game_state, "npcs", {}) or {}).items():
+        if not isinstance(npc, dict) or name == game_state.name or name == "太后":
+            continue
+        for idx, c in enumerate(npc.get("children", []) or []):
+            ensure_child_fields(c)
+            if str(c.get("uid")) == str(child_uid) and c.get("gender") == "皇子":
+                return idx, c
+    return -1, None
+
+
+def prince_serialize(game_state, child):
+    """皇子择妃/婚姻状态序列化，供前端渲染。"""
+    ensure_child_fields(child)
+    suitors = child.get("suitors") or []
+    suitor_views = []
+    for s in suitors:
+        v = suitor_public_view(s)
+        v["court_favor"] = suitor_court_favor_score(game_state, child, s)
+        suitor_views.append(v)
+    mother_name = child.get("adoptive_mother") or child.get("birth_mother") or ""
+    is_own = mother_name == getattr(game_state, "name", "") or child in (getattr(game_state, "children", []) or [])
+    return {
+        "uid": child.get("uid"),
+        "name": child.get("name"),
+        "age": int(child.get("age", 0)),
+        "title": child.get("title", ""),
+        "marriage_status": child.get("marriage_status", "未议"),
+        "suitors": suitor_views,
+        "consort": child.get("consort"),
+        "mansion": child.get("mansion"),
+        "marriage_events": (child.get("marriage_events") or [])[:8],
+        "mother": mother_name,
+        "is_own": bool(is_own),
+    }
 
 
 def find_player_princess(game_state, child_uid):
@@ -9329,12 +9502,13 @@ def chonghua_action():
         if level >= CHONGHUA_MAX_LEVEL:
             return jsonify({'success': False, 'error': f'重华宫已达最高等级（{CHONGHUA_MAX_LEVEL}级）'}), 400
         cost = chonghua_upgrade_cost(ch)
-        if game_state.silver < cost:
-            return jsonify({'success': False, 'error': f'银两不足（需{cost}两）'}), 400
-        game_state.silver -= cost
+        budget = int(ch.get('budget', 0) or 0)
+        if budget < cost:
+            return jsonify({'success': False, 'error': f'重华宫用度不足（现存{budget}两，需{cost}两），请先拨用度'}), 400
+        ch['budget'] = budget - cost
         ch['level'] = level + 1
         add_log(f'重华宫扩建至等级{ch["level"]}')
-        return ok(f'扩建成功，等级提升至{ch["level"]}（容量{chonghua_capacity(ch)}人），耗费{cost}两')
+        return ok(f'扩建成功，等级提升至{ch["level"]}（容量{chonghua_capacity(ch)}人），从宫中用度扣除{cost}两，余{ch["budget"]}两')
 
     if action == 'patronize':
         if not ch.get('founded'):
@@ -9849,6 +10023,188 @@ def princess_mansion():
             "princess": princess_serialize(game_state, child),
         })
     return jsonify({"success": False, "error": "未知的公主府操作"}), 400
+
+
+# ============================================================
+#  皇子择妃 · API 路由
+# ============================================================
+
+@app.route('/api/prince/list', methods=['GET'])
+def prince_list():
+    """列出玩家名下所有皇子的婚姻信息。"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    princes = []
+    seen = set()
+    for uid, child, mother_name, is_player in _iter_all_princes(game_state):
+        if not is_player:
+            continue
+        ensure_child_fields(child)
+        if uid in seen:
+            continue
+        seen.add(uid)
+        # 仅展示已成年（开府）的皇子
+        if child.get("eighteen_years") or int(child.get("age", 0)) >= PRINCE_MARRY_MIN_AGE:
+            princes.append(prince_serialize(game_state, child))
+    return jsonify({
+        "princes": princes,
+        "marry_min_age": PRINCE_MARRY_MIN_AGE,
+        "betroth_cost": PRINCE_BETROTH_COST,
+        "marry_cost": PRINCE_MARRY_COST,
+        "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)),
+        "factions": COURT_FACTIONS,
+    })
+
+
+@app.route('/api/prince/suitors', methods=['POST'])
+def prince_suitors():
+    """生成/返回皇子妃候选人（每旬缓存一次）。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    refresh = bool(data.get('refresh'))
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_prince(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该皇子"}), 404
+    if int(child.get("age", 0)) < PRINCE_MARRY_MIN_AGE:
+        return jsonify({"success": False, "error": f"皇子尚未成年（需满{PRINCE_MARRY_MIN_AGE}岁）"}), 400
+    if child.get("marriage_status") in ("已定", "已婚"):
+        return jsonify({"success": False, "error": "皇子婚事已定，不必再相看"}), 400
+    stamp = period_stamp(game_state)
+    if refresh or not child.get("suitors") or child.get("suitors_period") != stamp:
+        child["suitors"] = generate_prince_suitors(game_state, child)
+        child["suitors_period"] = stamp
+    if child.get("marriage_status") == "未议":
+        child["marriage_status"] = "议婚中"
+    autosave_session(player_id)
+    return jsonify({"success": True, "prince": prince_serialize(game_state, child)})
+
+
+@app.route('/api/prince/inspect', methods=['POST'])
+def prince_inspect():
+    """细察某皇子妃候选人，花行动点揭示其野心与隐藏标签。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    suitor_uid = data.get('suitor_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_prince(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该皇子"}), 404
+    suitor = next((s for s in (child.get("suitors") or []) if str(s.get("uid")) == str(suitor_uid)), None)
+    if not suitor:
+        return jsonify({"success": False, "error": "候选人不存在或已更替"}), 404
+    if suitor.get("inspected"):
+        return jsonify({"success": True, "message": "已细察过此人", "prince": prince_serialize(game_state, child)})
+    if game_state.remaining_actions <= 0:
+        return jsonify({"success": False, "error": "行动点不足，请先转旬"}), 400
+    game_state.consume_action()
+    suitor["inspected"] = True
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "message": f"细察{suitor.get('name')}完毕，揭示其野心与隐情",
+        "prince": prince_serialize(game_state, child),
+    })
+
+
+@app.route('/api/prince/betroth', methods=['POST'])
+def prince_betroth():
+    """定亲：选定一名候选正妃，写入 consort，marriage_status→已定。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    suitor_uid = data.get('suitor_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_prince(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该皇子"}), 404
+    if int(child.get("age", 0)) < PRINCE_MARRY_MIN_AGE:
+        return jsonify({"success": False, "error": f"皇子尚未成年（需满{PRINCE_MARRY_MIN_AGE}岁）"}), 400
+    if child.get("marriage_status") in ("已定", "已婚"):
+        return jsonify({"success": False, "error": "皇子婚事已定"}), 400
+    suitor = next((s for s in (child.get("suitors") or []) if str(s.get("uid")) == str(suitor_uid)), None)
+    if not suitor:
+        return jsonify({"success": False, "error": "候选人不存在或已更替"}), 404
+    if game_state.silver < PRINCE_BETROTH_COST:
+        return jsonify({"success": False, "error": f"银两不足，纳采需{PRINCE_BETROTH_COST}两"}), 400
+    game_state.silver -= PRINCE_BETROTH_COST
+    child["consort"] = dict(suitor)
+    child["marriage_status"] = "已定"
+    child["suitors"] = []
+    child["suitors_period"] = None
+    msg = f"💐 你为{child.get('title', '皇子')}{child.get('name')}定下正妃{suitor.get('name')}（{suitor.get('faction')}·{suitor.get('father_title')}之女），纳采礼成，耗银{PRINCE_BETROTH_COST}两"
+    game_state.add_memory(msg)
+    add_child_event(child, msg)
+    autosave_session(player_id)
+    return jsonify({
+        "success": True,
+        "message": msg,
+        "silver": game_state.silver,
+        "prince": prince_serialize(game_state, child),
+    })
+
+
+@app.route('/api/prince/marry', methods=['POST'])
+def prince_marry():
+    """大婚：下赐婚圣旨，迎娶正妃，触发朝堂联动。"""
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    child_uid = data.get('child_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    idx, child = find_player_prince(game_state, child_uid)
+    if child is None:
+        return jsonify({"success": False, "error": "未找到该皇子"}), 404
+    if game_state.silver < PRINCE_MARRY_COST:
+        return jsonify({"success": False, "error": f"银两不足，大典需{PRINCE_MARRY_COST}两"}), 400
+    if child.get("marriage_status") != "已定" or not child.get("consort"):
+        return jsonify({"success": False, "error": "尚未定亲，不能举行大婚"}), 400
+    game_state.silver -= PRINCE_MARRY_COST
+    child["marriage_status"] = "已婚"
+    consort = child.get("consort") or {}
+    favor = normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None))
+    faction = consort.get("faction")
+    court_notes = []
+    if faction in favor:
+        gain = random.randint(5, 12)
+        favor[faction] = min(100, favor[faction] + gain)
+        court_notes.append(f"{faction}因联姻之喜，好感+{gain}")
+    game_state.court_faction_favor = favor
+    game_state.attributes["威望"] = min(game_state.get_attr_max("威望"), game_state.attributes.get("威望", 0) + random.randint(6, 12))
+    title = child.get("title", "皇子")
+    name = child.get("name", "")
+    msg = f"🎊 赐婚圣旨已下，{title}{name}迎娶正妃{consort.get('name')}，六礼既成，百官朝贺，耗银{PRINCE_MARRY_COST}两"
+    game_state.add_memory(msg)
+    add_child_event(child, msg)
+    child.setdefault("marriage_events", []).insert(0, msg)
+    for note in court_notes:
+        game_state.add_memory(note)
+    autosave_session(player_id)
+    return jsonify({
+        "success": True, "message": msg,
+        "court_notes": court_notes,
+        "silver": game_state.silver,
+        "prince": prince_serialize(game_state, child),
+    })
 
 
 @app.route('/')
