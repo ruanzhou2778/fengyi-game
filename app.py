@@ -5442,6 +5442,7 @@ def start_draft(game_state, scale="大选"):
         npc = generate_npc(is_queen=False)
         while any(c["name"] == npc["name"] for c in candidates) or npc["name"] in game_state.npcs:
             npc = generate_npc(is_queen=False)
+        npc["rank"] = "秀女"  # 采选阶段未定位份，统一称秀女
         npc["endorsed_by"] = []
         npc["influenced"] = False
         candidates.append(npc)
@@ -5552,6 +5553,28 @@ def process_draft(game_state):
     for npc in admitted:
         npc.pop("endorsed_by", None)
         npc.pop("influenced", None)
+        # 皇帝拟定大致位份区间，皇后最终定夺具体位份
+        emp_score = _draft_score_emperor(game_state, npc)
+        if has_queen:
+            # 皇后在位：皇帝只给区间（答应~贵人 / 常在~嫔），皇后拍板
+            if emp_score >= 70:
+                pool = ["贵人", "常在", "答应"]
+            elif emp_score >= 55:
+                pool = ["常在", "答应", "官女子"]
+            else:
+                pool = ["答应", "官女子", "更衣"]
+            npc["rank"] = random.choice(pool)
+            npc["_rank_pending_queen"] = True
+        else:
+            # 中宫虚悬：皇帝直接定具体位份
+            if emp_score >= 75:
+                npc["rank"] = random.choice(["贵人", "嫔"])
+            elif emp_score >= 60:
+                npc["rank"] = random.choice(["常在", "贵人"])
+            elif emp_score >= 45:
+                npc["rank"] = random.choice(["答应", "常在"])
+            else:
+                npc["rank"] = random.choice(["官女子", "答应"])
         game_state.npcs[npc["name"]] = npc
         game_state.relationships[npc["name"]] = {"好感": random.randint(-10, 30), "印象": "陌生", "互动次数": 0}
         new_names.append(f"{npc['icon']}{npc['name']}（{npc['rank']}）")
