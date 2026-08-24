@@ -5375,6 +5375,76 @@ def emperor_interact():
         record_player_intimacy(game_state, intimacy_weights[action])
     return jsonify({"success": True, "narration": narration, "effects": changes, "reward": reward_info, "pregnancy": None, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "attributes": game_state.attributes, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
+def _current_period_index(game_state):
+    """当前旬序：0=上旬 1=中旬 2=下旬。"""
+    return 0 if game_state.day <= 10 else (1 if game_state.day <= 20 else 2)
+
+
+@app.route('/api/emperor/advise_draft', methods=['POST'])
+def emperor_advise_draft():
+    """劝皇帝开选秀。成功则有新人入宫（贤德无妒之名，威望+；同时引入新的竞争者）。"""
+    data = request.get_json()
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if "皇帝" not in game_state.relationships:
+        game_state.relationships["皇帝"] = {"好感": 10, "印象": "初识", "互动次数": 0}
+    # 本旬限一次：用带旬标记的 story_flag 做冷却
+    period_flag = f"draft_advise:{game_state.year}-{game_state.month}-{_current_period_index(game_state)}"
+    if period_flag in _story_flags(game_state):
+        return jsonify({"error": "本旬已向皇帝进言选秀之事，不宜再提。"}), 400
+    _add_story_flag(game_state, period_flag)
+    game_state.relationships["皇帝"]["互动次数"] += 1
+    favor = game_state.relationships["皇帝"].get("好感", 0)
+    prestige = game_state.attributes.get("威望", 0)
+    chance = 0.35 + min(0.30, favor / 200.0) + min(0.20, prestige / 500.0)
+    chance = min(chance, 0.9)
+    changes = {}
+    new_concubine = None
+    if random.random() < chance:
+        count = random.randint(2, 4)
+        new_names = []
+        for _ in range(count):
+            new_npc = generate_npc(is_queen=False)
+            while new_npc["name"] in game_state.npcs:
+                new_npc = generate_npc(is_queen=False)
+            game_state.npcs[new_npc["name"]] = new_npc
+            game_state.relationships[new_npc["name"]] = {"好感": random.randint(-10, 30), "印象": "陌生", "互动次数": 0}
+            new_names.append(f"{new_npc['icon']}{new_npc['name']}（{new_npc['rank']}）")
+        new_concubine = {"names": new_names, "is_daxuan": False}
+        prestige_gain = random.randint(3, 6)
+        favor_gain = random.randint(3, 7)
+        max_prestige = game_state.get_attr_max("威望")
+        game_state.attributes["威望"] = min(max_prestige, prestige + prestige_gain)
+        changes["威望"] = prestige_gain
+        game_state.relationships["皇帝"]["好感"] = min(100, favor + favor_gain)
+        narration = (
+            f"你于御前进言，请皇帝广纳淑女、充盈后宫，以固国本。皇帝赞你贤德无妒，"
+            f"当即命礼部备选，{len(new_names)}位新人不日入宫。你的威望+{prestige_gain}，"
+            f"皇帝好感+{favor_gain}。"
+        )
+        game_state.add_memory(f"劝皇帝选秀，{len(new_names)}位新人入宫（贤德无妒，威望+{prestige_gain}）")
+        game_state.add_attr_change(changes, "劝皇帝选秀")
+    else:
+        favor_gain = random.randint(1, 3)
+        game_state.relationships["皇帝"]["好感"] = min(100, favor + favor_gain)
+        narration = "你劝皇帝开选秀，皇帝以国库未丰、边事未靖为由，暂将此议搁下，只夸你识大体。"
+        game_state.add_memory("劝皇帝选秀未果，皇帝以时机未至为由暂缓")
+    return jsonify({
+        "success": True,
+        "narration": narration,
+        "effects": changes,
+        "new_concubine": new_concubine,
+        "attributes": game_state.attributes,
+        "remaining_actions": game_state.remaining_actions,
+        "max_actions": game_state.max_actions,
+    })
+
+
 @app.route('/api/dowager/interact', methods=['POST'])
 def dowager_interact():
     data = request.get_json()

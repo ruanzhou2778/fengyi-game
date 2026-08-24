@@ -3542,10 +3542,11 @@ function openEmperorInteract() {
                 <button onclick="emperorInteract('discuss')" class="interact-btn" style="background:#e8f0e8;">📜 奏对</button>
                 <button onclick="emperorInteract('recite_poem')" class="interact-btn" style="background:#e8e8f0;">📝 献诗</button>
                 <button onclick="emperorInteract('ask_reward')" class="interact-btn" style="background:#f0e0d8;">🎁 求赏赐</button>
+                <button onclick="emperorAdviseDraft()" class="interact-btn" style="background:#e6e8f0;">🌺 劝选秀</button>
                 <button onclick="petitionRankAction('任命协理')" class="interact-btn" style="background:#efe6d8;">👑 任命协理</button>
             </div>
             <div id="emperorResultArea" class="interact-result-area"></div>
-            <div style="font-size:7px;color:var(--text-light);text-align:center;padding-top:2px;">💡 与皇帝奏对可提升宠爱与威望</div>
+            <div style="font-size:7px;color:var(--text-light);text-align:center;padding-top:2px;">💡 与皇帝奏对可提升宠爱与威望；劝选秀可得贤德之名（威望↑），亦引新人入宫</div>
         </div>
     `;
     openModal('👑 皇帝', html, '关闭', null, true);
@@ -3633,7 +3634,31 @@ async function emperorInteract(action) {
     } catch (e) { showToast('❌ 操作失败'); }
 }
 
-async function dowagerInteract(action) {
+async function emperorAdviseDraft() {
+    if (!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/emperor/advise_draft`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: playerId })
+        });
+        const d = await r.json();
+        if (d.error) { showToast('❌ '+d.error); return; }
+        const narration = d.narration || '操作完成';
+        showInteractFeedback(narration, '皇帝', d.effects);
+        setInteractResult('emperorResultArea', narration);
+        if (d.new_concubine && d.new_concubine.names && d.new_concubine.names.length) {
+            const msg = `${d.new_concubine.names.join('、')} 入宫！`;
+            addLogEntry(formatEventMsg(msg, '🌺'), 'new-concubine');
+            showToast('🌺 新人入宫！');
+        } else {
+            showToast('📜 皇帝暂缓选秀');
+        }
+        const sr = await myFetch(`${API_BASE}/api/state/${playerId}`);
+        updateUI(await sr.json());
+    } catch (e) { showToast('❌ 操作失败'); }
+}
+
     if (!playerId) return;
     try {
         const r = await myFetch(`${API_BASE}/api/dowager/interact`, {
