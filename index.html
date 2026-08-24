@@ -3713,6 +3713,7 @@ async function draftAct(action, candidate) {
     } catch (e) { showToast('❌ 操作失败'); }
 }
 
+async function dowagerInteract(action) {
     if (!playerId) return;
     try {
         const r = await myFetch(`${API_BASE}/api/dowager/interact`, {
