@@ -28,7 +28,7 @@
         };
         window.doNextPeriod = function() { nextPeriod(); };
         window.doFreeAction = function() {
-            var input = document.getElementById('freeInput');
+            var input = document.getElementById('userInput');
             if (!input) { showToast('❌ 未找到输入框'); return; }
             var text = input.value.trim();
             if (!text) { showToast('❌ 请输入内容'); return; }
@@ -120,19 +120,6 @@
         document.querySelectorAll('[onclick*="查账"]').forEach(function(btn) {
             btn.setAttribute('onclick', "openLedger()");
         });
-
-        // ---- 3. 自由输入框绑定 ----
-        var freeInput = document.getElementById('freeInput');
-        if (freeInput) {
-            freeInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    doFreeAction();
-                }
-            });
-        }
-        var sendBtn = document.getElementById('sendBtn');
-        if (sendBtn) sendBtn.addEventListener('click', doFreeAction);
 
         // ---- 4. 同步迷你状态到新UI顶栏 ----
         var topBar = document.querySelector('.top-bar .left');

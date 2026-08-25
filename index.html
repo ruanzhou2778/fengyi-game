@@ -34,7 +34,7 @@
         }
 
         body {
-            font-family: 'Noto Serif SC', '楷体', 'KaiTi', serif;
+            font-family: 'Noto Serif SC', '楷体', 'KaiTi', '宋体', serif;
             background: #0a1210;
             display: flex;
             justify-content: center;
@@ -1347,7 +1347,7 @@
                 <div class="quick-actions">
                     <button class="qa-btn primary" onclick="doFlip()">🌙 翻牌</button>
                     <button class="qa-btn" onclick="doRandomEvent()">🎲 随机事件</button>
-                    <button class="qa-btn" onclick="doNextPeriod()">📅 转旬</button>
+                    <button class="qa-btn" id="nextPeriodBtn">📅 转旬</button>
                 </div>
 
                 <!-- ⭐ 每日行动网格（加回来了） -->
@@ -1408,8 +1408,8 @@
 
                 <!-- 自由输入 -->
                 <div class="input-row">
-                    <input type="text" placeholder="输入你想做的事..." id="freeInput">
-                    <button onclick="doFreeAction()">📤</button>
+                    <input type="text" placeholder="输入你想做的事..." id="userInput">
+                    <button id="sendBtn">📤</button>
                 </div>
                 <div class="footnote">📌 行动点共享 · 每日行动消耗 1 点 · 转旬恢复</div>
             </div>
@@ -1909,7 +1909,7 @@ window.doRandomEvent = function() {
 };
 window.doNextPeriod = function() { nextPeriod(); };
 window.doFreeAction = function() {
-    var input = document.getElementById('freeInput');
+    var input = document.getElementById('userInput');
     if (!input) { showToast('❌ 未找到输入框'); return; }
     var text = input.value.trim();
     if (!text) { showToast('❌ 请输入内容'); return; }
