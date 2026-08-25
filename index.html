@@ -1317,17 +1317,18 @@
         <!-- ========== 顶部状态栏 ========== -->
         <div class="top-bar">
             <div class="left">
-                <span>📅 建元三年 二月 上旬</span>
-                <span class="time-badge">🌅 辰时 · 晴</span>
-                <span>⚡ 7/7</span>
+                <span id="miniCalendar">📅 建元三年 二月 上旬</span>
+                <span id="miniRank" class="time-badge">🌅 辰时 · 晴</span>
+                <span id="miniActions">⚡ 7/7</span>
+                <span id="miniSilver">🪙 100</span>
             </div>
             <div class="right">
                 <button class="tool-btn" onclick="toggleMap()" title="宫廷舆图">🗺️</button>
                 <button class="tool-btn" onclick="openLedger()" title="内务府账册">📒<span class="badge">亏</span></button>
-                <button class="tool-btn" onclick="alert('💾 存档已保存')" title="存档">💾</button>
+                <button class="tool-btn" onclick="saveGame()" title="存档">💾</button>
                 <button class="tool-btn" onclick="openSaveList()" title="读档">📂</button>
                 <button class="tool-btn" onclick="openLifeReview()" title="一生回顾">📖</button>
-                <button class="tool-btn" onclick="if(confirm('确定重建新档？'))alert('🔄 已重置')" title="重开">🔄</button>
+                <button class="tool-btn" onclick="confirmReset()" title="重开">🔄</button>
             </div>
         </div>
 
@@ -1385,6 +1386,7 @@
 
                 <!-- 日志流 -->
                 <div class="log-area" id="logArea">
+                <div id="logContent">
                     <div class="log-entry">
                         <span class="time">二月初三</span>
                         <span class="msg">🌸 <span class="em">华妃</span> 与 <span class="em">端妃</span> 在御花园起了口角，皇后命各抄宫规十遍</span>
@@ -1402,6 +1404,7 @@
                         <span class="msg">📜 转旬完成 · <span class="em">安贵人</span> 晋为 <span class="em">安嫔</span></span>
                     </div>
                 </div>
+            </div>
 
                 <!-- 自由输入 -->
                 <div class="input-row">
@@ -1448,9 +1451,9 @@
                                 <span class="pc-tag">📜 <span class="num">180</span></span>
                                 <span class="pc-tag">🎂 22岁</span>
                             </div>
-                            <div class="preg-progress">
-                                <div class="track"><div class="fill" style="width:40%;"></div></div>
-                                <span class="label">🤰 孕4月</span>
+                            <div class="preg-progress" id="pregnancyProgress">
+                                <div class="track"><div class="fill" style="width:40%;" id="pregnancyProgressFill"></div></div>
+                                <span class="label" id="pregnancyProgressLabel">🤰 孕4月</span>
                             </div>
                             <div class="pc-badges">
                                 <span class="pc-badge rival">⚔️ 仇敌 2</span>
@@ -1463,6 +1466,8 @@
                         <div style="font-size:7px;color:#5a6a66;margin-top:2px;">点击查看详情</div>
                     </div>
                 </div>
+
+                <div id="statusTags"></div>
 
                 <div class="section-label" style="margin-top:4px;">👥 妃 嫔</div>
                 <div class="npc-grid">
@@ -1562,7 +1567,7 @@
 
                 <div class="stat-block">
                     <div class="block-title">📊 属 性</div>
-                    <div class="attr-grid">
+                    <div class="attr-grid" id="attrBars">
                         <div class="attr-item"><span class="name">容貌</span><span class="val high">85</span></div>
                         <div class="attr-item"><span class="name">才情</span><span class="val high">72</span></div>
                         <div class="attr-item"><span class="name">心计</span><span class="val">58</span></div>
@@ -1600,9 +1605,9 @@
                         <span class="st" style="border-color:rgba(158,190,178,0.04);color:#4a5a56;">+2 人</span>
                     </div>
                     <div style="margin-top:4px;display:flex;gap:4px;">
-                        <button class="cf-btn" style="flex:1;" onclick="alert('🧑 招募宫女（30两）')">招募宫女</button>
-                        <button class="cf-btn" style="flex:1;" onclick="alert('🧑 招募太监（20两）')">招募太监</button>
-                        <button class="cf-btn" onclick="alert('🎒 打开背包')">🎒</button>
+                        <button class="cf-btn" style="flex:1;" onclick="hireServant('宫女')">招募宫女</button>
+                        <button class="cf-btn" style="flex:1;" onclick="hireServant('太监')">招募太监</button>
+                        <button class="cf-btn" onclick="openInventory()">🎒</button>
                     </div>
                 </div>
             </div>
@@ -1881,12 +1886,78 @@
 
     </div>
 
+<div id="loading"></div>
+<div id="edictContainer"></div>
+
     <script src="js/config.js"></script>
 <script src="js/compat_prep.js"></script>
 <script>
 // ============================================================
 //  🌸 凤仪天下 · 完整修复版
 // ============================================================
+
+// ---------- 全局接入函数：新UI onclick 桥接（与 compat_ui.js 行为一致） ----------
+// 兜底：即使 compat_ui.js 未加载，按钮点击也能正常工作
+window.doFlip = function() {
+    if (!window.playerId) { showToast('❌ 请先开始游戏'); return; }
+    if (window._lastGameData) triggerFlip(window._lastGameData);
+    else showToast('❌ 无游戏数据');
+};
+window.doRandomEvent = function() {
+    if (!window.playerId || isProcessing) { showToast('⏳ 处理中...'); return; }
+    triggerRandomConflict();
+};
+window.doNextPeriod = function() { nextPeriod(); };
+window.doFreeAction = function() {
+    var input = document.getElementById('freeInput');
+    if (!input) { showToast('❌ 未找到输入框'); return; }
+    var text = input.value.trim();
+    if (!text) { showToast('❌ 请输入内容'); return; }
+    sendFreeInput(text);
+};
+window.openSaveList = function() { openSaveListModal(); };
+window.closeSaveList = function() { closeSaveListModal(); };
+window.toggleMap = function() {
+    var overlay = document.getElementById('mapOverlay');
+    if (!overlay) { showToast('🗺️ 暂无舆图'); return; }
+    overlay.classList.toggle('active');
+};
+window.openLedger = function() {
+    var d = window._lastGameData;
+    openModal('📜 宫中账目', '<div style="font-size:9px;line-height:1.6;">' +
+        (d ? '<p>🪙 银两：' + (d.silver || 0) + '</p>' +
+        '<p>📅 日期：' + (d.calendar_str || '-') + '</p>' +
+        '<p>⚡ 行动点：' + (d.remaining_actions || 0) + '/' + (d.max_actions || 7) + '</p>'
+        : '<p>暂无游戏数据</p>') + '</div>', '关闭');
+};
+window.closeLedger = function() { closeModal(); };
+window.closeEventResult = function() { closeModal(); };
+window.closePlayerDetail = function() { closeModal(); };
+window.closeFlipResult = function() {
+    var frm = document.getElementById('flipResultModal');
+    if (frm) frm.style.display = 'none';
+    closeModal();
+};
+window.closeFlipResultModal = function() {
+    var frm = document.getElementById('flipResultModal');
+    if (frm) frm.style.display = 'none';
+    closeModal();
+};
+window.openPlayerDetail = function() {
+    if (!window.playerId) { showToast('❌ 请先开始游戏'); return; }
+    openModal('📋 我的档案', '<div id="playerDetailContent">加载中...</div>', '关闭', null, true);
+    if (window._lastGameData) {
+        var d = _lastGameData;
+        var el = document.getElementById('playerDetailContent');
+        if (el) el.innerHTML =
+            '<div style="font-size:9px;line-height:1.6;">' +
+            '<p>👤 姓名：' + (d.player_name || d.name || '-') + '</p>' +
+            '<p>👑 位份：' + (d.display_rank || d.rank || '-') + '</p>' +
+            '<p>🏠 出身：' + (d.family_background || '-') + '</p>' +
+            '<p>🎂 年龄：' + (d.age || '-') + '岁</p>' +
+            '<p>🪙 银两：' + (d.silver || 0) + '</p></div>';
+    }
+};
 
 function resolveGameBase(stored) {
     if (stored && String(stored).trim()) return String(stored).trim().replace(/\/$/, '');
@@ -4729,6 +4800,7 @@ function formatEventMsg(msg, icon='🌙'){
 function addLogEntry(text,type){
 const calendar=miniCalendar.textContent||'建元元年一月上旬';
 eventLogs.push({calendar:calendar,text:text,type:type||'normal'});
+if(eventLogs.length>200) eventLogs.shift();
 renderLogs();
 }
 function renderLogs(){
