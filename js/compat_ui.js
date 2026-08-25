@@ -24,7 +24,7 @@
         };
         window.doRandomEvent = function() {
             if (!window.playerId || isProcessing) { showToast('⏳ 处理中...'); return; }
-            triggerRandomEvent();
+            triggerRandomConflict();
         };
         window.doNextPeriod = function() { nextPeriod(); };
         window.doFreeAction = function() {
