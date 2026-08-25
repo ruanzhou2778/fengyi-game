@@ -909,6 +909,13 @@
                 <div class="stat-block" id="factionBlock"><div class="block-title">🤝 阵 营 关 系</div><div id="factionContent"><span style="color:var(--text-light);font-size:8px;">加载中...</span></div></div>
                 <div class="stat-block">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div class="stat-block" id="innerPalaceBlock">
+                    <div class="block-title">🏛️ 内 务 府</div>
+                    <div id="ipContent" style="font-size:8px;color:var(--text-mid);line-height:1.4;">
+                        <span style="color:var(--text-light);">加载中...</span>
+                    </div>
+                    <div id="ipActions" style="display:flex;gap:3px;flex-wrap:wrap;margin-top:4px;"></div>
+                </div>
                         <span style="font-size:8px;color:var(--text-light);letter-spacing:1px;">⚙️ 配 置</span>
                         <button class="config-toggle-btn" id="configToggleBtn">展开</button>
                     </div>
@@ -2204,6 +2211,9 @@ function updateEmperorDisplay(data){if(data.emperor){const e=data.emperor;docume
 function updateDowagerDisplay(data){const rel=data.relationships?data.relationships['太后']:null;const dowager=(data.dowager)||((window._lastGameData||{}).dowager)||{};document.getElementById('dowagerFavor').textContent=rel?rel.好感:'-';const personalityEl=document.getElementById('dowagerPersonality');if(personalityEl)personalityEl.textContent=`${dowager.personality||'威严慈祥'}${dowager.age?` · ${dowager.age}岁`:''}`;}
 function updateServantList(data){
 const servants=data.servants||[];const container=document.getElementById('servantList');const countEl=document.getElementById('servantCount');
+// ---- 内务府面板刷新 ----
+if(typeof updateInnerPalacePanel==='function') updateInnerPalacePanel();
+
 if(servants.length===0){container.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无宫女太监</span>';countEl.textContent='0人';return;}
 container.innerHTML='';servants.forEach(s=>{const card=document.createElement('span');card.className='servant-card';card.innerHTML=`${s.type==='宫女'?'👩':'🧑'} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">${s.age||'-'}岁</span><span class="s-skill">技${s.skill}</span>`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});countEl.textContent=`${servants.length}人`;
 renderConflictAssist(servants);
@@ -5509,7 +5519,7 @@ function princeMarry(uid){
 // 初始化皇子面板
 if(typeof renderPrinceInline === 'function') setTimeout(renderPrinceInline, 800);
 
-
 </script>
+<script src="ip_panel.js"></script>
 </body>
 </html>

@@ -26,6 +26,81 @@ COURT_FACTIONS = {
 }
 
 
+def default_inner_palace():
+    """内务府默认状态。"""
+    return {
+        "budget": 800,
+        "storehouse": {"布匹": 30, "药材": 15, "香料": 10, "木材": 20, "食材": 40},
+        "chief": {"name": "苏培盛", "loyalty": 60, "corruption": 25, "skill": 70},
+        "market": {"布匹": 5, "药材": 10, "香料": 15, "木材": 8, "食材": 3},
+        "monthly_stipend": {
+            "皇后": 100, "皇贵妃": 80, "贵妃": 70, "妃": 60, "嫔": 50,
+            "贵人": 35, "常在": 25, "答应": 15, "官女子": 10
+        },
+        "logs": [],
+        "corruption_evidence": 0,
+        "audited_this_period": False,
+    }
+
+
+def _ip_int(data, key, default):
+    """取整数字段：键存在且可转 int 则用之（含 0），否则回落默认。"""
+    try:
+        if data is not None and key in data:
+            return int(data[key])
+    except (TypeError, ValueError):
+        pass
+    return default
+
+
+def normalize_inner_palace(data):
+    """归一化内务府数据，兼容旧存档缺失字段。"""
+    base = default_inner_palace()
+    if not isinstance(data, dict):
+        return base
+    # budget
+    base["budget"] = _ip_int(data, "budget", base["budget"])
+    # storehouse
+    sh = data.get("storehouse")
+    if isinstance(sh, dict):
+        for k in base["storehouse"]:
+            base["storehouse"][k] = _ip_int(sh, k, base["storehouse"][k])
+    # chief
+    ch = data.get("chief")
+    if isinstance(ch, dict):
+        nm = ch.get("name")
+        if isinstance(nm, str) and nm.strip():
+            base["chief"]["name"] = nm.strip()
+        for attr in ("loyalty", "corruption", "skill"):
+            v = _ip_int(ch, attr, None)
+            if v is not None:
+                base["chief"][attr] = max(0, min(100, v))
+    # market
+    mk = data.get("market")
+    if isinstance(mk, dict):
+        for k in base["market"]:
+            v = _ip_int(mk, k, None)
+            if v is not None:
+                base["market"][k] = max(2, v)
+    # monthly_stipend
+    ms = data.get("monthly_stipend")
+    if isinstance(ms, dict):
+        for k in base["monthly_stipend"]:
+            base["monthly_stipend"][k] = _ip_int(ms, k, base["monthly_stipend"][k])
+    # logs
+    logs = data.get("logs")
+    if isinstance(logs, list):
+        base["logs"] = [str(x) for x in logs[-50:]]
+    # corruption_evidence
+    try:
+        base["corruption_evidence"] = max(0, int(data.get("corruption_evidence", 0) or 0))
+    except (TypeError, ValueError):
+        pass
+    # audited_this_period
+    base["audited_this_period"] = bool(data.get("audited_this_period", False))
+    return base
+
+
 def default_court_faction_favor():
     """三派好感默认各 50。"""
     return {name: 50 for name in COURT_FACTIONS}
@@ -393,6 +468,8 @@ class GameState:
         self.court_faction_favor = default_court_faction_favor()
         # 夺嫡暗流——储君空悬时的多方博弈
         self.heir_race = default_heir_race()
+        # 内务府自治系统
+        self.inner_palace = default_inner_palace()
         self.emperor = {
             "name": "萧景琰",
             "personality": random.choice([p.value for p in EmperorPersonality]),
@@ -602,6 +679,7 @@ class GameState:
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
             "court_faction_favor": normalize_court_faction_favor(getattr(self, "court_faction_favor", None)),
             "heir_race": normalize_heir_race(getattr(self, "heir_race", None)),
+            "inner_palace": normalize_inner_palace(getattr(self, "inner_palace", None)),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -711,6 +789,7 @@ class GameState:
             game_state.frameups = data.get("frameups", {"seq": 1, "cases": [], "log": []})
             game_state.court_faction_favor = normalize_court_faction_favor(data.get("court_faction_favor"))
             game_state.heir_race = normalize_heir_race(data.get("heir_race"))
+            game_state.inner_palace = normalize_inner_palace(data.get("inner_palace"))
             try:
                 game_state.child_uid_seq = max(1, int(data.get("child_uid_seq", 1) or 1))
             except (TypeError, ValueError):

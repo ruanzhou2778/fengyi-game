@@ -18,7 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 load_dotenv()
-from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, FOUR_CONSORT_TITLES, ORDINARY_NOBLETITLES, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, is_four_consort_title, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor, default_heir_race, normalize_heir_race
+from models import GameState, Rank, Storyline, Servant, FOUR_CONSORTS, FOUR_CONSORT_TITLES, ORDINARY_NOBLETITLES, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, is_four_consort_title, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor, default_heir_race, normalize_heir_race, default_inner_palace, normalize_inner_palace, RANK_POWER
 from models import (
     default_heir_consorts, default_heir_consort_member,
     normalize_heir_consorts, normalize_heir_status,
@@ -4866,6 +4866,128 @@ def guard_action(game_state):
         return False, (jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429)
     return True, None
 
+
+# ============================================================
+#  内务府玩家干预 API
+# ============================================================
+@app.route('/api/inner_palace/status', methods=['GET'])
+def inner_palace_status():
+    """只读查询内务府状态。"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    return jsonify({
+        'budget': ip.get('budget', 0),
+        'storehouse': ip.get('storehouse', {}),
+        'chief': ip.get('chief', {}),
+        'market': ip.get('market', {}),
+        'logs': ip.get('logs', [])[-5:],
+        'corruption_evidence': ip.get('corruption_evidence', 0),
+    })
+
+
+@app.route('/api/inner_palace/purchase', methods=['POST'])
+def inner_palace_purchase():
+    """采买物资：消耗 budget 增加库存，消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    item = (data.get('item') or '').strip()
+    qty = max(1, int(data.get('qty', 1) or 1))
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    market = ip.get('market', {})
+    price = int(market.get(item, 0) or 0)
+    if price <= 0:
+        return jsonify({'error': f'未知名目「{item}」'}), 400
+    cost = price * qty
+    if int(ip.get('budget', 0) or 0) < cost:
+        return jsonify({'error': f'库银不足（需{cost}两，余{ip.get("budget",0)}两）'}), 400
+    ip['budget'] -= cost
+    storehouse = ip.setdefault('storehouse', {})
+    storehouse[item] = int(storehouse.get(item, 0) or 0) + qty
+    from inner_palace_system import _ip_log
+    _ip_log(ip, f'采买{item}{qty}单位，花费{cost}两')
+    return jsonify({'message': f'采买{item}{qty}单位成功，花费{cost}两', 'budget': ip['budget'], 'storehouse': storehouse})
+
+
+@app.route('/api/inner_palace/embezzle', methods=['POST'])
+def inner_palace_embezzle():
+    """玩家勾结总管贪墨：成功则 budget-、player.silver+；失败则威望-。消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    chief = ip.get('chief', {})
+    corruption = int(chief.get('corruption', 0) or 0)
+    loyalty = int(chief.get('loyalty', 0) or 0)
+    # 成功率：贪腐越高越容易，忠诚越高越难
+    success_rate = min(0.9, max(0.1, (corruption / 100.0) * 0.6 + (1 - loyalty / 100.0) * 0.3))
+    import random as _rnd
+    from inner_palace_system import _ip_log
+    if _rnd.random() < success_rate:
+        amount = _rnd.randint(20, 60)
+        ip['budget'] = max(0, int(ip.get('budget', 0) or 0) - amount)
+        game_state.silver = int(getattr(game_state, 'silver', 0) or 0) + amount
+        ev = _rnd.randint(2, 5)
+        ip['corruption_evidence'] = int(ip.get('corruption_evidence', 0) or 0) + ev
+        _ip_log(ip, f'玩家贪墨{amount}两，罪证+{ev}')
+        return jsonify({'message': f'贪墨成功！获得{amount}两，但留下了蛛丝马迹…', 'silver': game_state.silver, 'budget': ip['budget']})
+    else:
+        loss = _rnd.randint(3, 8)
+        game_state.attributes['威望'] = max(0, int(game_state.attributes.get('威望', 0) or 0) - loss)
+        _ip_log(ip, f'玩家贪墨败露，威望-{loss}')
+        return jsonify({'message': f'贪墨败露！你威望-{loss}', 'prestige': game_state.attributes['威望']})
+
+
+@app.route('/api/inner_palace/audit', methods=['POST'])
+def inner_palace_audit():
+    """查账：若 corruption_evidence > 0 则查出罪证、威望+；否则可能被反噬。消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    evidence = int(ip.get('corruption_evidence', 0) or 0)
+    from inner_palace_system import _ip_log
+    import random as _rnd
+    if evidence > 0:
+        found = min(evidence, _rnd.randint(5, 15))
+        ip['corruption_evidence'] = max(0, evidence - found)
+        gain = _rnd.randint(3, 8)
+        game_state.attributes['威望'] = min(game_state.get_attr_max('威望'), int(game_state.attributes.get('威望', 0) or 0) + gain)
+        ip['audited_this_period'] = True
+        _ip_log(ip, f'查账有功，清除罪证{found}，威望+{gain}')
+        return jsonify({'message': f'查账成功！清除罪证{found}点，威望+{gain}', 'prestige': game_state.attributes['威望'], 'evidence': ip['corruption_evidence']})
+    else:
+        # 无证据时可能反噬
+        if _rnd.random() < 0.3:
+            loss = _rnd.randint(2, 5)
+            game_state.attributes['威望'] = max(0, int(game_state.attributes.get('威望', 0) or 0) - loss)
+            _ip_log(ip, f'查账无果反被诬，威望-{loss}')
+            return jsonify({'message': f'查账未发现异常，反被总管倒打一耙，威望-{loss}', 'prestige': game_state.attributes['威望']})
+        ip['audited_this_period'] = True
+        _ip_log(ip, '查账无异常')
+        return jsonify({'message': '查账完毕，未发现异常。'})
+
 # ============================================================
 #  AI服务
 # ============================================================
@@ -6200,6 +6322,25 @@ def next_period():
     if growth_events:
         for msg in growth_events:
             game_state.add_memory(msg)
+
+    # ---- 内务府自治结算：月例/库存/物价/总管AI/NPC讨要/重华宫联动 ----
+    from inner_palace_system import inner_palace_period_tick
+    try:
+        ip_events = inner_palace_period_tick(
+            game_state,
+            normalize_inner_palace,
+            RANK_POWER,
+            chonghua_count_inside=chonghua_count_inside,
+            CHONGHUA_UPKEEP_PER_CHILD=CHONGHUA_UPKEEP_PER_CHILD,
+        )
+        for msg in ip_events:
+            intelligence.append(msg)
+            game_state.add_memory(msg)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        intelligence.append(f'⚠️ 内务府结算异常：{e}')
+
 
     # ---- 重华宫转旬结算：出馆/收容/用度/教养 ----
     chonghua_events = chonghua_period_tick(game_state)
