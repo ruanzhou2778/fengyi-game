@@ -9,7 +9,9 @@ venv/
 saves/
 *.log
 
-# 一次性补丁脚本与验证产物
+# 备份文件
+*.bak*
+*.bak_*
 _*.py
 _*.js
 _*.txt
