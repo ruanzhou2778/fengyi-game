@@ -26,12 +26,18 @@ COURT_FACTIONS = {
 }
 
 
+# 内务府总管派系
+IP_CHIEF_FACTIONS = ["皇后派", "太后派", "皇帝派", "中立"]
+
+
 def default_inner_palace():
     """内务府默认状态。"""
     return {
         "budget": 800,
         "storehouse": {"布匹": 30, "药材": 15, "香料": 10, "木材": 20, "食材": 40},
-        "chief": {"name": "苏培盛", "loyalty": 60, "corruption": 25, "skill": 70},
+        "chief": {"name": "苏培盛", "loyalty": 60, "corruption": 25, "skill": 70,
+                  "faction": "中立", "tenure": 0, "performance": 0,
+                  "appointed_by": "祖传", "dismissed": 0},
         "market": {"布匹": 5, "药材": 10, "香料": 15, "木材": 8, "食材": 3},
         "monthly_stipend": {
             "皇后": 100, "皇贵妃": 80, "贵妃": 70, "妃": 60, "嫔": 50,
@@ -40,6 +46,24 @@ def default_inner_palace():
         "logs": [],
         "corruption_evidence": 0,
         "audited_this_period": False,
+        # ---- 权谋操作：克扣份例 / 额外赏赐（逐旬结算）----
+        "stipend_cuts": {},
+        "bonus_gifts": {},
+        # ---- 宫宴承办 ----
+        "banquet": None,
+        "banquet_history": [],
+        # ---- 私库（公银转私银）----
+        "private_purse": {"enabled": False, "total_transferred": 0,
+                          "last_transfer_period": 0, "transfer_logs": []},
+        # ---- 季度考绩（每 30 旬一次）----
+        "performance_reviews": {"last_review": 0, "score": 0, "grade": "",
+                                "next_review": 30, "history": []},
+        # ---- 产业投资（长线经营）----
+        "projects": {
+            "皇庄": {"level": 0, "invested": 0, "income_per_period": 0, "status": "正常", "status_periods": 0},
+            "织造局": {"level": 0, "invested": 0, "income_per_period": 0, "status": "正常", "status_periods": 0},
+            "茶庄": {"level": 0, "invested": 0, "income_per_period": 0, "status": "正常", "status_periods": 0},
+        },
     }
 
 
@@ -75,6 +99,19 @@ def normalize_inner_palace(data):
             v = _ip_int(ch, attr, None)
             if v is not None:
                 base["chief"][attr] = max(0, min(100, v))
+        faction = ch.get("faction")
+        if faction in IP_CHIEF_FACTIONS:
+            base["chief"]["faction"] = faction
+        for attr in ("tenure", "dismissed"):
+            v = _ip_int(ch, attr, None)
+            if v is not None:
+                base["chief"][attr] = max(0, v)
+        perf = _ip_int(ch, "performance", None)
+        if perf is not None:
+            base["chief"]["performance"] = max(-100, min(100, perf))
+        ab = ch.get("appointed_by")
+        if isinstance(ab, str) and ab.strip():
+            base["chief"]["appointed_by"] = ab.strip()
     # market
     mk = data.get("market")
     if isinstance(mk, dict):
@@ -98,6 +135,69 @@ def normalize_inner_palace(data):
         pass
     # audited_this_period
     base["audited_this_period"] = bool(data.get("audited_this_period", False))
+    # stipend_cuts / bonus_gifts（逐旬权谋）
+    for key in ("stipend_cuts", "bonus_gifts"):
+        raw = data.get(key)
+        clean = {}
+        if isinstance(raw, dict):
+            for tgt, v in raw.items():
+                if not isinstance(v, dict):
+                    continue
+                pct = _ip_int(v, "amount", 0)
+                periods = _ip_int(v, "periods", 0)
+                if periods <= 0:
+                    continue
+                if key == "stipend_cuts":
+                    pct = max(10, min(50, pct))
+                    clean[str(tgt)] = {"amount": pct, "periods": min(30, periods),
+                                       "start_period": _ip_int(v, "start_period", 0)}
+                else:
+                    clean[str(tgt)] = {"amount": max(0, min(100, pct)),
+                                       "periods": min(30, periods),
+                                       "start_period": _ip_int(v, "start_period", 0)}
+        base[key] = clean
+    # banquet / banquet_history
+    bq = data.get("banquet")
+    base["banquet"] = bq if isinstance(bq, dict) else None
+    bh = data.get("banquet_history")
+    if isinstance(bh, list):
+        base["banquet_history"] = [x for x in bh if isinstance(x, dict)][:20]
+    # private_purse
+    pp = data.get("private_purse")
+    if isinstance(pp, dict):
+        base["private_purse"] = {
+            "enabled": bool(pp.get("enabled", False)),
+            "total_transferred": max(0, _ip_int(pp, "total_transferred", 0)),
+            "last_transfer_period": max(0, _ip_int(pp, "last_transfer_period", 0)),
+            "transfer_logs": [str(x) for x in pp.get("transfer_logs", [])[-30:]]
+            if isinstance(pp.get("transfer_logs"), list) else [],
+        }
+    # performance_reviews
+    pr = data.get("performance_reviews")
+    if isinstance(pr, dict):
+        history = [x for x in pr.get("history", []) if isinstance(x, dict)][:12] \
+            if isinstance(pr.get("history"), list) else []
+        base["performance_reviews"] = {
+            "last_review": max(0, _ip_int(pr, "last_review", 0)),
+            "score": _ip_int(pr, "score", 0),
+            "grade": str(pr.get("grade", "")),
+            "next_review": max(0, _ip_int(pr, "next_review", 30)),
+            "history": history,
+        }
+    # projects
+    pj = data.get("projects")
+    if isinstance(pj, dict):
+        for name in base["projects"]:
+            src = pj.get(name)
+            if not isinstance(src, dict):
+                continue
+            dst = base["projects"][name]
+            for attr in ("level", "invested", "income_per_period", "status_periods"):
+                dst[attr] = max(0, _ip_int(src, attr, 0))
+            dst["level"] = min(5, dst["level"])
+            status = src.get("status")
+            if status in ("正常", "丰收", "灾荒", "贪墨"):
+                dst["status"] = status
     return base
 
 
@@ -470,6 +570,8 @@ class GameState:
         self.heir_race = default_heir_race()
         # 内务府自治系统
         self.inner_palace = default_inner_palace()
+        # 内务府总管派系（顶层冗余，便于其他系统直接读取）
+        self.chief_faction = "中立"
         self.emperor = {
             "name": "萧景琰",
             "personality": random.choice([p.value for p in EmperorPersonality]),
@@ -680,6 +782,7 @@ class GameState:
             "court_faction_favor": normalize_court_faction_favor(getattr(self, "court_faction_favor", None)),
             "heir_race": normalize_heir_race(getattr(self, "heir_race", None)),
             "inner_palace": normalize_inner_palace(getattr(self, "inner_palace", None)),
+            "chief_faction": getattr(self, "chief_faction", "中立"),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -790,6 +893,8 @@ class GameState:
             game_state.court_faction_favor = normalize_court_faction_favor(data.get("court_faction_favor"))
             game_state.heir_race = normalize_heir_race(data.get("heir_race"))
             game_state.inner_palace = normalize_inner_palace(data.get("inner_palace"))
+            game_state.chief_faction = data.get("chief_faction") if data.get("chief_faction") in (
+                "皇后派", "太后派", "皇帝派", "中立") else "中立"
             try:
                 game_state.child_uid_seq = max(1, int(data.get("child_uid_seq", 1) or 1))
             except (TypeError, ValueError):

@@ -4872,20 +4872,13 @@ def guard_action(game_state):
 # ============================================================
 @app.route('/api/inner_palace/status', methods=['GET'])
 def inner_palace_status():
-    """只读查询内务府状态。"""
+    """只读查询内务府状态（含 Phase 1-5 全部字段）。"""
     player_id = request.args.get('player_id')
     game_state, err = session_or_404(player_id)
     if err:
         return err
     ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
-    return jsonify({
-        'budget': ip.get('budget', 0),
-        'storehouse': ip.get('storehouse', {}),
-        'chief': ip.get('chief', {}),
-        'market': ip.get('market', {}),
-        'logs': ip.get('logs', [])[-5:],
-        'corruption_evidence': ip.get('corruption_evidence', 0),
-    })
+    return jsonify(ip)
 
 
 @app.route('/api/inner_palace/purchase', methods=['POST'])
@@ -4988,6 +4981,390 @@ def inner_palace_audit():
         _ip_log(ip, '查账无异常')
         return jsonify({'message': '查账完毕，未发现异常。'})
 
+
+# ============================================================
+#  内务府扩展：Phase 1 权谋（克扣/赏赐/宫宴）
+# ============================================================
+# Phase 2 总管派系
+IP_CHIEF_FACTION_CHOICES = ["皇后派", "太后派", "皇帝派", "中立"]
+# Phase 1 宫宴规格
+IP_BANQUET_TIERS = {
+    "奢华": {"cost": 100, "pre": 8, "fav": 5},
+    "中等": {"cost": 50, "pre": 4, "fav": 3},
+    "简朴": {"cost": 20, "pre": 2, "fav": 1},
+}
+
+
+def _ip_banquet_effectiveness(ip):
+    """总管技能越高，办宴效果加成越多（100%~150%）。"""
+    skill = int((ip.get('chief') or {}).get('skill', 50) or 50)
+    return 100 + min(50, skill // 2)
+
+
+@app.route('/api/inner_palace/cut_stipend', methods=['POST'])
+def inner_palace_cut_stipend():
+    """克扣份例：某目标月例按比例缩减数旬。成功则库银逐旬回补，
+    但目标好感/健康受损，且存在被总管揭发的风险。消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    target = (data.get('target') or '').strip()
+    try:
+        pct = int(data.get('pct', 30) or 30)
+    except (TypeError, ValueError):
+        pct = 30
+    pct = max(10, min(50, pct))
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    npc = (game_state.npcs or {}).get(target)
+    if not isinstance(npc, dict) or not npc.get('alive', True):
+        return jsonify({'error': f'目标「{target}」不存在或已故'}), 400
+    if target == '太后':
+        return jsonify({'error': '太后的份例不可克扣'}), 400
+    rank = normalize_rank_name(npc.get('rank', ''))
+    base_amt = int(ip.get('monthly_stipend', {}).get(rank, 0) or 0)
+    if base_amt <= 0:
+        return jsonify({'error': f'{target}当前位份无月例可克'}), 400
+    cuts = ip.setdefault('stipend_cuts', {})
+    if target in cuts and isinstance(cuts[target], dict) and cuts[target].get('periods', 0) > 0:
+        return jsonify({'error': f'对{target}的克扣仍在生效中'}), 400
+    cuts[target] = {'amount': pct, 'periods': min(30, max(3, int(data.get('periods', 10) or 10))),
+                    'start_period': int(game_state.day or 0)}
+    from inner_palace_system import _ip_log
+    _ip_log(ip, f'暗中克扣{target}份例{pct}%，持续{cuts[target]["periods"]}旬')
+    return jsonify({'message': f'已授意内务府暗中克扣{target}的份例{pct}%（{cuts[target]["periods"]}旬）。小心别被察觉。',
+                    'target': target, 'pct': pct, 'periods': cuts[target]['periods']})
+
+
+@app.route('/api/inner_palace/give_bonus', methods=['POST'])
+def inner_palace_give_bonus():
+    """额外赏赐：立即花费库银，数旬内每月例之外加发赏银。
+    目标好感+、健康+。消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    target = (data.get('target') or '').strip()
+    try:
+        amount = int(data.get('amount', 20) or 20)
+    except (TypeError, ValueError):
+        amount = 20
+    amount = max(1, min(100, amount))
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    npc = (game_state.npcs or {}).get(target)
+    if not isinstance(npc, dict) or not npc.get('alive', True):
+        return jsonify({'error': f'目标「{target}」不存在或已故'}), 400
+    if target == '太后':
+        return jsonify({'error': '请通过请安或奏请太后，不必走内务府'}), 400
+    periods = min(30, max(3, int(data.get('periods', 5) or 5)))
+    cost = amount * periods
+    budget = int(ip.get('budget', 0) or 0)
+    if budget < cost:
+        return jsonify({'error': f'库银不足（需{cost}两，余{budget}两）'}), 400
+    ip['budget'] = budget - cost
+    gifts = ip.setdefault('bonus_gifts', {})
+    cur = gifts.get(target)
+    if isinstance(cur, dict) and int(cur.get('periods', 0) or 0) > 0:
+        cur['amount'] = min(100, int(cur.get('amount', 0) or 0) + amount)
+        cur['periods'] = min(30, int(cur.get('periods', 0) or 0) + periods)
+    else:
+        gifts[target] = {'amount': amount, 'periods': periods, 'start_period': int(game_state.day or 0)}
+    rel = game_state.relationships.get(target)
+    if isinstance(rel, dict):
+        rel['好感'] = min(100, int(rel.get('好感', 0) or 0) + 5)
+    npc['health'] = min(100, int(npc.get('health', 50) or 50) + 3)
+    from inner_palace_system import _ip_log
+    _ip_log(ip, f'额外赏赐{target}：{gifts[target]["amount"]}两/旬×{gifts[target]["periods"]}旬，本次拨{cost}两')
+    return jsonify({'message': f'已拨银{cost}两，{gifts[target]["periods"]}旬内{target}每月例之外多领{gifts[target]["amount"]}两。好感+5。',
+                    'budget': ip['budget']})
+
+
+@app.route('/api/inner_palace/banquet', methods=['POST'])
+def inner_palace_banquet():
+    """承办宫宴：立即花费库银，获得威望与皇帝好感（总管技能加成）。
+    消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    tier = (data.get('tier') or '中等').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    spec = IP_BANQUET_TIERS.get(tier)
+    if not spec:
+        return jsonify({'error': f'未知宫宴规格「{tier}」，可选：{"、".join(IP_BANQUET_TIERS)}'}), 400
+    budget = int(ip.get('budget', 0) or 0)
+    if budget < spec['cost']:
+        return jsonify({'error': f'库银不足（需{spec["cost"]}两，余{budget}两）'}), 400
+    ip['budget'] = budget - spec['cost']
+    eff = _ip_banquet_effectiveness(ip)
+    pre = max(1, spec['pre'] * eff // 100)
+    fav = max(1, spec['fav'] * eff // 100)
+    try:
+        pmax = game_state.get_attr_max('威望')
+    except Exception:
+        pmax = 999
+    game_state.attributes['威望'] = max(0, min(pmax, int(game_state.attributes.get('威望', 0) or 0) + pre))
+    em = game_state.relationships.get('皇帝')
+    if isinstance(em, dict):
+        em['好感'] = min(100, int(em.get('好感', 0) or 0) + fav)
+    record = {'period': int(game_state.day or 0), 'tier': tier, 'cost': spec['cost'],
+              'pre': pre, 'fav': fav}
+    ip['banquet'] = record
+    hist = ip.get('banquet_history')
+    if not isinstance(hist, list):
+        hist = []
+    hist.append(record)
+    ip['banquet_history'] = hist[-20:]
+    from inner_palace_system import _ip_log
+    _ip_log(ip, f'承办{tier}宫宴，花费{spec["cost"]}两，威望+{pre}')
+    return jsonify({'message': f'{tier}宫宴举办成功！花费{spec["cost"]}两，威望+{pre}，皇帝好感+{fav}。',
+                    'pre': pre, 'fav': fav, 'budget': ip['budget'], 'record': record})
+
+
+# ============================================================
+#  内务府扩展：Phase 2 总管任免 / Phase 3 私库
+# ============================================================
+def _ip_new_chief_data():
+    """随机生成一位新总管（含派系）。"""
+    from names import generate_servant_name
+    import random as _rnd
+    return {
+        'name': generate_servant_name('太监'),
+        'loyalty': _rnd.randint(35, 75),
+        'corruption': _rnd.randint(15, 60),
+        'skill': _rnd.randint(45, 85),
+        'faction': _rnd.choice(IP_CHIEF_FACTION_CHOICES),
+        'tenure': 0,
+        'performance': 0,
+        'appointed_by': '现任',
+        'dismissed': 0,
+    }
+
+
+@app.route('/api/inner_palace/chief/appoint', methods=['POST'])
+def inner_palace_chief_appoint():
+    """任命新总管：花费 100 两与 1 行动点，随机生成新总管（含派系）。
+    原总管若贪腐高，会留下罪证尾巴。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    budget = int(ip.get('budget', 0) or 0)
+    if budget < 100:
+        return jsonify({'error': f'任命总管需仪银100两（余{budget}两）'}), 400
+    ip['budget'] = budget - 100
+    old = ip.get('chief') or {}
+    old['dismissed'] = int(old.get('dismissed', 0) or 0) + 1
+    ev = max(0, min(15, int(old.get('corruption', 0) or 0) // 10))
+    if ev > 0:
+        ip['corruption_evidence'] = int(ip.get('corruption_evidence', 0) or 0) + ev
+    new_chief = _ip_new_chief_data()
+    ip['chief'] = new_chief
+    game_state.chief_faction = new_chief['faction']
+    from inner_palace_system import _ip_log
+    _ip_log(ip, f'任命{new_chief["name"]}为新总管（{new_chief["faction"]}），花费100两')
+    return jsonify({'message': f'新总管{new_chief["name"]}（{new_chief["faction"]}）走马上任。忠{new_chief["loyalty"]}/贪{new_chief["corruption"]}/能{new_chief["skill"]}'
+                    + (f'；前任留下罪证{ev}点。' if ev else ''),
+                    'chief': new_chief, 'budget': ip['budget']})
+
+
+@app.route('/api/inner_palace/chief/dismiss', methods=['POST'])
+def inner_palace_chief_dismiss():
+    """弹劾解职总管：需威望≥80 或罪证≥20，花费 50 两与 1 行动点。
+    罪证清零，但总管绩效-15。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    prestige = int(game_state.attributes.get('威望', 0) or 0)
+    evidence = int(ip.get('corruption_evidence', 0) or 0)
+    if prestige < 80 and evidence < 20:
+        return jsonify({'error': f'弹劾总管需威望≥80（当前{prestige}）或罪证≥20（当前{evidence}）'}), 400
+    budget = int(ip.get('budget', 0) or 0)
+    if budget < 50:
+        return jsonify({'error': f'弹劾需运作银两50两（余{budget}两）'}), 400
+    ip['budget'] = budget - 50
+    chief = ip.get('chief') or {}
+    old_name = chief.get('name', '总管')
+    ip['corruption_evidence'] = 0
+    chief['dismissed'] = int(chief.get('dismissed', 0) or 0) + 1
+    chief['performance'] = max(-100, int(chief.get('performance', 0) or 0) - 15)
+    from inner_palace_system import _ip_log
+    _ip_log(ip, f'弹劾解职总管{old_name}，花费50两，罪证清零')
+    return jsonify({'message': f'{old_name}被弹劾解职，内务府重新洗牌。罪证已清零。',
+                    'budget': ip['budget']})
+
+
+@app.route('/api/inner_palace/private_purse/enable', methods=['POST'])
+def inner_palace_purse_enable():
+    """开通私库：威望≥80 时允许公银转私银。不消耗行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ensure_ending_fields(game_state)
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    purse = ip.get('private_purse')
+    if not isinstance(purse, dict):
+        purse = ip['private_purse'] = {'enabled': False, 'total_transferred': 0,
+                                       'last_transfer_period': 0, 'transfer_logs': []}
+    if purse.get('enabled'):
+        return jsonify({'error': '私库已开通'}), 400
+    prestige = int(game_state.attributes.get('威望', 0) or 0)
+    if prestige < 80:
+        return jsonify({'error': f'威望不足（需≥80，当前{prestige}），开私库需足够分量'}), 400
+    purse['enabled'] = True
+    from inner_palace_system import _ip_log
+    _ip_log(ip, '开通私库：可授意内务府公银转私银')
+    return jsonify({'message': '私库已开通。此后可将内务府库银转入你的私库。'})
+
+
+@app.route('/api/inner_palace/private_purse/transfer', methods=['POST'])
+def inner_palace_purse_transfer():
+    """私库划转：每旬限一次，每次上限50两。成功率取决于总管忠诚与贪腐。
+    失败则被察觉（威望-，留罪证）。消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    try:
+        amount = int(data.get('amount', 20) or 20)
+    except (TypeError, ValueError):
+        amount = 20
+    amount = max(1, min(50, amount))
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    purse = ip.get('private_purse')
+    if not isinstance(purse, dict) or not purse.get('enabled'):
+        return jsonify({'error': '私库尚未开通（需威望≥80）'}), 400
+    period = int(game_state.day or 0)
+    if int(purse.get('last_transfer_period', 0) or 0) >= period:
+        return jsonify({'error': '本旬已划转过，请下旬再试'}), 400
+    budget = int(ip.get('budget', 0) or 0)
+    if budget < amount:
+        return jsonify({'error': f'库银不足（余{budget}两）'}), 400
+    chief = ip.get('chief') or {}
+    success_rate = max(0.3, min(0.95,
+        0.5 + (int(chief.get('loyalty', 50) or 50) - 50) / 200.0
+        - int(ip.get('corruption_evidence', 0) or 0) / 200.0
+        - int(chief.get('corruption', 0) or 0) / 400.0))
+    import random as _rnd
+    from inner_palace_system import _ip_log
+    if _rnd.random() < success_rate:
+        ip['budget'] = budget - amount
+        game_state.silver = int(getattr(game_state, 'silver', 0) or 0) + amount
+        purse['last_transfer_period'] = period
+        purse['total_transferred'] = int(purse.get('total_transferred', 0) or 0) + amount
+        _ip_log(ip, f'私库划转{amount}两，成功')
+        return jsonify({'message': f'银两悄然转入私库{amount}两，账面分文不动。',
+                        'silver': game_state.silver, 'budget': ip['budget']})
+    loss = _rnd.randint(3, 6)
+    ev = _rnd.randint(3, 8)
+    game_state.attributes['威望'] = max(0, int(game_state.attributes.get('威望', 0) or 0) - loss)
+    ip['corruption_evidence'] = int(ip.get('corruption_evidence', 0) or 0) + ev
+    logs = purse.get('transfer_logs')
+    if not isinstance(logs, list):
+        logs = []
+    logs.append(f'[{period}] 划转{amount}两被察觉，威望-{loss}，罪证+{ev}')
+    purse['transfer_logs'] = logs[-30:]
+    _ip_log(ip, f'私库划转{amount}两被察觉，威望-{loss}，罪证+{ev}')
+    return jsonify({'message': f'划转之事被察觉！{chief.get("name", "总管")}神色有异。威望-{loss}，罪证+{ev}',
+                    'prestige': game_state.attributes['威望']})
+
+
+# ============================================================
+#  内务府扩展：Phase 4 考绩 / Phase 5 产业
+# ============================================================
+@app.route('/api/inner_palace/performance', methods=['GET'])
+def inner_palace_performance():
+    """只读查询季度考绩状态。"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    reviews = ip.get('performance_reviews') or {}
+    day = int(getattr(game_state, 'day', 0) or 0)
+    return jsonify({
+        'last_review': reviews.get('last_review', 0),
+        'score': reviews.get('score', 0),
+        'grade': reviews.get('grade', ''),
+        'next_review': reviews.get('next_review', 30),
+        'periods_left': max(0, int(reviews.get('next_review', 30) or 30) - day),
+        'history': (reviews.get('history') or [])[-6:],
+        'projects': ip.get('projects', {}),
+    })
+
+
+@app.route('/api/inner_palace/project/upgrade', methods=['POST'])
+def inner_palace_project_upgrade():
+    """产业投资/升级：皇庄/织造局/茶庄，每级收益+5两，上限5级。
+    花费 = 100 + 80×(当前等级)。消耗 1 行动点。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    name = (data.get('name') or '').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, e = guard_action(game_state)
+    if not ok:
+        return e
+    ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    game_state.inner_palace = ip
+    projects = ip.get('projects') or {}
+    proj = projects.get(name)
+    if not isinstance(proj, dict):
+        return jsonify({'error': f'未知名目「{name}」，可选：皇庄、织造局、茶庄'}), 400
+    level = int(proj.get('level', 0) or 0)
+    if level >= 5:
+        return jsonify({'error': f'{name}已达最高等级（5级）'}), 400
+    cost = 100 + 80 * level
+    budget = int(ip.get('budget', 0) or 0)
+    if budget < cost:
+        return jsonify({'error': f'库银不足（升级{name}需{cost}两，余{budget}两）'}), 400
+    ip['budget'] = budget - cost
+    proj['level'] = level + 1
+    proj['invested'] = int(proj.get('invested', 0) or 0) + cost
+    proj['income_per_period'] = proj['level'] * 5
+    from inner_palace_system import _ip_log
+    _ip_log(ip, f'投资{name}升至{proj["level"]}级，花费{cost}两，收益{proj["income_per_period"]}两/旬')
+    return jsonify({'message': f'{name}升级至{proj["level"]}级！每旬收益{proj["income_per_period"]}两。',
+                    'project': proj, 'budget': ip['budget']})
 # ============================================================
 #  AI服务
 # ============================================================

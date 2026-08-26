@@ -22,6 +22,34 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
     msgs = []
     stipend_table = ip.get('monthly_stipend', {})
     budget = int(ip.get('budget', 0) or 0)
+    quarter_start_budget = budget  # 考绩用：本季度开局库银
+    # ---- 生效中的克扣 / 赏赐（Phase 1 权谋操作）----
+    cuts_raw = ip.get('stipend_cuts') or {}
+    gifts_raw = ip.get('bonus_gifts') or {}
+    if not isinstance(cuts_raw, dict):
+        cuts_raw = {}
+    if not isinstance(gifts_raw, dict):
+        gifts_raw = {}
+    cut_amt = {}
+    for tgt, v in cuts_raw.items():
+        if not isinstance(v, dict):
+            continue
+        npc = (game_state.npcs or {}).get(tgt)
+        if not isinstance(npc, dict) or not npc.get('alive', True):
+            continue
+        pct = max(0, min(50, int(v.get('amount', 0) or 0)))
+        if pct > 0:
+            cut_amt[str(tgt)] = pct
+    gift_amt = {}
+    for tgt, v in gifts_raw.items():
+        if not isinstance(v, dict):
+            continue
+        npc = (game_state.npcs or {}).get(tgt)
+        if not isinstance(npc, dict) or not npc.get('alive', True):
+            continue
+        amt = max(0, min(100, int(v.get('amount', 0) or 0)))
+        if amt > 0:
+            gift_amt[str(tgt)] = amt
     total_due = 0
     payouts = []
     player_rank = normalize_rank_name(getattr(game_state.rank, 'name', '秀女'))
@@ -34,6 +62,10 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
         r = normalize_rank_name(npc.get('rank', ''))
         if r == '太后': continue
         amt = int(stipend_table.get(r, 0))
+        if npc_name in cut_amt:
+            amt = max(0, amt - int(stipend_table.get(r, 0)) * cut_amt[npc_name] // 100)
+        if npc_name in gift_amt:
+            amt += gift_amt[npc_name]
         if amt > 0:
             payouts.append((npc_name, amt, r, False))
             total_due += amt
@@ -183,6 +215,192 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
                 msgs.append(f'💸 内务府无力全额拨付重华宫用度，欠饷{short}两')
                 _ip_log(ip, f'重华宫用度不足，欠饷{short}两')
 
+    # ---------- 7. 克扣份例：到期递减 + 总管揭发 + 副作用 ----------
+    cuts = ip.get('stipend_cuts')
+    if not isinstance(cuts, dict) or not cuts:
+        cuts = None
+    if cuts:
+        chief = ip.get('chief') or {}
+        exposure = max(0.05, min(0.65,
+                    (1 - int(chief.get('loyalty', 50) or 50) / 200.0)
+                    + int(chief.get('corruption', 0) or 0) / 250.0))
+        expired = []
+        for tgt, v in list(cuts.items()):
+            if not isinstance(v, dict):
+                expired.append(tgt)
+                continue
+            left = int(v.get('periods', 0) or 0) - 1
+            if left <= 0:
+                expired.append(tgt)
+                continue
+            npc = (game_state.npcs or {}).get(tgt)
+            if not isinstance(npc, dict) or not npc.get('alive', True):
+                expired.append(tgt)
+                continue
+            v['periods'] = left
+            pct = int(v.get('amount', 0) or 0)
+            npc['health'] = max(0, int(npc.get('health', 50) or 50) - 1)
+            rel = (game_state.relationships or {}).get(tgt)
+            if isinstance(rel, dict):
+                rel['好感'] = max(-100, int(rel.get('好感', 0) or 0) - 3)
+            if random.random() < exposure:
+                ev = random.randint(5, 10)
+                ip['corruption_evidence'] = int(ip.get('corruption_evidence', 0) or 0) + ev
+                game_state.attributes['威望'] = max(0, int(game_state.attributes.get('威望', 0) or 0) - 5)
+                _ip_log(ip, f'{chief.get("name", "总管")}揭发你克扣{tgt}份例，罪证+{ev}')
+                msgs.append(f'💥 克扣{tgt}份例被揭发！你威望-5，罪证+{ev}')
+                expired.append(tgt)
+        for t in expired:
+            cuts.pop(t, None)
+    # ---------- 8. 额外赏赐：到期递减 + 期满恩义递减 ----------
+    gifts = ip.get('bonus_gifts')
+    if not isinstance(gifts, dict) or not gifts:
+        gifts = None
+    if gifts:
+        expired = []
+        for tgt, v in list(gifts.items()):
+            if not isinstance(v, dict):
+                expired.append(tgt)
+                continue
+            left = int(v.get('periods', 0) or 0) - 1
+            npc = (game_state.npcs or {}).get(tgt)
+            if not isinstance(npc, dict) or not npc.get('alive', True):
+                expired.append(tgt)
+                continue
+            if left <= 0:
+                expired.append(tgt)
+                rel = (game_state.relationships or {}).get(tgt)
+                if isinstance(rel, dict):
+                    rel['好感'] = max(-100, int(rel.get('好感', 0) or 0) - 2)
+                _ip_log(ip, f'对{tgt}的额外赏赐期满，恩义渐散（好感-2）')
+            else:
+                v['periods'] = left
+        for t in expired:
+            gifts.pop(t, None)
+    # ---------- 9. 产业收益与状态流转（Phase 5）----------
+    projects = ip.get('projects')
+    if not isinstance(projects, dict):
+        ip['projects'] = {}
+        projects = ip['projects']
+    chief = ip.get('chief') or {}
+    for pname, p in list(projects.items()):
+        if not isinstance(p, dict) or int(p.get('level', 0) or 0) <= 0:
+            continue
+        base_inc = int(p.get('income_per_period', 0) or 0)
+        status = p.get('status', '正常')
+        if status in ('丰收', '灾荒', '贪墨'):
+            left = int(p.get('status_periods', 0) or 0) - 1
+            if left <= 0:
+                p['status'] = '正常'
+                p['status_periods'] = 0
+                status = '正常'
+            else:
+                p['status_periods'] = left
+        inc = base_inc
+        if status == '丰收':
+            inc = base_inc * 2
+        elif status == '灾荒':
+            inc = max(0, base_inc // 2)
+        elif status == '贪墨':
+            inc = 0
+        if inc > 0:
+            ip['budget'] = int(ip.get('budget', 0) or 0) + inc
+            _ip_log(ip, f'{pname}{status if status != "正常" else ""}进账{inc}两')
+        roll = random.random()
+        if status == '正常':
+            if roll < 0.05:
+                p['status'] = '丰收'
+                p['status_periods'] = random.randint(3, 6)
+                msgs.append(f'🌾 {pname}风调雨顺，进入丰年（收益翻倍数旬）')
+                _ip_log(ip, f'{pname}丰收')
+            elif roll < 0.10:
+                p['status'] = '灾荒'
+                p['status_periods'] = random.randint(2, 4)
+                msgs.append(f'🌪 {pname}遭遇灾荒，收益减半数旬')
+                _ip_log(ip, f'{pname}灾荒')
+            elif roll < 0.12 and int(chief.get('corruption', 0) or 0) > 50:
+                p['status'] = '贪墨'
+                p['status_periods'] = random.randint(2, 4)
+                ip['corruption_evidence'] = int(ip.get('corruption_evidence', 0) or 0) + 5
+                msgs.append(f'🐀 总管在{pname}账目上做手脚，收益被截，罪证+5')
+                _ip_log(ip, f'{pname}被贪墨')
+    # ---------- 10. 季度考绩（每30旬，Phase 4）----------
+    day = int(getattr(game_state, 'day', 0) or 0)
+    reviews = ip.get('performance_reviews')
+    if not isinstance(reviews, dict):
+        ip['performance_reviews'] = {'last_review': 0, 'score': 0, 'grade': '',
+                                     'next_review': 30, 'history': []}
+        reviews = ip['performance_reviews']
+    if day >= int(reviews.get('next_review', 30) or 30) and day > 0:
+        end_b = int(ip.get('budget', 0) or 0)
+        budget_score = max(0, min(40, 40 - max(0, quarter_start_budget - end_b) // 10))
+        low_store = sum(1 for k, v in (ip.get('storehouse') or {}).items() if int(v or 0) < 5)
+        store_score = max(0, min(30, 30 - low_store * 10))
+        favs = [int(v.get('favor', 50) or 50) for v in (game_state.npcs or {}).values()
+                if isinstance(v, dict) and v.get('alive', True)]
+        avg_fav = sum(favs) / len(favs) if favs else 50.0
+        favor_score = max(0, min(30, int(avg_fav)))
+        score = budget_score + store_score + favor_score
+        if score >= 80:
+            grade, pre, fav = '优', 5, 3
+        elif score >= 60:
+            grade, pre, fav = '平', 0, 0
+        else:
+            grade, pre, fav = '劣', -5, -3
+        try:
+            pmax = game_state.get_attr_max('威望')
+        except Exception:
+            pmax = 999
+        if pre:
+            game_state.attributes['威望'] = max(0, min(pmax,
+                                                       int(game_state.attributes.get('威望', 0) or 0) + pre))
+        em = (game_state.relationships or {}).get('皇帝')
+        if isinstance(em, dict) and fav:
+            em['好感'] = max(-100, min(100, int(em.get('好感', 0) or 0) + fav))
+        chief = ip.get('chief') or {}
+        chief['performance'] = max(-100, min(100, int(chief.get('performance', 0) or 0) + (10 if pre > 0 else -5)))
+        record = {'period': day, 'score': score, 'grade': grade, 'budget_end': end_b}
+        reviews['last_review'] = day
+        reviews['score'] = score
+        reviews['grade'] = grade
+        reviews['next_review'] = day + 30
+        hist = reviews.get('history')
+        if not isinstance(hist, list):
+            hist = []
+        hist.append(record)
+        reviews['history'] = hist[-12:]
+        _ip_log(ip, f'季度考绩：{grade}（{score}分），威望{pre:+d}')
+        msgs.append(f'📋 内务府季度考绩：{grade}（{score}分）' +
+                    (f'，威望{pre:+d}' if pre else ''))
+    # ---------- 11. 总管派系行为（Phase 2）----------
+    chief = ip.get('chief') or {}
+    faction = chief.get('faction', '中立')
+    tenure = int(chief.get('tenure', 0) or 0) + 1
+    chief['tenure'] = tenure
+    if faction == '皇后派' and random.random() < 0.30:
+        ev = int(ip.get('corruption_evidence', 0) or 0)
+        if ev > 0:
+            ip['corruption_evidence'] = ev + random.randint(3, 6)
+            msgs.append('📢 皇后派总管向皇后密奏，内务府账目问题被传了出去！')
+            _ip_log(ip, '皇后派总管告密，罪证扩散')
+    elif faction == '太后派' and random.random() < 0.25:
+        dw = (game_state.npcs or {}).get('太后')
+        if isinstance(dw, dict):
+            dw['favor'] = min(100, int(dw.get('favor', 50) or 50) + random.randint(1, 3))
+            msgs.append('🙏 太后派总管替你美言，太后对你略有好感')
+            _ip_log(ip, '太后派总管美言，太后好感+')
+    elif faction == '皇帝派' and random.random() < 0.15:
+        taken = random.randint(10, 30)
+        cur = int(ip.get('budget', 0) or 0)
+        if cur >= taken:
+            ip['budget'] = cur - taken
+            msgs.append(f'👑 皇帝调拨内务府库银{taken}两充作军费')
+            _ip_log(ip, f'皇帝调库银{taken}两')
+    if tenure >= 30:
+        if faction in ('皇后派', '皇帝派'):
+            chief['corruption'] = max(0, min(100, int(chief.get('corruption', 0) or 0) + 1))
+        elif faction == '太后派':
+            chief['loyalty'] = min(100, int(chief.get('loyalty', 0) or 0) + 1)
     # 重置本旬审计标记
     ip['audited_this_period'] = False
 
