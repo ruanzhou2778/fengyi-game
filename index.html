@@ -5127,7 +5127,6 @@ if(!d.player_id){showToast('❌ 入宫失败，请重试');return;}
 playerId=d.player_id;localStorage.setItem('gongdou_playerId',playerId);trackKnownPlayerId(playerId);
 localStorage.setItem('gongdou_save_slot','default');
 localStorage.setItem('gongdou_player_name', name);
-showLoading(true,{title:'入宫选秀中…',sub:'正在载入宫廷名册…',icon:'📜'});
 await syncConfigToBackend(playerId);
 eventLogs=[];flipTriggeredThisRound=false;addLogEntry(`🌸 欢迎入宫，${name}！`,'system');
 gameOverEnding=null;closeEndingOverlay();
