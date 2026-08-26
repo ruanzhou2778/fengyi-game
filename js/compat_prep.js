@@ -160,21 +160,17 @@
         frm.innerHTML = '<div class="modal-box"><div class="modal-title">翻牌结果</div><div id="flipResultContent" class="modal-body" style="max-height:60dvh;overflow-y:auto;"></div><div style="text-align:center;padding-top:8px;"><button onclick="closeFlipResultModal()" class="btn btn-primary" style="padding:6px 22px;border-radius:12px;font-family:inherit;font-size:11px;cursor:pointer;">知道了</button></div></div>';
     }
 
-    // 13. 存档列表模态框 - 确保 saveListModalBody 在 saveListModal 中
+    // 13. 存档列表模态框 - 新版UI已内置真实 #saveListModal > .modal-box > #saveListModalBody，
+    // 真实 body 位于 .modal-box 内（其 parentNode 是 .modal-box 而非 overlay），
+    // 切勿因 parentNode !== overlay 就搬动/删除它——否则真实 body 被删、新桩挂到 overlay 根节点，
+    // 存档内容会渲染到弹窗外。仅在整体缺失时补桩，且优先补进 .modal-box。
     var slm = document.getElementById('saveListModal');
-    if (slm) {
-        var oldBody = document.getElementById('saveListModalBody');
-        if (oldBody) {
-            if (oldBody.parentNode !== slm) {
-                oldBody.parentNode.removeChild(oldBody);
-            }
-        }
-        if (!document.getElementById('saveListModalBody')) {
-            var sib = document.createElement('div');
-            sib.id = 'saveListModalBody';
-            sib.style.cssText = 'max-height:50dvh;overflow-y:auto;padding:4px;';
-            slm.appendChild(sib);
-        }
+    if (slm && !document.getElementById('saveListModalBody')) {
+        var sib = document.createElement('div');
+        sib.id = 'saveListModalBody';
+        sib.style.cssText = 'max-height:50dvh;overflow-y:auto;padding:4px;';
+        var slmBox = slm.querySelector('.modal-box') || slm;
+        slmBox.appendChild(sib);
     }
 
     window.__compatReady = true;
