@@ -353,6 +353,127 @@ async def run_test():
             el = await page.query_selector(sel)
             results.assert_true(el is not None, f"元素存在: {name} ({sel})")
 
+        # ---- 7b. 重构后关键渲染容器检查 ----
+        heading(1, "重构后渲染容器检查")
+        # 先关闭可能遗留的模态框（翻牌后赏赐/侍寝弹窗会延迟弹出并遮挡导航按钮）
+        try:
+            for _ in range(6):
+                active = await page.query_selector("#modalOverlay.active")
+                if not active:
+                    break
+                cbtn = await page.query_selector("#modalConfirmBtn")
+                if cbtn and await cbtn.is_visible():
+                    await cbtn.click()
+                else:
+                    await page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+        except Exception:
+            pass
+
+        # 通过 JS 直接切换底部导航页，规避弹窗指针拦截
+        async def switch_page(page_id):
+            await page.evaluate(
+                "(pid) => { var nav = document.querySelector"
+                "('.nav-item[data-page=\"'+pid+'\"]'); if(nav) nav.click(); }",
+                page_id)
+
+        # 状态页真实字段应被 updateStatusPage 填充（非占位 '-'）
+        try:
+            s_name = await page.evaluate(
+                "() => (document.getElementById('sName')||{}).textContent || ''")
+            results.assert_true(
+                s_name.strip() not in ("", "-"),
+                "状态页姓名已填充", f"sName='{s_name}'")
+            attr_bars = await page.evaluate(
+                "() => (document.getElementById('attrBars')||{}).children"
+                " ? document.getElementById('attrBars').children.length : 0")
+            results.assert_true(attr_bars > 0, "状态页属性条已渲染",
+                                f"attrBars 子节点={attr_bars}")
+        except Exception as e:
+            results.assert_true(False, "状态页填充检查", str(e))
+
+        # 后宫页人物：切到后宫页，npcGrid 应有妃嫔卡或至少非报错占位
+        try:
+            await switch_page("pageHarem")
+            await asyncio.sleep(0.6)
+            emp_name = await page.evaluate(
+                "() => (document.querySelector('#pageHarem .emperor-strip')"
+                " ? document.querySelector('#pageHarem .emperor-strip').textContent : '')")
+            results.assert_true(emp_name.strip() != "", "后宫页皇帝信息存在",
+                                f"emperor-strip='{emp_name[:30]}'")
+            npc_children = await page.evaluate(
+                "() => document.getElementById('npcGrid')"
+                " ? document.getElementById('npcGrid').children.length : -1")
+            results.assert_true(npc_children >= 0, "后宫页 npcGrid 存在",
+                                f"npcGrid 子节点={npc_children}")
+        except Exception as e:
+            results.assert_true(False, "后宫页人物检查", str(e))
+
+        # 宫斗页目标下拉：切到宫斗页，conflictTarget 应被 loadConflictTargets 填充
+        try:
+            await switch_page("pageConflict")
+            await asyncio.sleep(0.8)
+            ct_opts = await page.evaluate(
+                "() => document.getElementById('conflictTarget')"
+                " ? document.getElementById('conflictTarget').options.length : -1")
+            results.assert_true(ct_opts >= 1, "宫斗页目标下拉存在",
+                                f"conflictTarget options={ct_opts}")
+            for cid in ["duelTarget", "curseTarget", "intrigueTarget",
+                        "queenAuthorityTarget", "sixPalaceAssistantCandidate"]:
+                exists = await page.evaluate(
+                    f"() => !!document.getElementById('{cid}')")
+                results.assert_true(exists, f"宫斗页容器存在: #{cid}")
+        except Exception as e:
+            results.assert_true(False, "宫斗页下拉检查", str(e))
+
+        # 存档列表动态填充：打开读档弹窗，saveListModalBody 不应停留在“加载中...”
+        try:
+            has_fn = await page.evaluate(
+                "() => typeof openSaveListModal === 'function'")
+            if has_fn:
+                await page.evaluate("() => openSaveListModal()")
+                # renderSaveListModal 为异步，轮询等待填充
+                filled = False
+                body_txt = ""
+                for _ in range(20):
+                    await asyncio.sleep(0.4)
+                    body_txt = await page.evaluate(
+                        "() => (document.getElementById('saveListModalBody')||{})"
+                        ".textContent || ''")
+                    if body_txt.strip() and "加载中" not in body_txt:
+                        filled = True
+                        break
+                results.assert_true(filled, "存档列表已动态填充",
+                                    f"body='{body_txt[:40]}'")
+                # 关闭存档弹窗，避免遮挡后续断言
+                await page.evaluate(
+                    "() => (typeof closeSaveListModal==='function') "
+                    "&& closeSaveListModal()")
+                await asyncio.sleep(0.3)
+            else:
+                results.assert_true(True, "存档列表检查（跳过）",
+                                    "openSaveListModal 不存在")
+        except Exception as e:
+            results.assert_true(False, "存档列表动态填充检查", str(e))
+
+        # 结局浮层 DOM 与函数完整性
+        try:
+            ending_ok = await page.evaluate(
+                "() => !!document.getElementById('endingOverlay')"
+                " && !!document.getElementById('endingBox')"
+                " && typeof showEndingOverlay === 'function'"
+                " && typeof closeEndingOverlay === 'function'")
+            results.assert_true(ending_ok, "结局浮层 DOM/函数齐备")
+        except Exception as e:
+            results.assert_true(False, "结局浮层检查", str(e))
+
+        # 回到记事页，恢复初始导航态
+        try:
+            await switch_page("pageStory")
+            await asyncio.sleep(0.3)
+        except Exception:
+            pass
+
         # 输入框联动
         heading(1, "输入框联动检查")
         # 先关闭可能遗留的模态框（翻牌后侍寝/赏赐弹窗会延迟弹出并遮挡 sendBtn）

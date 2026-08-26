@@ -40,55 +40,29 @@
     if (la) la.innerHTML = '';
     ensureEl('logContent', 'div', 'logArea', 'padding:4px;font-size:8px;line-height:1.4;');
 
-    // 4. npcGrid - 替换新UI的.npc-grid
-    var ng = document.querySelector('.page#pageHarem .npc-grid');
-    ensureEl('npcGrid', 'div', null, '');
-    var ngEl = document.getElementById('npcGrid');
-    ngEl.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%;';
-    if (ng && ng.parentNode) {
-        ng.parentNode.insertBefore(ngEl, ng);
-        ng.parentNode.removeChild(ng);
+    // 4. npcGrid - 新版UI的 .npc-grid 已内置 id="npcGrid"，无需替换；
+    // 若真实节点已存在则仅清空占位内容，切勿 insertBefore/removeChild（会误删真实网格）。
+    var existingNpcGrid = document.getElementById('npcGrid');
+    if (existingNpcGrid) {
+        existingNpcGrid.innerHTML = '';
+    } else {
+        var ng = document.querySelector('.page#pageHarem .npc-grid');
+        ensureEl('npcGrid', 'div', null, '');
+        var ngEl = document.getElementById('npcGrid');
+        ngEl.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%;';
+        if (ng && ng.parentNode && ng !== ngEl) {
+            ng.parentNode.insertBefore(ngEl, ng);
+            ng.parentNode.removeChild(ng);
+        }
     }
 
-    // 5. 状态页 - 替换静态内容为可见动态元素
-    var ps = document.getElementById('pageStatus');
-    if (ps) {
-        ps.innerHTML = '<div id="statusContent" style="padding:5px;font-size:9px;line-height:1.6;">' +
-            '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;">' +
-            '<span id="sName" style="font-weight:bold;color:var(--gold);"></span> ' +
-            '<span id="sFamily" style="color:var(--text-light);"></span> ' +
-            '<span id="sRank" style="color:var(--gold);"></span>' +
-            '</div>' +
-            '<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px;font-size:8px;color:var(--text-light);">' +
-            '<span>🪙 <span id="sSilver">0</span></span> ' +
-            '<span>📅 <span id="sCalendar">-</span></span> ' +
-            '<span>👤 <span id="sAppearance">-</span></span> ' +
-            '<span>🎯 <span id="sTalent">-</span></span> ' +
-            '<span>🧠 <span id="sPersonality">-</span></span> ' +
-            '<span>⭐ <span id="sTraits">-</span></span>' +
-            '</div>' +
-            '<div id="attrBars" style="margin-bottom:3px;"></div>' +
-            '<div id="childrenGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-bottom:3px;"></div>' +
-            '<div id="factionContent" style="margin-bottom:3px;"></div>' +
-            '<div id="memoriesList" style="margin-bottom:3px;max-height:100px;overflow-y:auto;"></div>' +
-            '<div id="changeLog" style="margin-bottom:3px;max-height:80px;overflow-y:auto;"></div>' +
-            '</div>';
-    } else {
-        ensureEl('sName', 'span', null, 'display:none;');
-        ensureEl('sFamily', 'span', null, 'display:none;');
-        ensureEl('sRank', 'span', null, 'display:none;');
-        ensureEl('sSilver', 'span', null, 'display:none;');
-        ensureEl('sCalendar', 'span', null, 'display:none;');
-        ensureEl('sAppearance', 'span', null, 'display:none;');
-        ensureEl('sTalent', 'span', null, 'display:none;');
-        ensureEl('sPersonality', 'span', null, 'display:none;');
-        ensureEl('sTraits', 'span', null, 'display:none;');
-        ensureEl('attrBars', 'div', null, 'display:none;');
-        ensureEl('childrenGrid', 'div', null, 'display:none;');
-        ensureEl('factionContent', 'div', null, 'display:none;');
-        ensureEl('memoriesList', 'div', null, 'display:none;');
-        ensureEl('changeLog', 'div', null, 'display:none;');
-    }
+    // 5. 状态页 - 新版UI已内置真实ID，无需覆写；仅在缺失时补占位
+    (function(){
+        var statusIds = ['sName','sFamily','sRank','sSilver','sCalendar','sAppearance','sTalent','sPersonality','sTraits','attrBars','childrenGrid','factionContent','memoriesList','changeLog'];
+        statusIds.forEach(function(id){
+            if (!document.getElementById(id)) ensureEl(id, 'div', null, 'display:none;');
+        });
+    })();
 
     // 6. 模态框系统
     ensureEl('modalOverlay', 'div', null, '');
@@ -99,10 +73,17 @@
     // 7. 其他必要元素
     ensureEl('saveListModalBody', 'div');
     ensureEl('flipResultContent', 'div');
-    ensureEl('endingOverlay', 'div', null, '');
-    var eo = document.getElementById('endingOverlay');
-    eo.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10000;justify-content:center;align-items:center;overflow-y:auto;';
-    ensureEl('endingBox', 'div', null, 'display:none;');
+    // 结局浮层：新版UI已内置真实 #endingOverlay/.ending-overlay + #endingBox，
+    // 切勿覆写其行内样式（会用 inline display:none 压过 .ending-overlay.active{display:flex}），
+    // 仅在整体缺失时补隐藏占位。
+    if (!document.getElementById('endingOverlay')) {
+        ensureEl('endingOverlay', 'div', null, '');
+        var eo = document.getElementById('endingOverlay');
+        eo.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:10000;justify-content:center;align-items:center;overflow-y:auto;';
+        ensureEl('endingBox', 'div', 'endingOverlay', 'display:none;');
+    } else if (!document.getElementById('endingBox')) {
+        ensureEl('endingBox', 'div', 'endingOverlay', 'display:none;');
+    }
     ensureEl('loadingOverlay', 'div', null, '');
     var lo = document.getElementById('loadingOverlay');
     lo.innerHTML = '<div class="loading-box"><div class="loading-icon">🌸</div><div class="loading-title">加载中...</div><div class="loading-sub">禀报中，请稍后</div></div>';
@@ -170,11 +151,14 @@
     ensureEl('configStatus', 'div');
     ensureEl('scenarioConfigStatus', 'div');
 
-    // 12. 翻牌结果模态框
-    ensureEl('flipResultModal', 'div', null, '');
-    var frm = document.getElementById('flipResultModal');
-    frm.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9998;justify-content:center;align-items:center;';
-    frm.innerHTML = '<div class="modal-box"><div class="modal-title">翻牌结果</div><div id="flipResultContent" class="modal-body" style="max-height:60dvh;overflow-y:auto;"></div><div style="text-align:center;padding-top:8px;"><button onclick="closeFlipResultModal()" class="btn btn-primary" style="padding:6px 22px;border-radius:12px;font-family:inherit;font-size:11px;cursor:pointer;">知道了</button></div></div>';
+    // 12. 翻牌结果模态框：新版UI已内置真实 #flipResultModal(.modal-overlay)+#flipResultContent，
+    // 且当前翻牌走 openModal(modalOverlay)，此处仅在整体缺失时补隐藏占位，勿覆写真实节点。
+    if (!document.getElementById('flipResultModal')) {
+        ensureEl('flipResultModal', 'div', null, '');
+        var frm = document.getElementById('flipResultModal');
+        frm.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9998;justify-content:center;align-items:center;';
+        frm.innerHTML = '<div class="modal-box"><div class="modal-title">翻牌结果</div><div id="flipResultContent" class="modal-body" style="max-height:60dvh;overflow-y:auto;"></div><div style="text-align:center;padding-top:8px;"><button onclick="closeFlipResultModal()" class="btn btn-primary" style="padding:6px 22px;border-radius:12px;font-family:inherit;font-size:11px;cursor:pointer;">知道了</button></div></div>';
+    }
 
     // 13. 存档列表模态框 - 确保 saveListModalBody 在 saveListModal 中
     var slm = document.getElementById('saveListModal');
