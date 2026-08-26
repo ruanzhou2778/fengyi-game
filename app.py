@@ -85,6 +85,11 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-API-Base,X-API-Key,X-API-Model,X-Client-Id')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    # 前端静态文件禁止浏览器缓存，保证代码更新后立即生效
+    if request.path.endswith(('.html', '.js', '.css')):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
     return response
 
 @app.errorhandler(404)
