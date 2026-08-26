@@ -126,7 +126,7 @@ async function openIpPurchase(){
                 const sr = await myFetch(`${API_BASE}/api/state/${playerId}`);
                 updateUI(await sr.json());
             }catch(e){ showToast('❌ 采买失败：'+e.message,'error'); }
-        }, null, true);
+        }, true);
     }catch(e){ showToast('❌ 打开采买面板失败','error'); }
 }
 
@@ -189,7 +189,7 @@ function openIpCut(){
         const r = await ipPostAction('cut_stipend', {player_id: playerId, target, pct, periods});
         if(r && r.error) return;
         await ipRefreshAll();
-    }, null, true);
+    }, true);
 }
 
 // ---- Phase 1：额外赏赐 ----
@@ -214,7 +214,7 @@ function openIpBonus(){
         const r = await ipPostAction('give_bonus', {player_id: playerId, target, amount, periods});
         if(r && r.error) return;
         await ipRefreshAll();
-    }, null, true);
+    }, true);
 }
 
 // ---- Phase 1：宫宴 ----
@@ -230,7 +230,7 @@ function openIpBanquet(){
         const r = await ipPostAction('banquet', {player_id: playerId, tier});
         if(r && r.error) return;
         await ipRefreshAll();
-    }, null, true);
+    }, true);
 }
 
 // ---- 统一 POST 辅助 ----
@@ -263,7 +263,7 @@ async function ipPurseAction(){
             const r = await ipPostAction('private_purse/enable', {player_id: playerId});
             if(r && r.error) return;
             await ipRefreshAll();
-        }, null, true);
+        }, true);
         return;
     }
     const canTransfer = (window._lastGameData||{}).day > (purse.last_transfer_period ?? 0);
@@ -279,7 +279,7 @@ async function ipPurseAction(){
         const r = await ipPostAction('private_purse/transfer', {player_id: playerId, amount});
         if(r && r.error) return;
         await ipRefreshAll();
-    }, null, true);
+    }, true);
 }
 
 // ---- Phase 2：总管任免 ----
@@ -317,7 +317,7 @@ async function ipChiefAction(){
             if(r && r.error) return;
             await ipRefreshAll();
         };
-    }, null, true);
+    }, true);
 }
 
 // ---- Phase 5：产业投资 ----
@@ -352,7 +352,7 @@ async function openIpUpgrade(){
                 await ipRefreshAll();
             };
         });
-    }, null, true);
+    }, true);
 }
 
 if(typeof updateInnerPalacePanel==='function') setTimeout(updateInnerPalacePanel, 600);
