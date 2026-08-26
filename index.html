@@ -1369,6 +1369,134 @@
                 font-size: 6px;
             }
         }
+
+        /* ===== 选秀（角色创建）界面 —— 恢复自 d77010a 前的规则 ===== */
+        .scenario-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(245,237,229,0.98); z-index: 100000; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 8px 10px 10px 10px; overflow-y: auto; backdrop-filter: blur(8px); }
+        .scenario-overlay.hidden { display: none; }
+        .scenario-overlay::-webkit-scrollbar { width: 3px; }
+        .scenario-overlay::-webkit-scrollbar-track { background: #e0d5cc; border-radius: 2px; }
+        .scenario-overlay::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 2px; }
+        .char-card { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-sm); padding: 6px 8px; margin-bottom: 4px; width: 100%; max-width: 300px; box-shadow: var(--shadow); }
+        .char-card .card-title { font-size: 8px; color: var(--text-light); letter-spacing: 2px; border-bottom: 1px solid var(--border-light); padding-bottom: 2px; margin-bottom: 4px; font-weight: 400; display: flex; justify-content: space-between; align-items: center; }
+        .char-card .card-title .badge { font-size: 6px; background: var(--gold-light); padding: 0 5px; border-radius: 8px; color: var(--text-mid); }
+        .char-card .card-row { display: flex; align-items: center; gap: 4px; padding: 2px 0; font-size: 9px; color: var(--text-mid); flex-wrap: wrap; }
+        .char-card .card-row .label { color: var(--text-light); min-width: 40px; font-size: 8px; }
+        .char-card .card-row input, .char-card .card-row select { flex: 1; padding: 2px 4px; border: 1px solid var(--border-light); border-radius: 3px; background: var(--bg-card); color: var(--text-dark); font-family: 'Georgia','楷体',serif; font-size: 9px; outline: none; min-width: 60px; }
+        .char-card .card-row input:focus, .char-card .card-row select:focus { border-color: var(--gold); }
+        .char-card .card-row textarea { width: 100%; padding: 3px 4px; border: 1px solid var(--border-light); border-radius: 3px; background: var(--bg-card); color: var(--text-dark); font-family: 'Georgia','楷体',serif; font-size: 9px; outline: none; resize: vertical; min-height: 36px; }
+        .char-card .card-row textarea:focus { border-color: var(--gold); }
+        .char-card.story-card { padding: 5px 7px; }
+        .story-editor-wrap { margin-top: 1px; }
+        .story-editor-wrap textarea {
+            width: 100%; box-sizing: border-box; display: block;
+            padding: 4px 6px; border: 1px solid #e8ddd4; border-radius: 4px;
+            background: linear-gradient(180deg, #faf7f3 0%, #f5efe8 100%);
+            color: var(--text-mid); font-family: 'Georgia','楷体',serif;
+            font-size: 8px; line-height: 1.45; letter-spacing: 0.2px;
+            outline: none; resize: vertical; min-height: 48px; max-height: 88px;
+        }
+        .story-editor-wrap textarea:focus { border-color: var(--gold); background: var(--bg-card); color: var(--text-dark); box-shadow: 0 0 0 1px rgba(201,168,124,0.15); }
+        .story-editor-wrap textarea::placeholder { color: #b8a99a; font-size: 7px; line-height: 1.4; }
+        .story-editor-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2px; padding: 0 1px; font-size: 6px; color: var(--text-light); letter-spacing: 0.5px; }
+        .story-editor-footer .story-hint { opacity: 0.85; }
+        .story-editor-footer .story-count { color: #a89888; font-variant-numeric: tabular-nums; }
+        .char-card .tag-group { display: flex; flex-wrap: wrap; gap: 3px; padding: 2px 0; }
+        .char-card .tag-group .tag { padding: 1px 6px; border: 1px solid var(--border-light); border-radius: 10px; font-size: 7px; cursor: pointer; transition: all 0.2s; color: var(--text-mid); background: var(--bg-card); user-select: none; }
+        .char-card .tag-group .tag:hover { border-color: var(--gold); }
+        .char-card .tag-group .tag.active { background: var(--gold); color: #fff; border-color: var(--gold); }
+        .attr-alloc-row { display: flex; align-items: center; gap: 3px; padding: 1px 0; font-size: 8px; color: var(--text-mid); }
+        .attr-alloc-row .attr-name { min-width: 22px; color: var(--text-light); }
+        .attr-alloc-row .bar-track { flex: 1; height: 4px; background: #e0d5cc; border-radius: 2px; overflow: hidden; }
+        .attr-alloc-row .bar-track .bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s ease; background: linear-gradient(90deg, var(--gold), var(--gold-dark)); }
+        .attr-alloc-row .attr-value { min-width: 20px; text-align: right; font-weight: 500; color: var(--text-dark); }
+        .attr-alloc-row .attr-btn { padding: 0 5px; border: 1px solid var(--border-light); border-radius: 3px; background: var(--bg-card); cursor: pointer; font-size: 10px; font-family: inherit; color: var(--text-dark); line-height: 16px; }
+        .attr-alloc-row .attr-btn:hover { background: var(--gold-light); border-color: var(--gold); }
+        .attr-alloc-row .attr-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .total-points { font-size: 8px; color: var(--text-mid); padding: 2px 0; text-align: center; border-top: 1px solid var(--border-light); margin-top: 2px; padding-top: 3px; }
+        .preview-btn { padding: 3px 12px; border: 1px solid var(--gold); border-radius: 4px; background: var(--gold-light); font-size: 8px; cursor: pointer; font-family: inherit; color: var(--text-dark); transition: all 0.2s; }
+        .preview-btn:hover { background: var(--gold); color: #fff; }
+        .preview-box { display: none; background: var(--bg-card); border: 1px solid var(--gold); border-radius: var(--radius-sm); padding: 6px 8px; margin-top: 4px; font-size: 9px; color: var(--text-mid); line-height: 1.5; max-height: 140px; overflow-y: auto; }
+        .preview-box.show { display: block; }
+        .preview-box .preview-title { font-weight: 600; color: var(--text-dark); border-bottom: 1px solid var(--border-light); padding-bottom: 2px; margin-bottom: 3px; }
+        .start-area { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; justify-content: center; margin-top: 4px; width: 100%; max-width: 300px; }
+        .start-area .btn { padding: 3px 10px; border: 1px solid var(--border-light); border-radius: 3px; background: var(--bg-card); font-size: 10px; cursor: pointer; font-family: inherit; transition: all 0.2s; }
+        .start-area .btn:hover { background: var(--gold-light); border-color: var(--gold); }
+        .start-area .btn-primary { border: none; background: var(--gold); color: #fff; font-size: 10px; padding: 3px 14px; letter-spacing: 1px; }
+        .start-area .btn-primary:hover { background: var(--gold-dark); }
+        /* 选秀界面：深色主题覆盖（墨彩流金） */
+        .scenario-overlay {
+            background: linear-gradient(180deg, rgba(22,32,31,.98), rgba(16,23,22,.98)) !important;
+            color: var(--text-body);
+            padding: 18px 14px 24px;
+        }
+        .scenario-hero {
+            width: min(460px,100%);
+            padding: 18px 0 14px !important;
+            border-bottom: 1px solid rgba(201,168,106,.24);
+            margin-bottom: 12px;
+        }
+        .scenario-hero > div:first-child {
+            color: var(--text-dark) !important;
+            font-size: 24px !important;
+            letter-spacing: 7px !important;
+            text-shadow: 0 0 18px rgba(201,168,106,.22);
+        }
+        .scenario-hero > div:first-child span { color: #e3c78f !important; }
+        .scenario-hero > div:last-child { color: var(--text-light) !important; letter-spacing: 3px !important; }
+        .char-card {
+            background: rgba(30,40,39,.92) !important;
+            border-color: rgba(158,190,178,.24) !important;
+            border-radius: 16px !important;
+            box-shadow: 0 2px 16px rgba(0,0,0,.35), 0 0 0 1px rgba(201,168,106,.10) inset !important;
+        }
+        .char-card .card-title { color: #e3c78f !important; }
+        .char-card .card-row .label,.story-editor-footer,.story-hint { color: var(--text-light) !important; }
+        .char-card .badge {
+            background: rgba(126,168,149,.14) !important;
+            color: #bcdccd !important;
+            border-color: rgba(126,168,149,.28) !important;
+        }
+        .char-card .tag {
+            background: rgba(126,168,149,.10) !important;
+            color: var(--text-mid) !important;
+            border-color: rgba(158,190,178,.24) !important;
+        }
+        .char-card .tag:hover,.char-card .tag.active {
+            background: var(--gold) !important;
+            color: #1d2523 !important;
+            border-color: #b1904f !important;
+        }
+        .scenario-overlay #startBtn {
+            background: linear-gradient(135deg, #c9a86a, #9d7c40) !important;
+            color: #1d2523 !important;
+            border-color: rgba(201,168,106,.42) !important;
+            box-shadow: 0 8px 24px rgba(0,0,0,.42);
+        }
+        .scenario-overlay #startBtn:hover { background: linear-gradient(135deg, #dcbc7c, #ae8c4c) !important; }
+        .scenario-overlay .preview-box {
+            background: rgba(30,40,39,.88) !important;
+            border-color: rgba(126,168,149,.28) !important;
+            color: var(--text-body) !important;
+        }
+        .scenario-overlay .story-editor-wrap { background: rgba(26,36,35,.72) !important; border-color: rgba(158,190,178,.24) !important; }
+        .scenario-overlay .bar-track { background: rgba(201,168,106,.14) !important; }
+        .scenario-overlay .bar-fill { background: linear-gradient(90deg, #7ea895, #c9a86a) !important; }
+        .preview-btn:hover { color: #1d2523; }
+        .start-area .btn-primary { color: #1d2523; }
+
+        /* 选秀界面响应式 */
+        @media (max-width:400px) {
+            .char-card .card-row input, .char-card .card-row select { font-size: 7px; }
+            .char-card .card-row textarea { font-size: 7px; min-height: 24px; }
+            .story-editor-wrap textarea { font-size: 7px; min-height: 32px; max-height: 56px; padding: 3px 5px; }
+            .story-editor-footer { font-size: 5px; }
+            .scenario-overlay { padding: 4px 6px 6px 6px; }
+            .scenario-hero { padding: 1px 0 0 0 !important; }
+            .scenario-hero > div:first-child { font-size: 14px !important; letter-spacing: 1px !important; }
+        }
+
+
+
     </style>
 </head>
 <body>
