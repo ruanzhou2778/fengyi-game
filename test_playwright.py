@@ -201,13 +201,15 @@ async def run_test():
 # 等待游戏加载完成
         info("等待游戏加载...")
         game_started = False
-        for i in range(40):
+        for i in range(80):
             try:
-                loading = await page.query_selector("#loading")
-                if loading:
-                    style = await loading.get_attribute("style") or ""
-                    if "display: none" in style:
-                        game_started = True; break
+                # 最可靠：后端返回 player_id 后前端会设置全局 playerId
+                pid = await page.evaluate(
+                    "() => (typeof playerId !== 'undefined' && playerId) "
+                    "|| window.playerId || null")
+
+                if pid:
+                    game_started = True; break
                 s_name = await page.query_selector("#sName")
                 if s_name:
                     text = (await s_name.text_content() or "").strip()
@@ -219,11 +221,19 @@ async def run_test():
         if not game_started:
             await asyncio.sleep(5)
             try:
-                await page.wait_for_selector("#sName", timeout=3000)
-                text = (await page.text_content("#sName") or "").strip()
-                game_started = bool(text and text != "-")
+                pid = await page.evaluate(
+                    "() => (typeof playerId !== 'undefined' && playerId) "
+                    "|| window.playerId || null")
+                if pid:
+                    game_started = True
+                else:
+                    await page.wait_for_selector("#sName", timeout=3000)
+                    text = (await page.text_content("#sName") or "").strip()
+                    game_started = bool(text and text != "-")
             except Exception:
                 game_started = False
+
+
         results.game_started = game_started
         results.assert_true(game_started, "游戏启动成功", "等待玩家名出现")
         if not game_started:
@@ -231,6 +241,27 @@ async def run_test():
 
         # ---- 4. 点击「翻牌」 ----
         heading(1, "点击「翻牌」")
+        # 入宫后可能残留 loadingOverlay 或初印象弹窗，先行关闭以免遮挡翻牌按钮
+        try:
+            for _ in range(8):
+                blocked = await page.evaluate(
+                    "() => {"
+                    " const lo=document.getElementById('loadingOverlay');"
+                    " const mo=document.getElementById('modalOverlay');"
+                    " const loShown = lo && getComputedStyle(lo).display!=='none';"
+                    " const moShown = mo && mo.classList.contains('active');"
+                    " return loShown || moShown;"
+                    "}")
+                if not blocked:
+                    break
+                cbtn = await page.query_selector("#modalConfirmBtn")
+                if cbtn and await cbtn.is_visible():
+                    await cbtn.click()
+                else:
+                    await page.keyboard.press("Escape")
+                await asyncio.sleep(0.6)
+        except Exception:
+            pass
         flip_btn = await page.query_selector("button.qa-btn.primary")
         if not flip_btn:
             flip_btn = await page.query_selector('[onclick*="doFlip"]')
@@ -324,6 +355,25 @@ async def run_test():
 
         # 输入框联动
         heading(1, "输入框联动检查")
+        # 先关闭可能遗留的模态框（翻牌后侍寝/赏赐弹窗会延迟弹出并遮挡 sendBtn）
+        try:
+            for _ in range(4):
+                active = await page.query_selector("#modalOverlay.active")
+                if not active:
+                    break
+                closed = False
+                cbtn = await page.query_selector("#modalConfirmBtn")
+                if cbtn and await cbtn.is_visible():
+                    await cbtn.click()
+                    closed = True
+                if not closed:
+                    await page.keyboard.press("Escape")
+                await asyncio.sleep(0.6)
+            still = await page.query_selector("#modalOverlay.active")
+            results.assert_true(still is None, "输入框检查前弹窗已关闭",
+                                "modalOverlay 仍处于 active")
+        except Exception as e:
+            results.assert_true(False, "关闭遗留弹窗", str(e))
         try:
             ui = page.locator("#userInput")
             if await ui.count() > 0:
@@ -331,9 +381,20 @@ async def run_test():
                     await ui.fill("")
                 await ui.fill("给太后请安，求平安")
                 await page.click("#sendBtn")
-                await asyncio.sleep(2)
+                # /api/act 可能调用 AI，耗时不定；轮询等待输入框被清空
+                cleared = False
+                for _ in range(40):  # 最多约 20s
+                    await asyncio.sleep(0.5)
+                    processing = await page.evaluate(
+                        "() => (typeof isProcessing !== 'undefined') "
+                        "? isProcessing : false")
+                    after = await ui.input_value()
+                    if not processing and after.strip() == "":
+                        cleared = True
+                        break
                 after = await ui.input_value()
-                results.assert_true(after.strip() == "", "发送后输入框已清空",
+                results.assert_true(cleared and after.strip() == "",
+                                    "发送后输入框已清空",
                                     f"残留: {after[:30]}")
             else:
                 results.assert_true(False, "找到输入框", "userInput 不存在")

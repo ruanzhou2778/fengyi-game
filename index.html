@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>凤仪天下 · 完整版 + 舆图 + 每日行动</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -11,8 +14,6 @@
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
         }
-
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;600;700&display=swap');
 
         :root {
             --bg-primary: #0d1816;
@@ -1050,6 +1051,68 @@
         .modal-close-btn:hover {
             border-color: #5a6a66;
             color: #7a8a86;
+        }
+
+        /* ===== Toast 通知 ===== */
+        .toast-notification {
+            position: fixed;
+            top: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 32, 29, 0.95);
+            border: 1px solid rgba(201, 168, 106, 0.35);
+            color: #e6e0d4;
+            font-size: 12px;
+            padding: 9px 20px;
+            border-radius: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
+            z-index: 10002;
+            pointer-events: none;
+            max-width: 86vw;
+            text-align: center;
+            animation: fadeIn 0.25s ease;
+        }
+        .toast-notification.toast-error {
+            border-color: rgba(208, 106, 80, 0.55);
+            color: #f0b48f;
+        }
+
+        /* ===== 圣旨 / 诏书弹窗内容 ===== */
+        .edict-modal-content {
+            text-align: center;
+            padding: 6px 4px 2px;
+        }
+        .edict-modal-content .edict-icon {
+            font-size: 34px;
+            display: block;
+            margin-bottom: 8px;
+        }
+        .edict-modal-content .edict-title {
+            font-size: 15px;
+            letter-spacing: 6px;
+            color: #c9a86a;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .edict-modal-content .edict-body {
+            font-size: 11px;
+            line-height: 2;
+            color: #d6cfc2;
+            margin-bottom: 10px;
+        }
+        .edict-modal-content .edict-seal {
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        .edict-effect {
+            display: inline-block;
+            margin-top: 6px;
+            font-size: 10px;
+            color: #7ea895;
+            background: rgba(126, 168, 149, 0.1);
+            border: 1px solid rgba(126, 168, 149, 0.2);
+            border-radius: 20px;
+            padding: 3px 12px;
         }
 
         .flip-result {
@@ -2415,10 +2478,13 @@ if(isHtml)el.innerHTML=body;else el.textContent=body;
 const confirmBtn=document.getElementById('modalConfirmBtn');
 confirmBtn.textContent=confirmText||'确 定';
 confirmBtn.style.display=confirmText===''?'none':'';
+confirmBtn.onclick=modalConfirm; // 绑定确认按钮，否则点击「确定」无反应，弹窗无法关闭
 modalCallback=callback||null;
-document.getElementById('modalOverlay').classList.add('active');
+const ov=document.getElementById('modalOverlay');
+ov.classList.add('active');
+ov.style.display='flex'; // compat_prep.js 设置了 inline display:none，必须同步覆盖
 }
-function closeModal(){document.getElementById('modalOverlay').classList.remove('active');modalCallback=null;}
+function closeModal(){const ov=document.getElementById('modalOverlay');ov.classList.remove('active');ov.style.display='none';modalCallback=null;}
 function modalConfirm(){if(modalCallback)modalCallback();closeModal();}
 document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal();});
 document.getElementById('saveListModal').addEventListener('click',function(e){if(e.target===this)closeSaveListModal();});

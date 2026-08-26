@@ -95,7 +95,6 @@
     var mo = document.getElementById('modalOverlay');
     mo.innerHTML = '<div class="modal-box"><div class="modal-title" id="modalTitle"></div><div class="modal-body" id="modalBody" style="max-height:60dvh;overflow-y:auto;"></div><div style="text-align:center;padding-top:8px;"><button id="modalConfirmBtn" class="btn btn-primary" style="padding:6px 22px;border-radius:12px;border:1px solid var(--border-light);background:var(--bg-card);color:var(--text-dark);font-family:inherit;font-size:11px;cursor:pointer;">确 定</button></div></div>';
     mo.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;justify-content:center;align-items:center;';
-    mo.classList.add('active');
 
     // 7. 其他必要元素
     ensureEl('saveListModalBody', 'div');
