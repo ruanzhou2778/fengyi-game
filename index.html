@@ -2483,9 +2483,9 @@ function initMapCanvas(){
 
 window.openLedger = async function() {
     var d = window._lastGameData;
-    var personal = d ? '<p>🪙 个人银两：' + (d.silver || 0) + '</p>' +
-        '<p>📅 日期：' + (d.calendar_str || '-') + '</p>' +
-        '<p>⚡ 行动点：' + (d.remaining_actions || 0) + '/' + (d.max_actions || 7) + '</p>'
+    var personal = d ? '<p style="color:var(--text-mid);">🪙 个人银两：' + (d.silver || 0) + '</p>' +
+        '<p style="color:var(--text-mid);">📅 日期：' + (d.calendar_str || '-') + '</p>' +
+        '<p style="color:var(--text-mid);">⚡ 行动点：' + (d.remaining_actions || 0) + '/' + (d.max_actions || 7) + '</p>'
         : '<p style="color:var(--text-light);">暂无游戏数据</p>';
     openModal('📜 宫中账目',
         '<div style="font-size:9px;line-height:1.6;">' +
@@ -2508,14 +2508,14 @@ window.openLedger = async function() {
         var shItems = Object.keys(sh).map(function(k){ return k + ':' + sh[k]; }).join('、');
         var pj = Object.keys(projects).map(function(n){ return n + 'Lv' + (projects[n].level||0); }).join('、');
         body.innerHTML =
-            '<p>💰 后宫库银：' + (ip.budget ?? 0) + '两</p>' +
+            '<p style="color:var(--text-mid);">💰 后宫库银：' + (ip.budget ?? 0) + '两</p>' +
             '<p><button onclick="window.openIpLogs && window.openIpLogs()" class="chonghua-btn" style="padding:2px 8px;font-size:8px;border:1px solid var(--border-light);border-radius:4px;background:rgba(201,168,106,.15);color:var(--text-dark);cursor:pointer;">📒 内务府记事（分旬）</button></p>' +
-            '<p>👤 总管：' + (chief.name || '空缺') + ' <span style="font-size:7px;color:var(--text-mid);">[' + (chief.faction || '中立') + '] 忠' + (chief.loyalty ?? '-') + '/贪' + (chief.corruption ?? '-') + '/能' + (chief.skill ?? '-') + '</span>' + (ip.corruption_evidence ? ' <span style="color:#e08080;">罪证' + ip.corruption_evidence + '</span>' : '') + '</p>' +
-            '<p>📦 库存：' + (shItems || '空') + '</p>' +
-            '<p>🏦 私库：' + (purse.enabled ? '累计转入' + (purse.total_transferred ?? 0) + '两' : '未开通（威望≥80）') + '</p>' +
-            '<p>📋 季度考绩：' + (reviews.grade ? reviews.grade + '（' + reviews.score + '分）' : '未考评') + '</p>' +
-            '<p>🏭 产业：' + (pj || '无') + '</p>' +
-            (!ip.can_manage ? '<p style="color:#8a6a3a;">🔒 须皇后或协理六宫方可掌管内务府</p>' : '');
+            '<p style="color:var(--text-mid);">👤 总管：' + (chief.name || '空缺') + ' <span style="font-size:7px;color:var(--text-light);">[' + (chief.faction || '中立') + '] 忠' + (chief.loyalty ?? '-') + '/贪' + (chief.corruption ?? '-') + '/能' + (chief.skill ?? '-') + '</span>' + (ip.corruption_evidence ? ' <span style="color:#e08080;">罪证' + ip.corruption_evidence + '</span>' : '') + '</p>' +
+            '<p style="color:var(--text-mid);">📦 库存：' + (shItems || '空') + '</p>' +
+            '<p style="color:var(--text-mid);">🏦 私库：' + (purse.enabled ? '累计转入' + (purse.total_transferred ?? 0) + '两' : '未开通（威望≥80）') + '</p>' +
+            '<p style="color:var(--text-mid);">📋 季度考绩：' + (reviews.grade ? reviews.grade + '（' + reviews.score + '分）' : '未考评') + '</p>' +
+            '<p style="color:var(--text-mid);">🏭 产业：' + (pj || '无') + '</p>' +
+            (!ip.can_manage ? '<p style="color:var(--text-light);">🔒 须皇后或协理六宫方可掌管内务府</p>' : '');
     } catch (e) {
         body.innerHTML = '<p style="color:var(--text-light);">后宫账目暂不可用：' + e.message + '</p>';
     }
@@ -3869,23 +3869,23 @@ function renderRegencyPanel(data) {
             <div style="font-size:7px;color:var(--text-light);">${hp.can_advise ? '点击御览并进言（每旬一次）' : '🔒 本旬已进言，静待太子批红'}</div>
         </div>`;
     } else {
-        html += `<div style="font-size:7px;color:var(--text-light);padding:3px 0;">🖋️ 暂无待议政务</div>`;
+        html += `<div style="font-size:7px;color:var(--text-light);padding:3px 0;">🖋️ 暂无事件需要处理</div>`;
     }
 
-    // 待处置东宫事件
+    // 待处置东宫事件（点击弹窗选择）
     const hev = hp.pending_heir_event;
     if (hev && hev.choices) {
         const isDefiance = hev.kind === 'defiance';
-        html += `<div style="background:${isDefiance ? 'rgba(192,57,43,0.15)' : 'rgba(63,114,175,0.15)'};border:1px solid ${isDefiance ? 'rgba(192,57,43,0.4)' : 'rgba(63,114,175,0.4)'};border-radius:6px;padding:4px 6px;margin-bottom:4px;">
-            <div style="font-weight:600;color:${isDefiance ? '#e59a8a' : '#9cc0e8'};">${isDefiance ? '💔' : '🧒'} ${escapeHtmlText(hev.name || '东宫之事')}</div>
+        const evAccent = isDefiance ? '#e59a8a' : '#9cc0e8';
+        const evBorder = isDefiance ? 'rgba(192,57,43,0.4)' : 'rgba(63,114,175,0.4)';
+        const evBg = isDefiance ? 'rgba(192,57,43,0.15)' : 'rgba(63,114,175,0.15)';
+        html += `<div onclick="openHeirEventModal()" style="background:${evBg};border:1px solid ${evBorder};border-radius:6px;padding:4px 6px;margin-bottom:4px;cursor:pointer;">
+            <div style="font-weight:600;color:${evAccent};">${isDefiance ? '💔' : '🧒'} ${escapeHtmlText(hev.name || '东宫之事')}<span style="float:right;font-size:7px;">处置 ▸</span></div>
             <div style="font-size:7px;color:var(--text-mid);margin:2px 0;">${escapeHtmlText(hev.description || '')}</div>
-            ${hev.flavor ? `<div style="font-size:7px;color:var(--text-light);font-style:italic;margin-bottom:2px;">${escapeHtmlText(hev.flavor)}</div>` : ''}
-            <div style="display:flex;flex-direction:column;gap:2px;">`;
-        Object.keys(hev.choices).forEach(k => {
-            const c = hev.choices[k] || {};
-            html += `<button onclick="heirEventResolve('${k}')" style="text-align:left;padding:2px 5px;border:1px solid ${isDefiance ? 'rgba(192,57,43,0.4)' : 'rgba(63,114,175,0.4)'};border-radius:5px;background:${isDefiance ? 'rgba(192,57,43,0.12)' : 'rgba(63,114,175,0.12)'};color:${isDefiance ? '#e59a8a' : '#9cc0e8'};font-size:7px;cursor:pointer;font-family:inherit;">${k}. ${escapeHtmlText(c.text || '')}</button>`;
-        });
-        html += `</div></div>`;
+            ${hev.flavor ? `<div style="font-size:7px;color:var(--text-light);font-style:italic;">${escapeHtmlText(hev.flavor)}</div>` : ''}
+        </div>`;
+    } else {
+        html += `<div style="font-size:7px;color:var(--text-light);padding:3px 0;">🧒 暂无事件需要处理</div>`;
     }
 
     // 微服私访
@@ -3932,6 +3932,43 @@ function openRegencyModal(){
     openModal('🖋️ 待议政务御览', body, '退 下', null, true);
 }
 
+// 东宫之事：弹窗选择
+function openHeirEventModal(){
+    const hp = (window._lastGameData || {}).heir_panel || {};
+    const ev = hp.pending_heir_event;
+    if(!ev || !ev.choices){ showToast('东宫暂无事件需要处理'); return; }
+    const isDefiance = ev.kind === 'defiance';
+    const accent = isDefiance ? '#e59a8a' : '#9cc0e8';
+    const border = isDefiance ? 'rgba(192,57,43,0.4)' : 'rgba(63,114,175,0.4)';
+    const bg = isDefiance ? 'rgba(192,57,43,0.12)' : 'rgba(63,114,175,0.12)';
+    let body = `<div style="font-size:9px;color:var(--text-dark);line-height:1.7;">${escapeHtmlText(ev.description || '')}</div>`;
+    if(ev.flavor) body += `<div style="font-size:8px;color:var(--text-light);font-style:italic;margin-top:4px;">${escapeHtmlText(ev.flavor)}</div>`;
+    body += `<div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">`;
+    Object.keys(ev.choices).forEach(k => {
+        const c = ev.choices[k] || {};
+        body += `<button onclick="heirEventResolve('${k}')" style="text-align:left;padding:6px 8px;border:1px solid ${border};border-radius:5px;background:${bg};color:${accent};font-size:9px;cursor:pointer;font-family:inherit;">${k}. ${escapeHtmlText(c.text || '')}</button>`;
+    });
+    body += `</div>`;
+    openModal(`${isDefiance ? '💔' : '🧒'} ${escapeHtmlText(ev.name || '东宫之事')}`, body, '暂 缓', null, true);
+}
+
+// 内宅之事：弹窗选择
+function openConsortEventModal(){
+    const hp = (window._lastGameData || {}).heir_panel || {};
+    const ev = hp.pending_consort_event;
+    if(!ev){ showToast('内宅暂无事件需要处理'); return; }
+    const opts = ev.options || ev.choices || {};
+    let body = `<div style="font-size:9px;color:var(--text-dark);line-height:1.7;">${escapeHtmlText(ev.scene || ev.description || '')}</div>`;
+    if(ev.dialogue) body += `<div style="font-size:8px;color:var(--text-light);font-style:italic;margin-top:4px;">${escapeHtmlText(ev.dialogue)}</div>`;
+    body += `<div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">`;
+    Object.keys(opts).forEach(k => {
+        const c = opts[k] || {};
+        body += `<button onclick="heirConsortResolve('${k}')" style="text-align:left;padding:6px 8px;border:1px solid var(--gold);border-radius:5px;background:var(--gold-light);color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;">${k}. ${escapeHtmlText(c.text || '')}</button>`;
+    });
+    body += `</div>`;
+    openModal(`🏮 ${escapeHtmlText(ev.name || '内宅之事')}`, body, '暂 缓', null, true);
+}
+
 // ============================================================
 //  东宫内宅面板
 // ============================================================
@@ -3970,20 +4007,16 @@ function renderConsortPanel(data) {
         html += `</div></div>`;
     }
 
-    // 内宅事件
+    // 内宅事件（点击弹窗选择）
     const cev = hp.pending_consort_event;
     if (cev) {
-        const opts = cev.options || cev.choices || {};
-        html += `<div style="background:var(--bg-card);border:1px solid var(--gold);border-radius:6px;padding:4px 6px;margin-bottom:4px;">
-            <div style="font-weight:600;color:var(--gold-dark);">🏮 ${escapeHtmlText(cev.name || '内宅之事')}</div>
+        html += `<div onclick="openConsortEventModal()" style="background:var(--bg-card);border:1px solid var(--gold);border-radius:6px;padding:4px 6px;margin-bottom:4px;cursor:pointer;">
+            <div style="font-weight:600;color:var(--gold-dark);">🏮 ${escapeHtmlText(cev.name || '内宅之事')}<span style="float:right;color:var(--gold);font-size:7px;">处置 ▸</span></div>
             <div style="font-size:7px;color:var(--text-mid);margin:2px 0;">${escapeHtmlText(cev.scene || cev.description || '')}</div>
-            ${cev.dialogue ? `<div style="font-size:7px;color:var(--text-light);font-style:italic;margin-bottom:2px;">${escapeHtmlText(cev.dialogue)}</div>` : ''}
-            <div style="display:flex;flex-direction:column;gap:2px;">`;
-        Object.keys(opts).forEach(k => {
-            const c = opts[k] || {};
-            html += `<button onclick="heirConsortResolve('${k}')" style="text-align:left;padding:2px 5px;border:1px solid var(--gold);border-radius:5px;background:var(--gold-light);color:var(--text-mid);font-size:7px;cursor:pointer;font-family:inherit;">${k}. ${escapeHtmlText(c.text || '')}</button>`;
-        });
-        html += `</div></div>`;
+            ${cev.dialogue ? `<div style="font-size:7px;color:var(--text-light);font-style:italic;">${escapeHtmlText(cev.dialogue)}</div>` : ''}
+        </div>`;
+    } else {
+        html += `<div style="font-size:7px;color:var(--text-light);padding:3px 0;">🏮 暂无事件需要处理</div>`;
     }
 
     // 编制总览
@@ -4076,7 +4109,12 @@ async function heirRegencyAdvise(choice) {
 }
 
 async function heirEventResolve(choice) {
-    await heirApiPost('/api/heir/event', { choice }, '🧒 已处置东宫之事');
+    const res = await heirApiPost('/api/heir/event', { choice }, '🧒 已处置东宫之事');
+    if (res && res.narration) {
+        openModal('🧒 东宫之事已决', `<div style="font-size:10px;color:var(--text-dark);line-height:1.8;text-align:center;">${escapeHtmlText(res.narration)}</div>`, '知 晓', null, true);
+    } else {
+        closeModal();
+    }
 }
 
 async function heirIncognito() {
@@ -4090,7 +4128,12 @@ async function heirConsortSelect(name) {
 }
 
 async function heirConsortResolve(choice) {
-    await heirApiPost('/api/heir/consort', { action: 'resolve', choice }, '🏮 内宅已理');
+    const res = await heirApiPost('/api/heir/consort', { action: 'resolve', choice }, '🏮 内宅已理');
+    if (res && res.narration) {
+        openModal('🏮 内宅已理', `<div style="font-size:10px;color:var(--text-dark);line-height:1.8;text-align:center;">${escapeHtmlText(res.narration)}</div>`, '知 晓', null, true);
+    } else {
+        closeModal();
+    }
 }
 
 async function heirConsortFill() {
