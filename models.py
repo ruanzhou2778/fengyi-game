@@ -33,7 +33,7 @@ IP_CHIEF_FACTIONS = ["皇后派", "太后派", "皇帝派", "中立"]
 def default_inner_palace():
     """内务府默认状态。"""
     return {
-        "budget": 800,
+        "budget": 5000,
         "storehouse": {"布匹": 30, "药材": 15, "香料": 10, "木材": 20, "食材": 40},
         "chief": {"name": "苏培盛", "loyalty": 60, "corruption": 25, "skill": 70,
                   "faction": "中立", "tenure": 0, "performance": 0,
@@ -45,6 +45,8 @@ def default_inner_palace():
         },
         "logs": [],
         "corruption_evidence": 0,
+        # ---- 奏请内帑拨款：同旬一次限制 ----
+        "last_funding_period": None,
         "audited_this_period": False,
         # ---- 权谋操作：克扣份例 / 额外赏赐（逐旬结算）----
         "stipend_cuts": {},
@@ -198,6 +200,8 @@ def normalize_inner_palace(data):
             status = src.get("status")
             if status in ("正常", "丰收", "灾荒", "贪墨"):
                 dst["status"] = status
+    # last_funding_period（奏请内帑同旬限制）
+    base["last_funding_period"] = data.get("last_funding_period")
     return base
 
 

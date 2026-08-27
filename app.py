@@ -6035,7 +6035,7 @@ def emperor_interact():
         return err
     if "皇帝" not in game_state.relationships:
         game_state.relationships["皇帝"] = {"好感": 10, "印象": "初识", "互动次数": 0}
-    action_map = {'serve_tea': {'desc': '献茶', 'effects': {'宠爱': (1,5), '威望': (0,2)}, 'cost': 10}, 'discuss': {'desc': '奏对', 'effects': {'宠爱': (2,6), '威望': (2,5), '谋略': (1,4)}, 'cost': 0}, 'recite_poem': {'desc': '献诗', 'effects': {'宠爱': (3,8), '才情': (2,5)}, 'cost': 0}, 'ask_reward': {'desc': '求赏赐', 'effects': {'宠爱': (0,3), '威望': (0,2)}, 'cost': 0}}
+    action_map = {'serve_tea': {'desc': '献茶', 'effects': {'宠爱': (1,5), '威望': (0,2)}, 'cost': 10}, 'discuss': {'desc': '奏对', 'effects': {'宠爱': (2,6), '威望': (2,5), '谋略': (1,4)}, 'cost': 0}, 'recite_poem': {'desc': '献诗', 'effects': {'宠爱': (3,8), '才情': (2,5)}, 'cost': 0}, 'ask_reward': {'desc': '求赏赐', 'effects': {'宠爱': (0,3), '威望': (0,2)}, 'cost': 0}, 'request_funding': {'desc': '请拨内帑', 'effects': {}, 'cost': 0}}
     if action not in action_map:
         return jsonify({"error": "无效行为"}), 400
     act = action_map[action]
@@ -6065,6 +6065,23 @@ def emperor_interact():
             narration = f"你向皇帝求赏赐，皇帝龙颜大悦，赏赐了你{reward['desc']}！"
         else:
             narration = "你向皇帝求赏赐，皇帝今日兴致不高，未予赏赐。"
+    elif action == 'request_funding':
+        # 奏请皇帝拨内帑充实内务府库银（仅皇后/协理六宫，每旬一次，随机5000-8000）
+        if not inner_palace_can_manage(game_state):
+            return jsonify({"error": "内务府为六宫公器，须皇后或受命协理六宫者方可奏请拨款"}), 403
+        ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+        _pk = f"{game_state.year}-{game_state.month}-{0 if game_state.day <= 10 else (1 if game_state.day <= 20 else 2)}"
+        if ip.get('last_funding_period') == _pk:
+            return jsonify({"error": "本旬已奏请拨款内务府，下旬再来"}), 400
+        grant = random.randint(5000, 8000)
+        ip['budget'] = int(ip.get('budget', 0) or 0) + grant
+        ip['last_funding_period'] = _pk
+        from inner_palace_system import _ip_log
+        _ip_log(ip, f'奏请皇帝拨内帑{grant}两充实内务府')
+        game_state.inner_palace = ip
+        game_state.add_memory(f"💰 奏请皇帝拨内帑{grant}两充实内务府库银")
+        narration = f"你奏请皇帝拨内帑充实内务府，皇帝准奏，拨银{grant}两入库。"
+        changes['内务府库银'] = grant
     else:
         narration = f"你向皇帝{act['desc']}，皇帝龙颜大悦，好感度+{favor_delta}，"
         if changes:
@@ -6072,7 +6089,8 @@ def emperor_interact():
             narration += f"属性变化：{change_str}"
         else:
             narration += "一切如常。"
-    game_state.add_memory(f"皇帝{act['desc']}，{narration}")
+    if action not in ('ask_reward', 'request_funding'):
+        game_state.add_memory(f"皇帝{act['desc']}，{narration}")
     game_state.add_attr_change(changes, f"皇帝{act['desc']}")
     intimacy_weights = {'serve_tea': 1, 'discuss': 1, 'recite_poem': 2, 'ask_reward': 1}
     if action in intimacy_weights:
