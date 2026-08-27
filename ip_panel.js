@@ -75,6 +75,10 @@ async function updateInnerPalacePanel(){
         if(logs.length){ html += `<div style="margin-top:2px;font-size:7px;color:var(--text-mid);line-height:1.3;">`; logs.slice().reverse().forEach(l=>{ html+=`<div>${l}</div>`; }); html+=`</div>`; }
         content.innerHTML = html;
         const remainActions = (window._lastGameData||{}).remaining_actions ?? 0;
+        if (!d.can_manage) {
+            actions.innerHTML = '<div style="font-size:8px;color:#8a6a3a;padding:4px 0;">🔒 须皇后或受命协理六宫者方可掌管内务府（账目可阅）</div>';
+            return;
+        }
         const dis = remainActions <= 0 ? 'disabled style="opacity:.45;cursor:not-allowed;"' : '';
         let btns = '';
         const B = (fn, label, extra) => btns += `<button onclick="${fn}" ${dis} class="interact-btn" style="padding:2px 6px;font-size:8px;${extra||''}">${label}</button>`;

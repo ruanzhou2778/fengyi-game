@@ -11,6 +11,7 @@ random.seed(7)
 with m.app.test_client() as c:
     r=post(c,'/api/start',{'scenario':'才女入宫','name':'测试玩家','storyline':'权谋线','attributes':{'谋略':18,'心计':18,'威望':18},'character':{'appearance':'清丽','talent':'善谋','personality':'沉静','traits':[]}})
     d=r.get_json() or {}; ck('start',r.status_code==200,r.status_code); pid=d.get('player_id'); gs=m.sessions.get(pid)
+    from models import Rank; gs.rank=Rank.皇后  # 需求：内务府须皇后或协理六宫方可掌管
     t=next((n for n,x in gs.npcs.items() if n!='太后' and x.get('alive',True)),None) if gs else None; ck('target',bool(t),t)
     r=get(c,f'/api/inner_palace/status?player_id={pid}'); s=r.get_json() or {}
     ck('status 200',r.status_code==200,r.status_code)

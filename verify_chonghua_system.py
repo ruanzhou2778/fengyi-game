@@ -80,6 +80,7 @@ with m.app.test_client() as client:
     ck('皇后为 full', m.chonghua_permission(gs) == 'full', m.chonghua_permission(gs))
 
     # ---------- 2. 开设门槛 ----------
+    gs.chonghua['founded'] = False  # 新档默认已开设，此处重置以测试开设流程
     gs.attributes['威望'] = 10
     gs.silver = 1000
     code, res = act(client, pid, 'found')

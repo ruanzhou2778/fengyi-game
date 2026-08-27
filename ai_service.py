@@ -563,7 +563,7 @@ def _call_period_events_ai(client, model, npc_list, children_hint, pregnant_hint
     return _parse_period_event_lines(text), text
 
 
-def generate_period_events(game_state, npc_names=None, api_key=None, base_url=None, model=None):
+def generate_period_events(game_state, npc_names=None, api_key=None, api_base=None, api_model=None):
     """转旬情报：JSON 结构化请求 + 重试 + 本地兜底，保证至少 4 条。"""
     target_count = 4
     if npc_names is None:
@@ -579,7 +579,7 @@ def generate_period_events(game_state, npc_names=None, api_key=None, base_url=No
         player_name = getattr(game_state, "name", "玩家")
         pregnant_hint = f" 玩家{player_name}有孕（约{int(getattr(game_state, 'pregnancy_month', 0))}月）。"
 
-    if not (api_key and base_url and model and str(api_key).strip() and str(base_url).strip() and str(model).strip()):
+    if not (api_key and api_base and api_model and str(api_key).strip() and str(api_base).strip() and str(api_model).strip()):
         print("⚠️ generate_period_events: 未配置 API Key 或模型，使用本地情报")
         events = _period_events_local_fallback(game_state, target_count)
         return {"events": events, "ai_used": False, "reason": "no_api_config", "fallback": True}
@@ -587,13 +587,13 @@ def generate_period_events(game_state, npc_names=None, api_key=None, base_url=No
     ai_events = []
     ai_parsed_count = 0
     ai_called = False
-    client = get_openai_client(api_key, base_url)
+    client = get_openai_client(api_key, api_base)
 
     for attempt, use_json in enumerate((True,)):
         try:
-            print(f"📌 generate_period_events: 调用 AI model={model}, base={base_url}, json={use_json}, attempt={attempt + 1}")
+            print(f"📌 generate_period_events: 调用 AI model={api_model}, base={api_base}, json={use_json}, attempt={attempt + 1}")
             parsed, _raw_text = _call_period_events_ai(
-                client, model, npc_list, children_hint, pregnant_hint, json_mode=use_json
+                client, api_model, npc_list, children_hint, pregnant_hint, json_mode=use_json
             )
             ai_called = True
             ai_events = parsed

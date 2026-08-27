@@ -1797,6 +1797,8 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     
     # ===== 尝试AI生成故事 =====
     narration = None
+    if not (api_key and api_base and api_model and str(api_key).strip() and str(api_base).strip() and str(api_model).strip()):
+        print(f"[conflict] 未配置完整 API（key={mask_api_key(api_key)} base={api_base} model={api_model}），使用本地宫斗模板")
     try:
         if api_key and api_base and api_model and api_key.strip() and api_base.strip():
             client = get_openai_client(api_key, api_base)
@@ -4857,6 +4859,31 @@ def game_over_response(game_state):
         "ending": ending,
     }), 409
 
+def inner_palace_can_manage(game_state):
+    """内务府为六宫公器，仅皇后或受命协理六宫者可掌管。"""
+    if game_state.rank.name == "皇后":
+        return True
+    return _get_six_palace_assistant(game_state) == game_state.name
+
+
+@app.before_request
+def _guard_inner_palace_routes():
+    """内务府管理操作（POST）须皇后或协理六宫者；只读 GET（status/performance）不拦截。"""
+    path = request.path or ''
+    if request.method != 'POST' or not path.startswith('/api/inner_palace/'):
+        return None
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    if not player_id:
+        return None
+    game_state, err = session_or_404(player_id)
+    if err:
+        return None
+    if not inner_palace_can_manage(game_state):
+        return jsonify({'error': '内务府为六宫公器，须皇后或受命协理六宫者方可掌管'}), 403
+    return None
+
+
 def guard_action(game_state):
     """行动前统一守卫：先查终局，再扣行动点。
 
@@ -4883,7 +4910,7 @@ def inner_palace_status():
     if err:
         return err
     ip = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
-    return jsonify(ip)
+    return jsonify({**ip, 'can_manage': inner_palace_can_manage(game_state)})
 
 
 @app.route('/api/inner_palace/purchase', methods=['POST'])
@@ -9541,7 +9568,7 @@ def chonghua_state(game_state):
     ch = getattr(game_state, 'chonghua', None)
     if not isinstance(ch, dict):
         ch = {}
-    ch.setdefault('founded', False)
+    ch.setdefault('founded', True)
     ch.setdefault('level', 1)
     ch.setdefault('budget', 0)
     ch.setdefault('stipend', 0)        # 皇帝每月固定拨发的用度（主控自行填写）
