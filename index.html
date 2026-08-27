@@ -2715,7 +2715,12 @@ function setInteractResult(areaId, html) {
 }
 
 let modalCallback=null;
-function openModal(title,body,confirmText,callback,isHtml=false){
+// 永久修复：modalBody 默认按 HTML 渲染（fail-safe）。
+// 原默认 isHtml=false 会导致任何遗漏第5参数的调用走 textContent 分支，
+// 富文本标签被当作纯文本显示，引发「文字UI全部显示异常」。
+// 改为默认 true 后，即便调用方漏传 isHtml，HTML 也能正确渲染；
+// 仅当确实需要转义纯文本时，才显式传 isHtml=false。
+function openModal(title,body,confirmText,callback,isHtml=true){
 document.getElementById('modalTitle').textContent=title;
 const el=document.getElementById('modalBody');
 if(isHtml)el.innerHTML=body;else el.textContent=body;
@@ -6637,6 +6642,6 @@ if(typeof renderPrinceInline === 'function') setTimeout(renderPrinceInline, 800)
 
 </script>
 <script src="js/compat_ui.js"></script>
-<script src="ip_panel.js?v=3"></script>
+<script src="ip_panel.js?v=4"></script>
 </body>
 </html>
