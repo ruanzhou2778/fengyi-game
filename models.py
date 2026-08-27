@@ -478,13 +478,16 @@ class Servant:
         self.age = age if age is not None else random.randint(16, 28)
         self.is_active = True
         self.hire_day = 0
+        # 心腹系统：是否具备立为心腹的潜质（默认 True，个别宫人可禁用）
+        self.has_confidant_potential = True
     def to_dict(self):
-        return {"name": self.name, "type": self.type, "loyalty": self.loyalty, "skill": self.skill, "age": self.age, "is_active": self.is_active, "hire_day": self.hire_day}
+        return {"name": self.name, "type": self.type, "loyalty": self.loyalty, "skill": self.skill, "age": self.age, "is_active": self.is_active, "hire_day": self.hire_day, "has_confidant_potential": getattr(self, "has_confidant_potential", True)}
     @classmethod
     def from_dict(cls, data):
         s = cls(data["name"], data["type"], data["loyalty"], data["skill"], data.get("age"))
         s.is_active = data.get("is_active", True)
         s.hire_day = data.get("hire_day", 0)
+        s.has_confidant_potential = data.get("has_confidant_potential", True)
         return s
 
 class GameState:
@@ -576,6 +579,9 @@ class GameState:
         self.draft = None
         # 东宫内宅（太子妃 + 五级侧室）
         self.heir_consorts = default_heir_consorts()
+        # 心腹系统：心腹宫人名字 + 心腹关键事件（最多20条）
+        self.confidant = None
+        self.confidant_memory = []
         # 重华宫与陷害系统新属性
         # chonghua.children 保存在馆子嗣的 uid 列表；log/events 为流水记录
         self.chonghua = {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}
@@ -584,6 +590,16 @@ class GameState:
         self.court_faction_favor = default_court_faction_favor()
         # 夺嫡暗流——储君空悬时的多方博弈
         self.heir_race = default_heir_race()
+        # 子嗣标签事件队列 + 协理六宫事件（每旬 1~2 件，队列 max2）
+        self.child_event_queue = []
+        self.governance_events = []
+        self.governance_history = []
+        self.governance_cooldown = 0
+        self.governance_handled_streak = 0
+        # NPC 妃嫔关系网：{A: {B: {好感, 印象, 关系类型, 历史事件, 最后互动旬}}}
+        self.npc_relationships = {}
+        self.relationship_events = []   # 待推送的关系变化事件
+        self.relationship_log = []      # 关系变化历史日志（最多40条）
         # 内务府自治系统
         self.inner_palace = default_inner_palace()
         # 内务府总管派系（顶层冗余，便于其他系统直接读取）
@@ -797,8 +813,18 @@ class GameState:
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
             "court_faction_favor": normalize_court_faction_favor(getattr(self, "court_faction_favor", None)),
             "heir_race": normalize_heir_race(getattr(self, "heir_race", None)),
+            "child_event_queue": getattr(self, "child_event_queue", []),
+            "governance_events": getattr(self, "governance_events", []),
+            "governance_history": getattr(self, "governance_history", [])[-30:],
+            "governance_cooldown": getattr(self, "governance_cooldown", 0),
+            "governance_handled_streak": getattr(self, "governance_handled_streak", 0),
+            "npc_relationships": getattr(self, "npc_relationships", {}),
+            "relationship_events": getattr(self, "relationship_events", []),
+            "relationship_log": getattr(self, "relationship_log", [])[-40:],
             "inner_palace": normalize_inner_palace(getattr(self, "inner_palace", None)),
             "chief_faction": getattr(self, "chief_faction", "中立"),
+            "confidant": getattr(self, "confidant", None),
+            "confidant_memory": getattr(self, "confidant_memory", [])[-20:],
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -885,6 +911,16 @@ class GameState:
             for sd in servants_data:
                 s = Servant.from_dict(sd)
                 game_state.servants.append(s)
+            # 心腹系统：还原心腹指向（旧存档可能缺失字段；若心腹已不在则清空）
+            saved_confidant = data.get("confidant")
+            game_state.confidant = None
+            if saved_confidant:
+                for _cs in game_state.servants:
+                    if _cs.name == saved_confidant and _cs.is_active:
+                        game_state.confidant = saved_confidant
+                        break
+            cm = data.get("confidant_memory", [])
+            game_state.confidant_memory = [str(x) for x in cm][-20:] if isinstance(cm, list) else []
             game_state.max_servants = 6 + game_state.rank.value // 2
             game_state.is_pregnant = data.get("is_pregnant", False)
             game_state.pregnancy_month = data.get("pregnancy_month", 0)
@@ -908,6 +944,26 @@ class GameState:
             game_state.frameups = data.get("frameups", {"seq": 1, "cases": [], "log": []})
             game_state.court_faction_favor = normalize_court_faction_favor(data.get("court_faction_favor"))
             game_state.heir_race = normalize_heir_race(data.get("heir_race"))
+            ceq = data.get("child_event_queue")
+            game_state.child_event_queue = ceq if isinstance(ceq, list) else []
+            ge = data.get("governance_events")
+            game_state.governance_events = ge if isinstance(ge, list) else []
+            gh = data.get("governance_history")
+            game_state.governance_history = gh[-30:] if isinstance(gh, list) else []
+            try:
+                game_state.governance_cooldown = int(data.get("governance_cooldown", 0) or 0)
+            except (TypeError, ValueError):
+                game_state.governance_cooldown = 0
+            try:
+                game_state.governance_handled_streak = int(data.get("governance_handled_streak", 0) or 0)
+            except (TypeError, ValueError):
+                game_state.governance_handled_streak = 0
+            nrel = data.get("npc_relationships")
+            game_state.npc_relationships = nrel if isinstance(nrel, dict) else {}
+            rel_ev = data.get("relationship_events")
+            game_state.relationship_events = rel_ev if isinstance(rel_ev, list) else []
+            rel_log = data.get("relationship_log")
+            game_state.relationship_log = rel_log[-40:] if isinstance(rel_log, list) else []
             game_state.inner_palace = normalize_inner_palace(data.get("inner_palace"))
             game_state.chief_faction = data.get("chief_faction") if data.get("chief_faction") in (
                 "皇后派", "太后派", "皇帝派", "中立") else "中立"

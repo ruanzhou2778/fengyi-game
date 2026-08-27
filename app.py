@@ -2349,6 +2349,7 @@ def ensure_child_fields(child):
     child.setdefault("marriage_authority", None)   # 婚事决策权归属（皇帝下放给生母/皇后时为其名）
     child.setdefault("marriage_decider", None)      # 择婿主持人：皇帝亲选 / 生母自选 / 皇后择婿（依皇帝态度而定）
     child.setdefault("last_visit_period", None)    # 上次省亲的旬标记
+    ensure_child_stats(child)
     return child
 
 def ensure_child_uid(game_state, child):
@@ -2450,6 +2451,888 @@ def validate_child_name(raw_name, game_state, current_name=None):
     return full, None
 
 
+# ---- 子嗣五维系统 ----
+# 皇子：文治/武略/体魄/心性/仪容；公主：文采/容貌/体魄/心性/仪态
+CHILD_STAT_KEYS = {
+    "皇子": ["文治", "武略", "体魄", "心性", "仪容"],
+    "公主": ["文采", "容貌", "体魄", "心性", "仪态"],
+}
+# 属性互斥对：成长时一方提升，另一方受抑（出生值不受钳制）
+CHILD_STAT_PAIRS = {
+    "皇子": [("文治", "武略"), ("体魄", "心性")],
+    "公主": [("文采", "容貌"), ("体魄", "心性")],
+}
+CHILD_STAT_ICONS = {
+    "文治": "📜", "武略": "⚔️", "体魄": "💪", "心性": "🧘", "仪容": "🌟",
+    "文采": "🖌️", "容貌": "🌹", "仪态": "🎎",
+}
+
+
+def ensure_child_stats(child):
+    """补全五维字段（兼容旧存档）。
+
+    旧字段迁移映射：health → 体魄；wit → 心性；talent → 文治/武略（皇子随机）/文采（公主）。
+    emperor_favor 原样保留（帝眷独立于五维）。
+    """
+    gender = child.get("gender", "皇子")
+    keys = CHILD_STAT_KEYS.get(gender, CHILD_STAT_KEYS["皇子"])
+    stats = child.get("stats")
+    if not isinstance(stats, dict):
+        stats = {}
+    for key in keys:
+        if not isinstance(stats.get(key), (int, float)):
+            if key == "体魄":
+                stats[key] = int(child.get("health", 70))
+            elif key == "心性":
+                stats[key] = int(child.get("wit", 40))
+            elif key == "武略":
+                stats[key] = int(child.get("talent", 50)) if random.random() < 0.5 else 45
+            elif key in ("文治", "文采"):
+                stats[key] = int(child.get("talent", 50)) if random.random() < 0.5 else 40
+            else:  # 仪容/仪态
+                stats[key] = 55
+    child["stats"] = stats
+    return stats
+
+
+def _mother_is_legitimate(game_state, mother_name):
+    """嫡出判定：生母位份为皇后。"""
+    if not mother_name:
+        return False
+    if mother_name == getattr(game_state, "name", ""):
+        return game_state.rank.name == "皇后"
+    npc = (game_state.npcs or {}).get(mother_name)
+    return isinstance(npc, dict) and npc.get("rank") == "皇后"
+
+
+def calc_child_birth_stats(gender, game_state, mother_name=None):
+    """按遗传公式计算子嗣出生五维（保底10 + 皇帝×权重 + 母妃×权重 + 随机0~8 + 修正）。
+
+    遗传映射：
+    - 文治/文采：皇帝仁德×0.25 + 母妃才情×0.30
+    - 武略（皇子）：皇帝威严×0.25 + 母妃倾向×0.25
+    - 仪容/容貌：(皇帝威严+好色)/2 ×0.20 + 母妃容貌×0.35（权重最高）
+    - 体魄：皇帝健康×0.20 + 母妃健康×0.20
+    - 心性：皇帝好色逆映射×0.15 + 母妃心计×0.25
+    - 仪态（公主）：皇帝仁德×0.20 + (母妃容貌+才情)/2 ×0.30
+    修正：母妃健康≥80→体魄+3；<40→体魄-5~10；嫡出→心性+3~5、体魄+3~5
+    """
+    emperor = game_state.emperor or {}
+    estats = emperor.get("stats") or {}
+    runde = estats.get("仁德", 50)
+    weiyan = estats.get("威严", 50)
+    emp_health = emperor.get("health", 80) or 80
+    haose = estats.get("好色", 30)
+
+    if mother_name:
+        npc = (game_state.npcs or {}).get(mother_name)
+        if not isinstance(npc, dict) or mother_name == getattr(game_state, "name", ""):
+            mattrs = getattr(game_state, "attributes", {}) or {}
+        else:
+            mattrs = npc.get("attributes") or {}
+    else:
+        mattrs = getattr(game_state, "attributes", {}) or {}
+    m_caiqing = mattrs.get("才情", 50)
+    m_rongmao = mattrs.get("容貌", 60)
+    m_health = mattrs.get("健康", 80)
+    m_xinji = mattrs.get("心计", 40)
+    m_qingxiang = mattrs.get("倾向", 35)
+
+    def _base(emp_part, mother_part):
+        return 10 + emp_part + mother_part + random.randint(0, 8)
+
+    if gender == "公主":
+        stats = {
+            "文采": _base(runde * 0.25, m_caiqing * 0.30),
+            "容貌": _base((weiyan + haose) / 2 * 0.20, m_rongmao * 0.35),
+            "体魄": _base(emp_health * 0.20, m_health * 0.20),
+            "心性": _base((100 - haose) * 0.15, m_xinji * 0.25),
+            "仪态": _base(runde * 0.20, (m_rongmao + m_caiqing) / 2 * 0.30),
+        }
+    else:
+        stats = {
+            "文治": _base(runde * 0.25, m_caiqing * 0.30),
+            "武略": _base(weiyan * 0.25, m_qingxiang * 0.25),
+            "体魄": _base(emp_health * 0.20, m_health * 0.20),
+            "心性": _base((100 - haose) * 0.15, m_xinji * 0.25),
+            "仪容": _base((weiyan + haose) / 2 * 0.20, m_rongmao * 0.35),
+        }
+    # 孕期修正（以母妃当下健康近似孕期状态）
+    if m_health >= 80:
+        stats["体魄"] += 3
+    elif m_health < 40:
+        stats["体魄"] -= random.randint(5, 10)
+    # 嫡出修正
+    if _mother_is_legitimate(game_state, mother_name):
+        stats["心性"] += random.randint(3, 5)
+        stats["体魄"] += random.randint(3, 5)
+    for k, v in stats.items():
+        stats[k] = int(max(5, min(100, round(v))))
+    return stats
+
+
+def grow_child_stat(child, key, amount):
+    """成长单维属性：提升 key（应用标签乘数），互斥对属性受抑。返回 (gained, suppressed) 供叙事。"""
+    gender = child.get("gender", "皇子")
+    ensure_child_stats(child)
+    ensure_child_tags(child)
+    stats = child["stats"]
+    key = key if key in stats else next(iter(stats))
+    gain = max(0, int(amount))
+    # 标签成长乘数（勤奋/先天不足/娇纵/孤僻/尚武）
+    gain = int(round(gain * child_tag_growth_bonus(child, key)))
+    stats[key] = int(max(0, min(100, stats.get(key, 0) + gain)))
+    suppressed = None
+    if gain:
+        for a, b in CHILD_STAT_PAIRS.get(gender, []):
+            if key == a:
+                suppressed = b
+                break
+            if key == b:
+                suppressed = a
+                break
+        if suppressed is not None:
+            drop = max(1, gain // 2)
+            before = stats.get(suppressed, 0)
+            stats[suppressed] = int(max(0, min(100, before - drop)))
+    return stats[key], (suppressed, gain // 2) if suppressed and gain else None
+
+
+# ---- 子嗣标签系统 ----
+# 最多 5 标签/人；互斥标签自动替换；来源：出生/成长/随机事件
+CHILD_TAG_MAX = 5
+CHILD_TAG_INFO = {
+    "类父":     {"icon": "👑", "desc": "形神酷似天家，皇帝初始好感+10"},
+    "肖母":     {"icon": "💞", "desc": "眉眼性情随母，与母妃互动好感额外+2"},
+    "先天不足": {"icon": "🕯️", "desc": "体魄成长-20%，3岁前每旬3%夭折概率"},
+    "勤奋":     {"icon": "📖", "desc": "全属性成长+5%"},
+    "娇纵":     {"icon": "🍭", "desc": "心性成长-20%"},
+    "孤僻":     {"icon": "🌫️", "desc": "心性成长+15%，亲密度上限60"},
+    "尚武":     {"icon": "🏹", "desc": "武略成长+10%，文治成长-5%（仅皇子）"},
+    "倾国倾城": {"icon": "🌹", "desc": "驸马门第自动升一档（仅公主）"},
+    "遇险":     {"icon": "⚡", "desc": "体魄-10，心性+5"},
+    "异梦":     {"icon": "🌙", "desc": "随机属性+8，得「预言」"},
+}
+# 互斥标签组：获得新标签时若持有互斥标签，自动替换之
+CHILD_TAG_EXCLUSIVE = {
+    "勤奋": {"娇纵"},
+    "娇纵": {"勤奋"},
+    "孤僻": {"肖母"},
+    "肖母": {"孤僻"},
+}
+
+
+def ensure_child_tags(child):
+    """补全 tags 字段（兼容旧存档），并同步特殊规则标记。"""
+    tags = child.get("tags")
+    if not isinstance(tags, list):
+        tags = []
+    gender = child.get("gender", "皇子")
+    stats = ensure_child_stats(child)
+    # 特殊规则 → 标签双向同步
+    if gender == "公主" and stats.get("容貌", 0) >= 85:
+        child["beauty_grace"] = True
+        if "倾国倾城" not in tags:
+            tags.append("倾国倾城")
+    elif gender == "皇子" and stats.get("仪容", 0) >= 80:
+        child["handsome_grace"] = True
+    child["tags"] = tags
+    return tags
+
+
+def grant_child_tag(child, tag):
+    """授予标签：互斥自动替换，上限 CHILD_TAG_MAX。返回 (granted, replaced)。"""
+    if tag not in CHILD_TAG_INFO:
+        return False, None
+    tags = ensure_child_tags(child)
+    if tag in tags:
+        return False, None
+    replaced = None
+    excl = CHILD_TAG_EXCLUSIVE.get(tag, set())
+    for old in list(tags):
+        if old in excl:
+            tags.remove(old)
+            replaced = old
+            break
+    if len(tags) >= CHILD_TAG_MAX:
+        # 上限已满：挤掉最早的一个标签
+        tags.pop(0)
+    tags.append(tag)
+    return True, replaced
+
+
+def child_tag_growth_bonus(child, key):
+    """标签对指定属性成长的乘数（>0，1=无修正）。"""
+    tags = child.get("tags") or []
+    bonus = 1.0
+    if "勤奋" in tags:
+        bonus *= 1.05
+    if "娇纵" in tags and key == "心性":
+        bonus *= 0.80
+    if "孤僻" in tags and key == "心性":
+        bonus *= 1.15
+    if "先天不足" in tags and key == "体魄":
+        bonus *= 0.80
+    if "尚武" in tags and child.get("gender") == "皇子":
+        if key == "武略":
+            bonus *= 1.10
+        elif key == "文治":
+            bonus *= 0.95
+    return bonus
+
+
+def child_tag_affection_cap(child):
+    """孤僻标签亲密度上限（默认 100）。"""
+    if "孤僻" in (child.get("tags") or []):
+        return 60
+    return 100
+
+
+def apply_child_tag_stats(child, tag):
+    """标签附带的一次性数值效果，返回叙事片段列表。"""
+    msgs = []
+    ensure_child_stats(child)
+    stats = child["stats"]
+    gender = child.get("gender", "皇子")
+    if tag == "先天不足":
+        msgs.append("先天不足，体魄成长-20%，幼年需多加照料")
+    elif tag == "遇险":
+        stats["体魄"] = int(max(0, min(100, stats.get("体魄", 50) - 10)))
+        stats["心性"] = int(max(0, min(100, stats.get("心性", 50) + 5)))
+        msgs.append("体魄-10，心性+5")
+    elif tag == "异梦":
+        keys = [k for k in stats]
+        rk = random.choice(keys)
+        stats[rk] = int(max(0, min(100, stats.get(rk, 50) + 8)))
+        child["has_prophecy"] = True
+        msgs.append(f"{rk}+8，得「预言」")
+    elif tag == "类父":
+        child["emperor_favor"] = min(100, child.get("emperor_favor", 30) + 10)
+        msgs.append("皇帝好感+10")
+    return msgs
+
+
+# ============================================================
+#  子嗣标签事件系统（20 事件 × 四阶段，每子每旬最多 1 件）
+# ============================================================
+CHILD_TAG_EVENT_CHANCE = 0.10   # 每子每旬触发概率
+CHILD_TAG_EVENT_QUEUE_MAX = 3
+
+# choice: {text, effects:{stats键/affection/health/emperor_favor:delta}, tag?, cost?, success?, fail_text?, gender?}
+CHILD_TAG_EVENTS = [
+    # ---- 婴儿/幼儿 ----
+    {"id": "first_smile", "min_age": 2, "max_age": 12,
+     "narrative": "{name}今日忽然对你露出第一个真正的笑容，眼睛弯弯如新月，满殿生辉。",
+     "choices": [
+         {"text": "抱在怀里细看", "effects": {"affection": 8}},
+         {"text": "请太医验看", "effects": {"health": 4}},
+     ]},
+    {"id": "teething", "min_age": 4, "max_age": 18,
+     "narrative": "{name}近来啼哭不止，小脸红扑扑——是在长牙。太医道需以清凉之物舒缓。",
+     "choices": [
+         {"text": "送翡翠牙咬", "effects": {"health": 3, "affection": 3}},
+         {"text": "顺其自然", "effects": {"health": -3}},
+     ]},
+    {"id": "strange_dream_baby", "min_age": 6, "max_age": 24,
+     "narrative": "乳母急报：{name}睡梦中喃喃说着「龙」「火」二字，惊醒后竟安然无恙。此兆吉是凶？",
+     "choices": [
+         {"text": "视为吉兆，大宴祈福", "tag": "异梦", "effects": {"emperor_favor": 5}},
+         {"text": "压下不传", "effects": {}},
+     ]},
+    {"id": "first_words", "min_age": 10, "max_age": 24,
+     "narrative": "{name}咿咿呀呀间，竟清晰唤出了「母」字，声如银铃，满殿皆惊。",
+     "choices": [
+         {"text": "抱他/她细看", "effects": {"affection": 8}},
+         {"text": "请女官启蒙", "effects": {"心性": 6}, "cost": 20},
+     ]},
+    # ---- 童年 ----
+    {"id": "grab_week", "min_age": 12, "max_age": 14,
+     "narrative": "{name}抓周之日，案上摆满书卷、金印、弓箭、算盘。{name}蹒跚上前，目光在诸物间游移……",
+     "choices": [
+         {"text": "引导向书卷", "tag": "勤奋", "effects": {"文治": 6}},
+         {"text": "引导向弓箭", "tag": "尚武", "effects": {"武略": 6}, "gender": "皇子"},
+         {"text": "顺其自然", "effects": {"心性": 3}},
+     ]},
+    {"id": "kindergarten_play", "min_age": 24, "max_age": 108,
+     "narrative": "御花园里，{name}与同岁兄弟姐妹嬉戏，不慎跌入浅池，宫人惊慌。",
+     "choices": [
+         {"text": "亲自救起，悉心安抚", "effects": {"affection": 10, "health": 2}},
+         {"text": "斥责宫人看护不周", "effects": {"health": 5, "affection": -3}},
+     ]},
+    {"id": "study_struggle", "min_age": 36, "max_age": 108,
+     "narrative": "太傅上禀：{name}近日读书时常常走神，功课一塌糊涂，问之则支吾。",
+     "choices": [
+         {"text": "循循善诱", "effects": {"文治": 5, "affection": 4}},
+         {"text": "加罚功课", "effects": {"文治": 8, "心性": -4, "affection": -5}},
+     ]},
+    {"id": "sick_fever", "min_age": 12, "max_age": 120,
+     "narrative": "{name}忽发高热，太医说是时疫之气，需静养旬日方可痊愈。",
+     "choices": [
+         {"text": "亲守药炉", "effects": {"health": 10, "affection": 8}},
+         {"text": "委付乳母", "effects": {"health": 4, "affection": -2}},
+     ]},
+    {"id": "kind_to_servant", "min_age": 24, "max_age": 120,
+     "narrative": "{name}将自己的点心分给了扫洒宫女，小宫女谢恩落泪。",
+     "choices": [
+         {"text": "嘉奖其善心", "tag": "肖母", "effects": {"心性": 6}},
+         {"text": "道宫中无此规矩", "effects": {"心性": -3, "affection": -2}},
+     ]},
+    # ---- 少年 ----
+    {"id": "debate_win", "min_age": 120, "max_age": 180,
+     "narrative": "皇子们庭辩政事，{name}以经史之学驳得对方哑口无言，文官班列侧目相看。",
+     "choices": [
+         {"text": "奏报皇帝", "effects": {"文治": 8, "emperor_favor": 6}},
+         {"text": "劝其收敛锋芒", "effects": {"心性": 6, "emperor_favor": 2}},
+     ]},
+    {"id": "martial_awakening", "min_age": 120, "max_age": 180,
+     "narrative": "校场秋操，{name}一箭中的百步之外的靶心，满场喝彩。武官纷纷侧目。",
+     "choices": [
+         {"text": "奏请赐弓", "effects": {"武略": 10, "emperor_favor": 5}, "gender": "皇子"},
+         {"text": "恐其恃勇，加授文典", "effects": {"武略": 4, "文治": 4}, "gender": "皇子"},
+     ]},
+    {"id": "princess_reputation", "min_age": 120, "max_age": 180,
+     "narrative": "{name}的一首新词传入坊间，「才名动京华」的说法开始流传。世家纷纷遣使问名。",
+     "choices": [
+         {"text": "盛赞其才", "effects": {"文采": 8, "emperor_favor": 5}, "gender": "公主"},
+         {"text": "诫其深居简出", "effects": {"心性": 4, "文采": 2}, "gender": "公主"},
+     ]},
+    {"id": "rebellious", "min_age": 120, "max_age": 180,
+     "narrative": "{name}竟顶撞了太后身边的嬷嬷，被斥「不懂规矩」。{name}摔门而去，闷闷不乐。",
+     "choices": [
+         {"text": "深夜寻回，长谈", "effects": {"心性": 6, "affection": 8}},
+         {"text": "责以规矩", "effects": {"心性": 4, "affection": -6}},
+     ]},
+    # ---- 青年 ----
+    {"id": "border_news", "min_age": 192, "max_age": 240,
+     "narrative": "边关急报：蛮族犯境。朝议历练皇子，有人举荐{name}监军，也有人主张历练文臣。",
+     "choices": [
+         {"text": "举荐{name}监军", "effects": {"武略": 12, "emperor_favor": 6}, "gender": "皇子"},
+         {"text": "举荐{name}赞画军务", "effects": {"文治": 10, "emperor_favor": 6}},
+     ]},
+    {"id": "dangers_omen", "min_age": 120, "max_age": 240,
+     "narrative": "{name}自宫道归来，面色苍白：「今日遇刺，若非侍卫及时……」",
+     "choices": [
+         {"text": "奏请皇帝彻查", "tag": "遇险", "effects": {"emperor_favor": 8, "心性": 4}},
+         {"text": "隐忍，暗中部署", "effects": {"心性": 8}, "success": 0.7, "fail_text": "刺客背后势力未明，暗中调查无果"},
+     ]},
+    {"id": "philanthropy", "min_age": 120, "max_age": 240,
+     "narrative": "水患之年，{name}主动散出月例采买粥棚，百姓称「{name}菩萨」。",
+     "choices": [
+         {"text": "奏明圣上", "effects": {"文治": 6, "emperor_favor": 8}},
+         {"text": "暗中补其用度", "effects": {"affection": 6}, "cost": 50},
+     ]},
+    {"id": "starfall", "min_age": 120, "max_age": 240,
+     "narrative": "昨夜流星坠于北境，钦天监观星后密奏：「此星主皇子，吉凶未定。」",
+     "choices": [
+         {"text": "焚毁密奏", "tag": "异梦", "effects": {"emperor_favor": -2}},
+         {"text": "呈给皇帝", "effects": {"心性": 6, "emperor_favor": 4}},
+     ]},
+]
+
+
+def generate_child_tag_events(game_state):
+    """转旬时：为每名存活子嗣按阶段/概率掷一次标签事件（每子每旬最多 1 件，队列上限 3）。"""
+    if not isinstance(getattr(game_state, "child_event_queue", None), list):
+        game_state.child_event_queue = []
+    if len(game_state.child_event_queue) >= CHILD_TAG_EVENT_QUEUE_MAX:
+        return
+    for child in game_state.children:
+        if len(game_state.child_event_queue) >= CHILD_TAG_EVENT_QUEUE_MAX:
+            break
+        if not child.get("alive", True):
+            continue
+        ensure_child_fields(child)
+        ensure_child_stats(child)
+        age = round(float(child.get("age", 0)) * 12)
+        triggered = set(child.get("triggered_events") or [])
+        candidates = [e for e in CHILD_TAG_EVENTS
+                      if e["min_age"] <= age <= e["max_age"] and e["id"] not in triggered]
+        if not candidates or random.random() >= CHILD_TAG_EVENT_CHANCE:
+            continue
+        ev = random.choice(candidates)
+        triggered.add(ev["id"])
+        child["triggered_events"] = sorted(triggered)
+        game_state.child_event_queue.append({
+            "id": f"{ev['id']}_{child.get('uid', '')}",
+            "event_id": ev["id"],
+            "child_uid": child.get("uid", ""),
+            "child_name": child.get("name", "皇嗣"),
+            "gender": child.get("gender", "皇子"),
+            "narrative": ev["narrative"].format(name=child.get("name", "皇嗣")),
+            "choices": ev["choices"],
+        })
+
+
+def apply_child_tag_choice(game_state, ev, choice):
+    """结算子嗣标签事件选项。返回 {narration, effects}。"""
+    child = next((c for c in game_state.children if c.get("uid") == ev.get("child_uid")), None)
+    if child is None:
+        return {"narration": "该事件已了结。", "effects": {}}
+    ensure_child_stats(child)
+    gender = child.get("gender", "皇子")
+    if choice.get("gender") and choice["gender"] != gender:
+        return {"narration": "此事与他/她身份不符，无从处置。", "effects": {}}
+    cost = int(choice.get("cost", 0) or 0)
+    if cost and game_state.silver < cost:
+        return {"narration": f"需花费 {cost} 两银子，你囊中不足。", "effects": {}}
+    if cost:
+        game_state.silver -= cost
+    if choice.get("success") and random.random() > choice["success"]:
+        return {"narration": choice.get("fail_text") or "事与愿违，未能如愿。", "effects": {}}
+    effects = {}
+    for key, delta in (choice.get("effects") or {}).items():
+        if key in ("affection", "health", "emperor_favor"):
+            base = int(child.get(key, 0) or 0)
+            child[key] = int(max(0, min(100, base + delta)))
+            effects[key] = delta
+        else:
+            grow_child_stat(child, key, delta)
+            effects[key] = delta
+    if choice.get("tag"):
+        granted, replaced = grant_child_tag(child, choice["tag"])
+        tag_msgs = apply_child_tag_stats(child, choice["tag"])
+        if granted or tag_msgs:
+            effects["标签"] = choice["tag"]
+            if replaced:
+                effects["替换"] = replaced
+    narr = f"{ev.get('child_name', '皇嗣')}：你选择了「{choice.get('text', '处置')}」。"
+    parts = [f"{k}{'+' if isinstance(v, int) and v > 0 else ''}{v}" for k, v in effects.items() if v != 0]
+    if parts:
+        narr += "（" + "、".join(parts) + "）"
+    add_child_event(child, narr)
+    return {"narration": narr, "effects": effects}
+
+
+# ============================================================
+#  协理六宫事件系统（10 模板 × 5 大类，每旬 1~2 件，队列上限 2）
+# ============================================================
+GOVERNANCE_EVENT_QUEUE_MAX = 2
+GOVERNANCE_HISTORY_MAX = 30
+
+# choice.effects 支持键：NPC名→好感变化、"威望"（玩家威望）、"压力_A/B"、"银两"
+# NPC 名由生成时用 {a} {b} 占位替换为实际妃嫔
+GOVERNANCE_EVENT_TEMPLATES = [
+    # ---- 人事纠纷（30%）----
+    {"id": "g_favor_dispute", "type": "人事纠纷", "icon": "🏛️", "title": "争宠告状",
+     "desc": "{a}跪在你面前，哭诉 {b} 抢了她侍寝的日子，言语间带着刺。",
+     "choices": [
+         {"text": "按规矩查档裁定", "icon": "⚖️", "effects": {"{a}": 10, "{b}": -6, "威望": 2}},
+         {"text": "各打五十大板", "icon": "🤝", "effects": {"{a}": -3, "{b}": -3, "威望": -1}},
+         {"text": "私下安抚，息事宁人", "icon": "🌙", "effects": {"{a}": 3, "{b}": 3}},
+     ]},
+    {"id": "g_servant_conflict", "type": "人事纠纷", "icon": "🏛️", "title": "宫人争执",
+     "desc": "{a}与 {b} 的宫人当街推搡，各不相让。两宫都盯着你怎么定夺。",
+     "choices": [
+         {"text": "各罚俸禄一月", "icon": "⚖️", "effects": {"{a}": -2, "{b}": -2, "威望": 3}},
+         {"text": "位份低者多担责", "icon": "🔥", "effects": {"{a}": 5, "{b}": -10}},
+         {"text": "调走涉事宫人", "icon": "🌙", "effects": {"{a}": 1, "{b}": 1}},
+     ]},
+    {"id": "g_rank_petition", "type": "人事纠纷", "icon": "🏛️", "title": "位份之争",
+     "desc": "{a} 请托你向皇后/圣上言其功劳，称 {b}「窃取其功」。此事如何处置？",
+     "choices": [
+         {"text": "秉公回绝，各安其位", "icon": "⚖️", "effects": {"{a}": -5, "{b}": 3, "威望": 3}},
+         {"text": "替 {a} 进言", "icon": "📜", "effects": {"{a}": 12, "{b}": -8, "威望": -2}},
+     ]},
+    # ---- 宫务管理（25%）----
+    {"id": "g_budget_theft", "type": "宫务管理", "icon": "📜", "title": "月例挪用",
+     "desc": "内务府呈报：本月有宫例银两去向不明，查至 {a} 宫中。{b} 出面向你求情。",
+     "choices": [
+         {"text": "彻查到底，追回银两", "icon": "⚖️", "effects": {"{a}": -15, "{b}": 5, "银两": 80, "威望": 4}},
+         {"text": "罚 {a} 补交，从轻发落", "icon": "🤝", "effects": {"{a}": -8, "银两": 40, "威望": 1}},
+         {"text": "听 {b} 情面，大事化小", "icon": "🌙", "effects": {"{a}": 4, "{b}": 8, "威望": -3}},
+     ]},
+    {"id": "g_supply_short", "type": "宫务管理", "icon": "📜", "title": "用度短缺",
+     "desc": "冬衣未至，{a} 宫人手足无依。内务府推说库银见底，请你定夺补给与否。",
+     "choices": [
+         {"text": "从你的私库拨银补给", "icon": "🪙", "effects": {"{a}": 12, "银两": -100, "威望": 2}},
+         {"text": "奏请内务府加拨", "icon": "📜", "effects": {"{a}": 6}},
+         {"text": "按旧例拖延", "icon": "🌙", "effects": {"{a}": -6, "威望": -1}},
+     ]},
+    {"id": "g_court_discipline", "type": "宫务管理", "icon": "📜", "title": "宫宴失仪",
+     "desc": "昨日宫宴上 {b} 当众讥讽 {a} 失仪，满座哗然。皇帝尚未听闻。",
+     "choices": [
+         {"text": "罚 {b} 向 {a} 赔罪", "icon": "⚖️", "effects": {"{a}": 10, "{b}": -12, "威望": 3}},
+         {"text": "隐瞒不报", "icon": "🌙", "effects": {"{a}": -4, "{b}": 4, "威望": -2}},
+     ]},
+    # ---- 人情博弈（20%）----
+    {"id": "g_bribe", "type": "人情博弈", "icon": "🎭", "title": "暗送殷勤",
+     "desc": "{a} 差心腹送来两匣珠玉，附书道：「他日若得圣眷，不忘姐姐恩典。」",
+     "choices": [
+         {"text": "收下并应允", "icon": "🎁", "effects": {"{a}": 15, "银两": 60, "威望": -3}},
+         {"text": "原样退回", "icon": "⚖️", "effects": {"{a}": -8, "威望": 2}},
+         {"text": "收下不允诺", "icon": "🌙", "effects": {"{a}": 5, "银两": 60}},
+     ]},
+    {"id": "g_plea", "type": "人情博弈", "icon": "🎭", "title": "泣血求情",
+     "desc": "{b} 的妹妹触法当杖，{b} 跪求你向皇后说情，并许诺「愿为姐姐驱使」。",
+     "choices": [
+         {"text": "应允并代为说情", "icon": "🤝", "effects": {"{b}": 15, "威望": -2}},
+         {"text": "法不容情，婉拒", "icon": "⚖️", "effects": {"{b}": -10, "威望": 3}},
+     ]},
+    # ---- 突发事件（15%）----
+    {"id": "g_fire", "type": "突发事件", "icon": "⚠️", "title": "失火警讯",
+     "desc": "深夜 {a} 宫失火，宫人四散。幸未伤人，但 {b} 疑心是 {a} 借火行事。",
+     "choices": [
+         {"text": "彻查纵火，安抚两宫", "icon": "⚖️", "effects": {"{a}": -5, "{b}": 5, "威望": 4}},
+         {"text": "以「失手」结案", "icon": "🌙", "effects": {"{a}": 3, "{b}": -5, "威望": -2}},
+     ]},
+    {"id": "g_poison_scare", "type": "突发事件", "icon": "⚠️", "title": "疑云毒药",
+     "desc": "{a} 饮了 {b} 宫送来的莲子羹后腹痛不止，太医疑有剧毒。{a} 誓要讨个说法。",
+     "choices": [
+         {"text": "封 {b} 宫彻查", "icon": "⚖️", "effects": {"{a}": 12, "{b}": -20, "威望": 3, "压力_{b}": 15}},
+         {"text": "和稀泥，各让一步", "icon": "🤝", "effects": {"{a}": -3, "{b}": -3}},
+         {"text": "信 {b} 是无辜的", "icon": "🌙", "effects": {"{a}": -15, "{b}": 10}},
+     ]},
+    # ---- 派系斗争（10%）----
+    {"id": "g_faction_purge", "type": "派系斗争", "icon": "👑", "title": "派系倾轧",
+     "desc": "{a} 暗中拉拢宫人，意图在位份册上除名 {b}。若坐实，朝中清流也将被牵连。",
+     "choices": [
+         {"text": "将 {a} 拿问", "icon": "⚖️", "effects": {"{a}": -25, "{b}": 12, "威望": 6, "压力_{a}": 20}},
+         {"text": "敲打 {a}，警告 {b}", "icon": "🎯", "effects": {"{a}": -10, "{b}": -5, "威望": 2}},
+         {"text": "置身事外", "icon": "🌙", "effects": {"{a}": 5, "{b}": -5, "威望": -3}},
+     ]},
+]
+
+
+def _gov_pick_npcs(game_state):
+    """选两名存活妃嫔（排除太后/玩家本人），高位在前。"""
+    names = [n for n, c in (game_state.npcs or {}).items()
+             if n != "太后" and n != game_state.name and isinstance(c, dict) and c.get("alive", True)]
+    if len(names) < 2:
+        return None, None
+    a, b = random.sample(names, 2)
+    if RANK_LEVELS.get(normalize_rank_name(game_state.npcs[a].get("rank", "答应")), 0) < \
+       RANK_LEVELS.get(normalize_rank_name(game_state.npcs[b].get("rank", "答应")), 0):
+        a, b = b, a
+    return a, b
+
+
+def generate_governance_events(game_state):
+    """转旬时：玩家有协理权时生成 1~2 件协理事件。连处理 2 旬后冷却 1 旬。"""
+    if not isinstance(getattr(game_state, "governance_events", None), list):
+        game_state.governance_events = []
+    if not isinstance(getattr(game_state, "governance_history", None), list):
+        game_state.governance_history = []
+    has_auth = False
+    try:
+        qa = queen_authority(game_state)
+        has_auth = game_state.rank.name == "皇后" or qa.get("is_player") \
+            or qa.get("assistant") == game_state.name or qa.get("can_assist_six_palaces")
+    except Exception:
+        pass
+    if not has_auth:
+        game_state.governance_events = []
+        return
+    cooldown = int(getattr(game_state, "governance_cooldown", 0) or 0)
+    if cooldown > 0:
+        game_state.governance_cooldown = cooldown - 1
+        return
+    streak = int(getattr(game_state, "governance_handled_streak", 0) or 0)
+    if streak >= 2:
+        game_state.governance_handled_streak = 0
+        game_state.governance_cooldown = 1
+        return
+    if len(game_state.governance_events) >= GOVERNANCE_EVENT_QUEUE_MAX:
+        return
+    for _ in range(random.choice([1, 2])):
+        if len(game_state.governance_events) >= GOVERNANCE_EVENT_QUEUE_MAX:
+            break
+        tpl = random.choice(GOVERNANCE_EVENT_TEMPLATES)
+        a, b = _gov_pick_npcs(game_state)
+        if not a or not b:
+            continue
+        choices = []
+        for ch in tpl["choices"]:
+            eff = {k.format(a=a, b=b): v for k, v in (ch.get("effects") or {}).items()}
+            choices.append({"text": ch["text"].format(a=a, b=b), "icon": ch.get("icon", ""), "effects": eff})
+        game_state.governance_events.append({
+            "id": f"gov_{tpl['id']}_{game_state.year}_{game_state.month}_{len(game_state.governance_events)}",
+            "type": tpl["type"], "icon": tpl["icon"], "title": tpl["title"].format(a=a, b=b),
+            "desc": tpl["desc"].format(a=a, b=b),
+            "choices": choices,
+            "involved": [a, b],
+            "period": f"{game_state.year}年{game_state.month}月",
+        })
+
+
+def apply_governance_choice(game_state, ev, choice):
+    """结算协理事件选项。返回 {narration, effects}。"""
+    effects = {}
+    involved = ev.get("involved") or []
+    for k, v in (choice.get("effects") or {}).items():
+        v = int(v)
+        if k == "银两":
+            game_state.silver = max(0, game_state.silver + v)
+            effects["银两"] = v
+        elif k == "威望":
+            old = int(game_state.attributes.get("威望", 0) or 0)
+            game_state.attributes["威望"] = int(max(0, min(game_state.get_attr_max("威望"), old + v)))
+            effects["威望"] = v
+        elif k.startswith("压力_"):
+            target = k.split("_", 1)[1]
+            npc = (game_state.npcs or {}).get(target)
+            if isinstance(npc, dict):
+                npc["压力"] = int(max(0, min(100, int(npc.get("压力", 0) or 0) + v)))
+                effects[f"压力·{target}"] = v
+        else:
+            npc = (game_state.npcs or {}).get(k)
+            if isinstance(npc, dict) and isinstance(npc.get("relationship"), dict):
+                rel = npc["relationship"]
+                rel["好感"] = int(max(-100, min(100, int(rel.get("好感", 0) or 0) + v)))
+                effects[k] = v
+            # 裁决同时影响 NPC 间关系网（涉及对方）
+            if len(involved) == 2 and k in involved:
+                other = involved[1] if k == involved[0] else involved[0]
+                modify_npc_rel(game_state, k, other, int(v * 0.5), ev.get("title", ""),
+                               ev.get("period"), notify=False)
+    narr = f"「{ev.get('title', '')}」你裁决：{choice.get('text', '')}。"
+    parts = [f"{k}{'+' if v > 0 else ''}{v}" for k, v in effects.items() if v != 0]
+    if parts:
+        narr += "（" + "、".join(parts) + "）"
+    game_state.governance_history.insert(0, {
+        "id": ev.get("id"), "title": ev.get("title"), "type": ev.get("type"),
+        "choice": choice.get("text"), "period": ev.get("period"),
+    })
+    game_state.governance_history = game_state.governance_history[:GOVERNANCE_HISTORY_MAX]
+    game_state.governance_handled_streak = int(getattr(game_state, "governance_handled_streak", 0) or 0) + 1
+    return {"narration": narr, "effects": effects}
+
+
+# ---- NPC 妃嫔关系网引擎 ----
+# 妃嫔之间自动产生好感变化/结盟/结仇，让后宫自我运转
+NPC_REL_TIERS = [
+    (-100, -50, "死敌", "💀", "#c0392b"),
+    (-50, -20, "仇敌", "⚔️", "#e74c3c"),
+    (-20, -5, "对手", "🎯", "#e67e22"),
+    (-5, 5, "中立", "—", "#95a5a6"),
+    (5, 20, "友善", "🤝", "#27ae60"),
+    (20, 50, "朋友", "🌸", "#a1887f"),
+    (50, 80, "知己", "💛", "#f39c12"),
+    (80, 101, "同盟", "👑", "#d4af37"),
+]
+# 性格对冲对：冲突概率提升
+NPC_PERSONALITY_CLASH = {
+    ("温婉贤淑", "阴险毒辣"), ("温婉贤淑", "妖艳张扬"),
+    ("高傲冷艳", "活泼开朗"), ("端庄大方", "阴险毒辣"),
+    ("清冷孤傲", "妖艳张扬"), ("懦弱胆小", "野心勃勃"),
+}
+NPC_REL_LOG_MAX = 40
+
+
+def npc_rel_tier(score):
+    """好感分 → (类型名, 图标, 颜色)。"""
+    s = int(score)
+    for lo, hi, name, icon, color in NPC_REL_TIERS:
+        if lo <= s < hi:
+            return name, icon, color
+    return "中立", "—", "#95a5a6"
+
+
+def _ensure_npc_rel(game_state, a, b, period):
+    """取/建 A→B 的关系条目（含初始好感：位份差 + 性格 + 随机）。"""
+    net = game_state.npc_relationships
+    row = net.setdefault(a, {})
+    if not isinstance(row.get(b), dict):
+        na, nb = (game_state.npcs or {}).get(a), (game_state.npcs or {}).get(b)
+        la = RANK_LEVELS.get(normalize_rank_name((na or {}).get("rank", "答应")), 0)
+        lb = RANK_LEVELS.get(normalize_rank_name((nb or {}).get("rank", "答应")), 0)
+        base = random.randint(-15, 20)
+        if la > lb:
+            base -= random.randint(1, 5)   # 高位对低位略疏
+        elif lb > la:
+            base += random.randint(1, 5)
+        pa = (na or {}).get("personality", "")
+        pb = (nb or {}).get("personality", "")
+        if (pa, pb) in NPC_PERSONALITY_CLASH or (pb, pa) in NPC_PERSONALITY_CLASH:
+            base -= random.randint(5, 15)
+        elif pa and pa == pb:
+            base += random.randint(5, 12)
+        row[b] = {
+            "好感": int(max(-100, min(100, base))),
+            "印象": random.choice(["友善", "疏离", "信任"]) if base > 0 else random.choice(["疏离", "敌视"]),
+            "关系类型": "中立",
+            "历史事件": [],
+            "最后互动旬": period,
+        }
+    return row[b]
+
+
+def get_npc_rel(game_state, a, b):
+    """查询 A→B 关系（不创建）。"""
+    return ((game_state.npc_relationships or {}).get(a) or {}).get(b)
+
+
+def modify_npc_rel(game_state, a, b, delta, reason="", period=None, notify=True):
+    """修改 A→B 好感并记录；重大变化（|delta|≥10 或类型跨越）推送事件。"""
+    if a == b or not a or not b:
+        return
+    if period is None:
+        period = f"{game_state.year}年{game_state.month}月"
+    entry = _ensure_npc_rel(game_state, a, b, period)
+    old = int(entry.get("好感", 0))
+    old_tier, _, _ = npc_rel_tier(old)
+    new = int(max(-100, min(100, old + delta)))
+    entry["好感"] = new
+    entry["最后互动旬"] = period
+    if delta and reason:
+        entry.setdefault("历史事件", []).insert(0, {"事件": reason, "变化": int(delta), "旬": period})
+        entry["历史事件"] = entry["历史事件"][:10]
+    new_tier, _, _ = npc_rel_tier(new)
+    entry["关系类型"] = new_tier
+    entry["印象"] = new_tier if new_tier in ("仇敌", "知己", "同盟") else entry.get("印象", "疏离")
+    if notify and (abs(delta) >= 10 or new_tier != old_tier):
+        line = f"🌸 {a} 与 {b}「{reason or '关系变化'}」：{new_tier}（好感 {new}）"
+        game_state.relationship_events.append({"msg": line, "period": period, "a": a, "b": b})
+        game_state.relationship_log.insert(0, line)
+        game_state.relationship_log = game_state.relationship_log[:NPC_REL_LOG_MAX]
+
+
+def sync_npc_rel_to_player(game_state):
+    """关系网 → 玩家可见的 rivalries/alliances 增量同步（只增强，不覆盖玩家主动操作值）。"""
+    if not isinstance(getattr(game_state, "rivalries", None), dict):
+        game_state.rivalries = {}
+    if not isinstance(getattr(game_state, "alliances", None), dict):
+        game_state.alliances = {}
+    for a, row in (game_state.npc_relationships or {}).items():
+        for b, entry in row.items():
+            if b not in (game_state.npcs or {}) or not isinstance(entry, dict):
+                continue
+            score = int(entry.get("好感", 0))
+            if score <= -20:
+                game_state.rivalries[b] = max(game_state.rivalries.get(b, 0), min(100, -score))
+            if score >= 50:
+                game_state.alliances[b] = max(game_state.alliances.get(b, 0), min(100, score - 40))
+
+
+def process_npc_relationships(game_state):
+    """每旬执行：NPC 之间关系自然变化 + 偶发事件。返回叙事消息列表（进情报）。"""
+    msgs = []
+    if not isinstance(getattr(game_state, "npc_relationships", None), dict):
+        game_state.npc_relationships = {}
+    if not isinstance(getattr(game_state, "relationship_events", None), list):
+        game_state.relationship_events = []
+    if not isinstance(getattr(game_state, "relationship_log", None), list):
+        game_state.relationship_log = []
+    period = f"{game_state.year}年{game_state.month}月"
+    alive = [n for n, c in (game_state.npcs or {}).items()
+             if c.get("alive", True) and n != "太后"]
+    if len(alive) < 2:
+        return msgs
+
+    pairs = [(a, b) for a in alive for b in alive if a != b]
+
+    # ① 好感自然衰减：向 0 靠近 1~2 点
+    for a, b in pairs:
+        entry = _ensure_npc_rel(game_state, a, b, period)
+        score = int(entry.get("好感", 0))
+        if score == 0:
+            continue
+        move = random.choice([1, 2])
+        entry["好感"] = int(max(-100, min(100, score - move if score > 0 else score + move)))
+
+    # ② 压力传导：高压者对所有人好感-1；心情愉悦者 +1
+    for a in alive:
+        pres = int((game_state.npcs[a] or {}).get("压力", 0) or 0)
+        if pres >= 70 or pres <= 20:
+            step = -1 if pres >= 70 else 1
+            for b in alive:
+                if a == b:
+                    continue
+                entry = _ensure_npc_rel(game_state, a, b, period)
+                entry["好感"] = int(max(-100, min(100, entry.get("好感", 0) + step)))
+
+    # ③ 位份相近自然亲近/冲突（每月）
+    if game_state.day <= 10:
+        for a, b in pairs:
+            la = RANK_LEVELS.get(normalize_rank_name((game_state.npcs[a] or {}).get("rank", "答应")), 0)
+            lb = RANK_LEVELS.get(normalize_rank_name((game_state.npcs[b] or {}).get("rank", "答应")), 0)
+            if abs(la - lb) > 1:
+                continue
+            pa = (game_state.npcs[a] or {}).get("personality", "")
+            pb = (game_state.npcs[b] or {}).get("personality", "")
+            clash = (pa, pb) in NPC_PERSONALITY_CLASH or (pb, pa) in NPC_PERSONALITY_CLASH
+            chance = 0.05 if clash else (0.25 if (pa and pa == pb) else 0.15)
+            if random.random() < chance:
+                if clash:
+                    delta, reason = -random.randint(2, 6), "言语冲撞"
+                else:
+                    delta, reason = random.randint(1, 3), "同病相怜"
+                modify_npc_rel(game_state, a, b, delta, reason, period)
+                modify_npc_rel(game_state, b, a, delta, reason, period, notify=False)
+
+    # ④ 每月偶发大事（全后宫最多 2 件，避免轰炸）
+    if game_state.day <= 10:
+        big = []
+        # 御花园偶遇
+        if random.random() < 0.30:
+            a, b = random.sample(alive, 2)
+            good = random.random() < 0.55
+            delta = random.randint(5, 12) if good else -random.randint(5, 12)
+            reason = "御花园偶遇相谈甚欢" if good else "御花园偶遇言语不和"
+            modify_npc_rel(game_state, a, b, delta, reason, period)
+            modify_npc_rel(game_state, b, a, int(delta * 0.8), reason, period, notify=False)
+            big.append(f"🌸 {reason}，{a}与{b}间的气氛随之变化")
+        # 高位施恩/训斥低位
+        if random.random() < 0.20:
+            hi = [n for n in alive if RANK_LEVELS.get(normalize_rank_name((game_state.npcs[n] or {}).get("rank", "答应")), 0) >= RANK_LEVELS.get("嫔", 0)]
+            lo = [n for n in alive if n not in hi]
+            if hi and lo:
+                a, b = random.choice(hi), random.choice(lo)
+                good = random.random() < 0.5
+                delta = random.randint(3, 8) if good else -random.randint(5, 15)
+                reason = f"{a}赏脸施恩" if good else f"{a}当众训斥"
+                modify_npc_rel(game_state, b, a, delta, reason, period)
+                big.append(f"🏛️ {reason}，{b}心中暗记")
+        # 野心勃勃者暗生嫌隙
+        if random.random() < 0.20:
+            ambit = [n for n in alive if (game_state.npcs[n] or {}).get("personality") == "野心勃勃"]
+            if ambit:
+                a = random.choice(ambit)
+                rivals = [n for n in alive if n != a
+                          and RANK_LEVELS.get(normalize_rank_name((game_state.npcs[n] or {}).get("rank", "答应")), 0)
+                          > RANK_LEVELS.get(normalize_rank_name((game_state.npcs[a] or {}).get("rank", "答应")), 0)]
+                if rivals:
+                    b = random.choice(rivals)
+                    modify_npc_rel(game_state, a, b, -random.randint(5, 15), "暗地里觊觎上位", period, notify=False)
+        # 强者结拜 / 旧怨激化
+        for a in alive:
+            row = (game_state.npc_relationships or {}).get(a) or {}
+            for b, entry in list(row.items()):
+                if b == a or b not in (game_state.npcs or {}) or not isinstance(entry, dict):
+                    continue
+                s = int(entry.get("好感", 0))
+                if s >= 70 and random.random() < 0.15:
+                    modify_npc_rel(game_state, a, b, random.randint(15, 25), "月下焚香结为干姐妹", period)
+                    modify_npc_rel(game_state, b, a, random.randint(15, 25), "月下焚香结为干姐妹", period, notify=False)
+                    big.append(f"💛 {a}与{b}月下结拜，情同姐妹")
+                elif s <= -40 and random.random() < 0.10:
+                    modify_npc_rel(game_state, a, b, -random.randint(5, 15), "旧怨再激，形同陌路", period, notify=False)
+        msgs.extend(big[:2])
+
+    # ⑤ 同步到玩家可见的 rivalries/alliances
+    sync_npc_rel_to_player(game_state)
+    return msgs
+
+
+def npc_relationships_payload(game_state):
+    """返回前端关系网数据（含类型/图标/颜色）。"""
+    out = {}
+    for a, row in (getattr(game_state, "npc_relationships", {}) or {}).items():
+        if a not in (game_state.npcs or {}):
+            continue
+        out[a] = {}
+        for b, entry in row.items():
+            if b not in (game_state.npcs or {}) or not isinstance(entry, dict):
+                continue
+            s = int(entry.get("好感", 0))
+            tier, icon, color = npc_rel_tier(s)
+            out[a][b] = {
+                "score": s, "tier": tier, "icon": icon, "color": color,
+                "impress": entry.get("印象", ""),
+                "events": (entry.get("历史事件") or [])[:5],
+            }
+    return out
+
+
 def create_newborn_child(gender, name, game_state, mother_name=None):
     child = {
         "name": name,
@@ -2478,6 +3361,29 @@ def create_newborn_child(gender, name, game_state, mother_name=None):
         "guardian": "",
         "in_chonghua": False,
     }
+    # 五维遗传（出生值含噪声，不受互斥钳制）
+    child["stats"] = calc_child_birth_stats(gender, game_state, mother_name)
+    # 标签系统：特殊规则 + 出生随机标签
+    special = []
+    stats = child["stats"]
+    ensure_child_tags(child)
+    if gender == "公主" and stats.get("容貌", 0) >= 85:
+        grant_child_tag(child, "倾国倾城")
+        special.append("🌹 生而倾国，他日择驸马，门第必高一档")
+    if gender == "皇子" and stats.get("仪容", 0) >= 80:
+        grant_child_tag(child, "类父")
+        special.append("🌟 天生贵仪，他日立储，群臣必加三分称许")
+    # 出生随机标签（概率性，最多再给1个）
+    if random.random() < 0.30:
+        birth_pool = [t for t in CHILD_TAG_INFO if t not in ("倾国倾城",)]
+        bt = random.choice(birth_pool)
+        granted, _ = grant_child_tag(child, bt)
+        if granted:
+            info = CHILD_TAG_INFO[bt]
+            tag_msgs = apply_child_tag_stats(child, bt)
+            special.append(f"{info['icon']} 生来{bt}：{'，'.join(tag_msgs)}")
+    if special:
+        add_child_event(child, "✨ 天资异禀：" + "；".join(special))
     return child
 
 def process_child_milestones(child, prefix, game_state=None):
@@ -6969,6 +7875,13 @@ def next_period():
         prince_events.extend(process_child_milestones(child, "你的", game_state))
     child_life_events = process_player_child_events(game_state)
     prince_events.extend(child_life_events)
+    # ---- 子嗣标签事件（每子每旬最多 1 件，队列弹窗） ----
+    generate_child_tag_events(game_state)
+    # ---- 协理六宫事件（每旬 1~2 件，弹窗裁决） ----
+    generate_governance_events(game_state)
+    # ---- NPC 妃嫔关系网：每旬自然变化 ----
+    for rel_msg in process_npc_relationships(game_state):
+        intelligence.append(rel_msg)
     # ---- 夺嫡暗流：储君空悬时逐旬更新皇子势头 ----
     heir_race_events = process_heir_race(game_state)
     for evt in heir_race_events:
@@ -7344,6 +8257,10 @@ def next_period():
         "palaces": PALACE_LIST,
         "emperor": game_state.emperor,
         "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)),
+        "child_event_queue": getattr(game_state, "child_event_queue", []),
+        "governance_events": getattr(game_state, "governance_events", []),
+        "governance_history": getattr(game_state, "governance_history", [])[-10:],
+        "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5],
     })
 
 @app.route('/api/intrigue/targets', methods=['GET'])
@@ -7801,7 +8718,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state)})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state), "child_event_queue": getattr(game_state, "child_event_queue", []), "governance_events": getattr(game_state, "governance_events", []), "governance_history": getattr(game_state, "governance_history", [])[-10:], "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5]})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -8342,6 +9259,77 @@ def generate_background_story_api():
         personality=data.get('personality'),
     )
     return jsonify({"success": True, "story": story, "background": bg})
+
+@app.route('/api/child_event/respond', methods=['POST'])
+def child_event_respond():
+    """处理子嗣标签事件：提交选项索引，结算并移除该事件。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    queue = getattr(game_state, 'child_event_queue', None)
+    if not isinstance(queue, list):
+        queue = []
+        game_state.child_event_queue = queue
+    ev_id = data.get('event_id')
+    ev = next((e for e in queue if e.get('id') == ev_id), None)
+    if ev is None:
+        return jsonify({"error": "事件不存在或已了结"}), 404
+    idx = int(data.get('choice_index', 0) or 0)
+    choices = ev.get('choices') or []
+    if idx < 0 or idx >= len(choices):
+        return jsonify({"error": "选项无效"}), 400
+    result = apply_child_tag_choice(game_state, ev, choices[idx])
+    game_state.child_event_queue = [e for e in queue if e.get('id') != ev_id]
+    return jsonify({"success": True, **result, "child_event_queue": game_state.child_event_queue,
+                    "children": game_state.children})
+
+
+@app.route('/api/governance/respond', methods=['POST'])
+def governance_respond():
+    """处理协理六宫事件：提交选项索引，结算并移除该事件（消耗 1 行动点）。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    queue = getattr(game_state, 'governance_events', None)
+    if not isinstance(queue, list):
+        queue = []
+        game_state.governance_events = queue
+    ev_id = data.get('event_id')
+    ev = next((e for e in queue if e.get('id') == ev_id), None)
+    if ev is None:
+        return jsonify({"error": "事件不存在或已了结"}), 404
+    ok, gerr = guard_action(game_state)
+    if not ok:
+        return gerr
+    idx = int(data.get('choice_index', 0) or 0)
+    choices = ev.get('choices') or []
+    if idx < 0 or idx >= len(choices):
+        return jsonify({"error": "选项无效"}), 400
+    result = apply_governance_choice(game_state, ev, choices[idx])
+    game_state.governance_events = [e for e in queue if e.get('id') != ev_id]
+    return jsonify({"success": True, **result,
+                    "governance_events": game_state.governance_events,
+                    "governance_history": game_state.governance_history[-10:],
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes,
+                    "remaining_actions": game_state.remaining_actions})
+
+
+@app.route('/api/relationships', methods=['GET'])
+def relationship_net():
+    """后宫关系网数据（含类型/图标/颜色）+ 最近变化日志。"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    return jsonify({
+        "net": npc_relationships_payload(game_state),
+        "log": (getattr(game_state, "relationship_log", []) or [])[:20],
+        "pending": (getattr(game_state, "relationship_events", []) or [])[-5:],
+    })
+
 
 @app.route('/api/child/given_chars', methods=['GET'])
 def list_child_given_chars():

@@ -1663,6 +1663,7 @@
             </div>
             <div class="right">
                 <button class="tool-btn" onclick="toggleMap()" title="宫廷舆图">🗺️</button>
+                <button class="tool-btn" onclick="openRelationNet()" title="后宫关系网">🕸️</button>
                 <button class="tool-btn" onclick="openLedger()" title="内务府账册">📒<span class="badge">亏</span></button>
                 <button class="tool-btn" onclick="saveGame()" title="存档">💾</button>
                 <button class="tool-btn" onclick="openSaveList()" title="读档">📂</button>
@@ -1901,6 +1902,7 @@
                 <div class="stat-block" id="regencyBlock" style="display:none;">
                     <div class="block-title">📜 东 宫 监 国</div>
                     <div id="regencyPanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;padding:3px 0;"></div>
+<div id="governancePanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;padding:2px 0;"></div>
                 </div>
                 <div class="stat-block" id="heirRaceBlock" style="display:none;">
                     <div class="block-title">👑 夺 嫡 风 云</div>
@@ -4370,7 +4372,9 @@ if(data.death_message){
 }
 
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
-updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);renderHeirRaceUI(data);renderRegencyPanel(data);renderConsortPanel(data);loadQueenAuthority();
+updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);renderHeirRaceUI(data);renderRegencyPanel(data);renderConsortPanel(data);renderGovernancePanel(data);loadQueenAuthority();
+checkChildEventQueue(data);
+if((data.relationship_log||[]).length>0){addLogEntry(data.relationship_log[0],'intel');}
 const disabled=rem<=0;
 document.querySelectorAll('.action-btn, .interact-btn, #sendBtn, [onclick*="hireServant"], [onclick*="trainServant"], [onclick*="dowagerInteract"], [onclick*="emperorInteract"], [onclick*="interactAction"]').forEach(btn=>{btn.disabled=disabled;btn.style.opacity=disabled?'0.4':'1';btn.style.cursor=disabled?'not-allowed':'pointer';});
 userInput.disabled=disabled;userInput.placeholder=disabled?'行动点已用完，请转旬':'输入你想做的事...';
@@ -4409,6 +4413,104 @@ drawMap(data);
 // ===== 终局处理：放在最后，锁死操作并覆盖行动点相关的启用状态 =====
 if(handleEndingPayload(data)) return;
 if(!data._skipFlip) triggerFlip(data);
+}
+
+// ============================================================
+//  子嗣标签事件 / 协理事件 / 关系网
+// ============================================================
+function checkChildEventQueue(data){
+    if(!data || !Array.isArray(data.child_event_queue) || data.child_event_queue.length === 0) return;
+    if(window._childEventShown) return;
+    window._childEventShown = true;
+    openChildEventModal(data.child_event_queue[0]);
+}
+function openChildEventModal(ev){
+    let body = `<div style="font-size:10px;color:var(--text-mid);line-height:1.7;">${ev.narrative||''}</div>`;
+    body += `<div style="margin-top:6px;font-size:9px;color:var(--text-light);">👶 ${ev.child_name||''} · ${ev.stage||''}</div>`;
+    body += `<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;">`;
+    (ev.choices||[]).forEach((c, i) => {
+        const tagHint = c.tag ? ` <span style="font-size:8px;color:#d4af37;">（获标签：${c.tag}）</span>` : '';
+        body += `<button onclick="childEventRespond('${ev.id}',${i})" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;text-align:left;">${c.icon||'📜'} ${c.text}${tagHint}</button>`;
+    });
+    body += `</div>`;
+    openModal(`👶 皇嗣 · ${ev.title||'事件'}`, body, '稍后再说', () => { window._childEventShown = false; }, true);
+}
+async function childEventRespond(evId, idx){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/child_event/respond`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, event_id: evId, choice_index: idx})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '处理失败');
+        window._childEventShown = false;
+        closeModal();
+        if(d.narration){
+            openModal('📜 皇嗣事件 · 结果', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration}</div>`, '知道了', null, true);
+        } else { showToast('👶 事件已了结'); }
+        refreshState();
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
+}
+function renderGovernancePanel(data){
+    const panel = document.getElementById('governancePanel');
+    if(!panel) return;
+    const q = (data && Array.isArray(data.governance_events)) ? data.governance_events : [];
+    if(q.length === 0){
+        panel.innerHTML = `<div style="font-size:9px;color:var(--text-light);padding:4px 0;">🏛️ 协理六宫：本旬暂无待裁事务</div>`;
+    } else {
+        panel.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0;">` + q.map(ev =>
+            `<button onclick="openGovernanceModal('${ev.id}')" style="padding:4px 10px;background:rgba(192,57,43,.12);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;">${ev.icon||'🏛️'} ${ev.type||''} · ${ev.title||'待裁'} ▸</button>`
+        ).join('') + `</div>`;
+    }
+}
+
+function openGovernanceModal(evId){
+    const data = window._lastGameData || {};
+    const ev = ((data.governance_events) || []).find(e => e.id === evId);
+    if(!ev) return;
+    let body = `<div style="font-size:10px;color:var(--text-mid);line-height:1.7;">${ev.desc||''}</div>`;
+    body += `<div style="margin-top:4px;font-size:9px;color:var(--text-light);">🏛️ 协理六宫 · ${ev.type||''}${ev.is_urgent?' · <span style="color:#e74c3c;">紧急</span>':''}</div>`;
+    body += `<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;">`;
+    (ev.choices||[]).forEach((c, i) => {
+        body += `<button onclick="governanceRespond('${evId}',${i})" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;text-align:left;">${c.icon||'⚖️'} ${c.text}</button>`;
+    });
+    body += `</div>`;
+    openModal(`🏛️ 协理六宫 · ${ev.title||'裁断'}`, body, '暂且搁置', null, true);
+}
+async function governanceRespond(evId, idx){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/governance/respond`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, event_id: evId, choice_index: idx})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '裁断失败');
+        closeModal();
+        openModal('🏛️ 裁断结果', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', () => refreshState(), true);
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
+}
+async function openRelationNet(){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/relationships?player_id=${playerId}`);
+        const d = await r.json();
+        const net = d.net || {};
+        let rows = Object.keys(net).map(a => {
+            const rels = Object.entries(net[a] || {})
+                .sort((x, y) => y[1].score - x[1].score)
+                .map(([b, e]) => `<span style="display:inline-block;background:var(--bg-card);border:1px solid ${e.color};border-radius:10px;padding:1px 7px;font-size:8px;margin:1px;cursor:pointer;" title="${(e.events||[]).map(v=>v.事件).join(' / ')}" onclick="closeModal();openInteract('npc','${b}')">${e.icon} ${b} · ${e.tier} ${e.score>0?'+':''}${e.score}</span>`).join('');
+            return `<div style="padding:3px 0;border-bottom:1px dashed var(--border-light);"><span style="font-size:9px;color:var(--text-dark);font-weight:600;">${a}</span><div style="margin-top:2px;">${rels || '<span style="font-size:8px;color:var(--text-light);">（尚无往来）</span>'}</div></div>`;
+        }).join('');
+        const logHtml = (d.log || []).slice(0, 8).map(m => `<div style="font-size:8px;color:var(--text-light);padding:1px 0;">· ${m}</div>`).join('');
+        const html = `<div style="max-height:55vh;overflow-y:auto;">${rows}</div>${logHtml ? `<div style="margin-top:6px;font-size:8px;color:var(--text-mid);font-weight:600;">📜 近日人情变动</div>${logHtml}` : ''}`;
+        openModal('🕸️ 后宫关系网', html, '关闭', null, true);
+    } catch(e){ showToast('❌ 获取关系网失败', 'error'); }
+}
+function refreshState(){
+    if(!playerId) return;
+    myFetch(`${API_BASE}/api/state/${playerId}`).then(r => r.json()).then(d => { if(!d.error) updateUI(d); }).catch(() => {});
 }
 
 // ============================================================
