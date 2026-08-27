@@ -594,26 +594,29 @@
             font-size: 10px;
             color: #b0c0ba;
         }
-        .player-card .preg-progress {
+        .preg-progress {
             margin-top: 2px;
-            display: flex;
+            display: none;
             align-items: center;
             gap: 6px;
         }
-        .player-card .preg-progress .track {
+        .preg-progress.visible {
+            display: flex;
+        }
+        .preg-progress .track {
             width: 60px;
             height: 3px;
             background: rgba(158, 190, 178, 0.1);
             border-radius: 4px;
             overflow: hidden;
         }
-        .player-card .preg-progress .track .fill {
+        .preg-progress .track .fill {
             height: 100%;
             background: linear-gradient(90deg, #c9a86a, #f0b48f);
             border-radius: 4px;
             width: 40%;
         }
-        .player-card .preg-progress .label {
+        .preg-progress .label {
             font-size: 7px;
             color: #c9a86a;
         }
@@ -1728,7 +1731,11 @@
                     <span style="font-size:8px;color:#7a8a86;">好感 <span id="dowagerFavor">-</span></span>
                 </div>
 
-                <!-- 主控个人卡已移除：后宫列表只显示太后与妃嫔；主控信息统一在状态页（pageStatus 基本信息 / 我的档案）查看 -->
+                <!-- 主控个人卡已移至状态页；孕期进度条独立保留 -->
+                <div class="preg-progress" id="pregnancyProgress">
+                    <div class="track"><div class="fill" style="width:0%;" id="pregnancyProgressFill"></div></div>
+                    <span class="label" id="pregnancyProgressLabel"></span>
+                </div>
 
                 <div id="statusTags"></div>
 
