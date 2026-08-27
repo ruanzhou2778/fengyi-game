@@ -1728,23 +1728,7 @@
                     <span style="font-size:8px;color:#7a8a86;">好感 <span id="dowagerFavor">-</span></span>
                 </div>
 
-                <!-- 玩家身份卡 -->
-                <div class="section-label" style="margin-top:4px;">👤 你</div>
-                <div class="player-card" onclick="openPlayerDetail()">
-                    <div class="pc-left">
-                        <div class="pc-avatar">👑</div>
-                        <div class="pc-info">
-                            <div class="pc-name" id="pcName">-</div>
-                            <div class="preg-progress" id="pregnancyProgress">
-                                <div class="track"><div class="fill" style="width:0%;" id="pregnancyProgressFill"></div></div>
-                                <span class="label" id="pregnancyProgressLabel"></span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="pc-right">
-                        <div style="font-size:7px;color:var(--text-light);margin-top:2px;">点击查看详情</div>
-                    </div>
-                </div>
+                <!-- 主控个人卡已移除：后宫列表只显示太后与妃嫔；主控信息统一在状态页（pageStatus 基本信息 / 我的档案）查看 -->
 
                 <div id="statusTags"></div>
 
@@ -1766,6 +1750,7 @@
                     <div class="stat-row"><span class="label">性格</span><span class="value" id="sPersonality">-</span></div>
                     <div class="stat-row"><span class="label">特质</span><span class="value" id="sTraits">-</span></div>
                     <div class="stat-row"><span class="label">物品</span><span class="value"><button class="interact-btn" onclick="openInventory()">🎒 物品背包</button></span></div>
+                    <div class="stat-row"><span class="label">档案</span><span class="value"><button class="interact-btn" onclick="openPlayerDetail()">📋 我的档案</button></span></div>
                 </div>
 
                 <div class="stat-block">
