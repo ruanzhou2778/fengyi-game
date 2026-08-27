@@ -72,7 +72,24 @@ async function updateInnerPalacePanel(){
         html += `<div style="padding:2px 0;border-bottom:1px solid rgba(201,168,106,.18);"><span style="color:var(--text-light);">🏷️ 市价</span><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:1px;">`;
         for(const [k,v] of Object.entries(market)){ html += `<span style="font-size:7px;color:var(--text-mid);">${k}${v}</span>`; }
         html += `</div></div>`;
-        if(logs.length){ html += `<div style="margin-top:2px;font-size:7px;color:var(--text-mid);line-height:1.3;">`; logs.slice().reverse().forEach(l=>{ html+=`<div>${l}</div>`; }); html+=`</div>`; }
+        if(logs.length){
+            // 内务府记事：按旬分组压缩显示（不再内联罗列全部明细）
+            const byPeriod = {};
+            logs.forEach(function(l){
+                const p = (l && typeof l === 'object') ? (l.p || 0) : 0;
+                const t = (l && typeof l === 'object') ? (l.t || '') : String(l || '');
+                if(!byPeriod[p]) byPeriod[p] = [];
+                byPeriod[p].push(t);
+            });
+            const periods = Object.keys(byPeriod).map(Number).sort(function(a,b){ return b-a; });
+            const latest = periods.length ? periods[0] : 0;
+            const latestMsgs = (byPeriod[latest] || []).slice(0, 3);
+            html += `<div style="margin-top:2px;font-size:7px;color:var(--text-mid);line-height:1.3;">`;
+            html += `<span style="color:var(--gold-dark);font-weight:600;">📒 记事·第${latest}旬</span>`;
+            latestMsgs.forEach(function(t){ html += `<div>· ${t}</div>`; });
+            if(periods.length > 1) html += `<div style="color:var(--text-light);opacity:.7;">…共 ${periods.length} 旬记录，点『📒 记事』查看</div>`;
+            html += `</div>`;
+        }
         content.innerHTML = html;
         const remainActions = (window._lastGameData||{}).remaining_actions ?? 0;
         if (!d.can_manage) {
@@ -91,6 +108,7 @@ async function updateInnerPalacePanel(){
         B('ipPurseAction()','🏦 私库');
         B('ipChiefAction()','👤 总管');
         B('openIpUpgrade()','🏭 产业');
+        btns += `<button onclick="openIpLogs()" class="interact-btn" style="padding:2px 6px;font-size:8px;">📒 记事</button>`;
         if(remainActions<=0) btns += `<span style="font-size:7px;color:var(--text-light);margin-left:4px;">行动点不足</span>`;
         actions.innerHTML = btns;
     }catch(e){ content.innerHTML=`<span style="color:#e08080;">加载失败</span>`; actions.innerHTML=''; }
@@ -306,22 +324,23 @@ async function ipChiefAction(){
         `</div>` +
         (canDismiss?'':'<div style="font-size:8px;color:#e08080;">弹劾需威望≥80或罪证≥20</div>') +
         `</div>`;
-    openModal('👤 总管人事', html, '关闭', async ()=>{
-        const appBtn = document.getElementById('ipAppointBtn');
-        if(appBtn) appBtn.onclick = async ()=>{
-            if(!confirm('确定任命新总管？花费100两。新总管随机生成（含派系）。')) return;
-            const r = await ipPostAction('chief/appoint', {player_id: playerId});
-            if(r && r.error) return;
-            await ipRefreshAll();
-        };
-        const disBtn = document.getElementById('ipDismissBtn');
-        if(disBtn && canDismiss) disBtn.onclick = async ()=>{
-            if(!confirm(`确定弹劾${chief.name||'总管'}？花费50两，罪证清零。`)) return;
-            const r = await ipPostAction('chief/dismiss', {player_id: playerId});
-            if(r && r.error) return;
-            await ipRefreshAll();
-        };
-    }, true);
+    openModal('👤 总管人事', html, '关闭', null, true);
+    const appBtn = document.getElementById('ipAppointBtn');
+    if(appBtn) appBtn.onclick = async ()=>{
+        if(!confirm('确定任命新总管？花费100两。新总管随机生成（含派系）。')) return;
+        const r = await ipPostAction('chief/appoint', {player_id: playerId});
+        if(r && r.error) return;
+        await ipRefreshAll();
+        closeModal();
+    };
+    const disBtn = document.getElementById('ipDismissBtn');
+    if(disBtn && canDismiss) disBtn.onclick = async ()=>{
+        if(!confirm(`确定弹劾${chief.name||'总管'}？花费50两，罪证清零。`)) return;
+        const r = await ipPostAction('chief/dismiss', {player_id: playerId});
+        if(r && r.error) return;
+        await ipRefreshAll();
+        closeModal();
+    };
 }
 
 // ---- Phase 5：产业投资 ----
@@ -347,16 +366,47 @@ async function openIpUpgrade(){
     const html = `<div style="display:flex;flex-direction:column;gap:4px;">` +
         `<div style="font-size:8px;color:var(--text-mid);">库银${budget}两。产业每旬自动进账，可能遭遇丰收/灾荒/贪墨。升级消耗1行动点。</div>` +
         rows + `</div>`;
-    openModal('🏭 产业投资', html, '关闭', async ()=>{
-        names.forEach((n,i)=>{
-            const btn = document.getElementById('ipUpgBtn'+i);
-            if(btn && !btn.disabled) btn.onclick = async ()=>{
-                const r = await ipPostAction('project/upgrade', {player_id: playerId, name: n});
-                if(r && r.error) return;
-                await ipRefreshAll();
-            };
-        });
-    }, true);
+    openModal('🏭 产业投资', html, '关闭', null, true);
+    names.forEach((n,i)=>{
+        const btn = document.getElementById('ipUpgBtn'+i);
+        if(btn && !btn.disabled) btn.onclick = async ()=>{
+            const r = await ipPostAction('project/upgrade', {player_id: playerId, name: n});
+            if(r && r.error) return;
+            await ipRefreshAll();
+            closeModal();
+        };
+    });
 }
 
 if(typeof updateInnerPalacePanel==='function') setTimeout(updateInnerPalacePanel, 600);
+
+// ---- 内务府记事：弹窗分旬查看 ----
+async function openIpLogs(){
+    if(!playerId) return;
+    const d = await ipFetchStatus();
+    if(d.error){ showToast('❌ '+d.error,'error'); return; }
+    const logs = d.logs || [];
+    if(!logs.length){
+        openModal('📒 内务府记事', '<p style="color:var(--text-light);font-size:9px;">暂无记事</p>', '关闭', null, true);
+        return;
+    }
+    // 按旬分组
+    const byPeriod = {};
+    logs.forEach(function(l){
+        const p = (l && typeof l === 'object') ? (l.p || 0) : 0;
+        const t = (l && typeof l === 'object') ? (l.t || '') : String(l || '');
+        if(!byPeriod[p]) byPeriod[p] = [];
+        byPeriod[p].push(t);
+    });
+    const periods = Object.keys(byPeriod).map(Number).sort(function(a,b){ return b-a; });
+    let body = '<div style="font-size:9px;line-height:1.6;max-height:60vh;overflow-y:auto;">';
+    periods.forEach(function(p){
+        body += `<div style="margin-top:4px;font-weight:600;color:var(--gold-dark);border-bottom:1px solid rgba(201,168,106,.2);padding-bottom:2px;margin-bottom:2px;">📆 第${p}旬</div>`;
+        byPeriod[p].forEach(function(t){
+            body += `<div style="padding:1px 0;color:var(--text-mid);">· ${t}</div>`;
+        });
+    });
+    body += '</div>';
+    openModal('📒 内务府记事（分旬）', body, '关闭', null, true);
+}
+window.openIpLogs = openIpLogs;

@@ -126,10 +126,22 @@ def normalize_inner_palace(data):
     if isinstance(ms, dict):
         for k in base["monthly_stipend"]:
             base["monthly_stipend"][k] = _ip_int(ms, k, base["monthly_stipend"][k])
-    # logs
+    # logs（按旬归档：新结构为 {'p': 旬, 't': 文本}，兼容旧字符串）
     logs = data.get("logs")
     if isinstance(logs, list):
-        base["logs"] = [str(x) for x in logs[-50:]]
+        clean_logs = []
+        for x in logs[-80:]:
+            if isinstance(x, dict):
+                p = _ip_int(x, "p", 0)
+                t = x.get("t")
+                if isinstance(t, str) and t.strip():
+                    clean_logs.append({"p": p, "t": t.strip()})
+            elif isinstance(x, str) and x.strip():
+                # 兼容旧存档：剥离形如 [MM-DD HH:MM] 的本地时间前缀
+                import re as _re
+                t = _re.sub(r'^\[\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}\]\s*', '', x.strip())
+                clean_logs.append({"p": 0, "t": t})
+        base["logs"] = clean_logs
     # corruption_evidence
     try:
         base["corruption_evidence"] = max(0, int(data.get("corruption_evidence", 0) or 0))

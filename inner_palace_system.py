@@ -1,16 +1,20 @@
 # inner_palace_system.py
 import random
-from datetime import datetime as _dt
 
 def _ip_log(ip, text):
+    """记录内务府记事：按游戏内『旬』归档，不再使用本地具体时间。
+
+    每旬转旬结算时由 inner_palace_period_tick 将 ip['_period'] 更新为当前旬号；
+    玩家操作（采买/贪墨/查账等）发生时沿用最近一旬标记，便于前端按旬分组弹窗展示。
+    """
     logs = ip.setdefault('logs', [])
     if not isinstance(logs, list):
         ip['logs'] = []
         logs = ip['logs']
-    ts = _dt.now().strftime('%m-%d %H:%M')
-    logs.append(f'[{ts}] {text}')
-    if len(logs) > 50:
-        ip['logs'] = logs[-50:]
+    period = int(ip.get('_period', 0) or 0)
+    logs.append({'p': period, 't': text})
+    if len(logs) > 80:
+        ip['logs'] = logs[-80:]
 
 
 def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, chonghua_count_inside=None, CHONGHUA_UPKEEP_PER_CHILD=10):
@@ -20,6 +24,8 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
         game_state.inner_palace = normalize_inner_palace(None)
         ip = game_state.inner_palace
     msgs = []
+    # 记录当前游戏旬，供内务府记事按旬归档（不再写本地具体时间）
+    ip['_period'] = int(getattr(game_state, 'day', 0) or 0)
     stipend_table = ip.get('monthly_stipend', {})
     budget = int(ip.get('budget', 0) or 0)
     quarter_start_budget = budget  # 考绩用：本季度开局库银
@@ -189,7 +195,10 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
                 _ip_log(ip, f'{beggar}告状，威望-3')
 
 
-    # ---------- 6. 重华宫用度联动 ----------
+    # ---------- 6. 重华宫用度联动（记事口径） ----------
+    # 重华宫用度已与内务府合并：每旬在馆抚养费由 chonghua_period_tick 统一从
+    # 内务府库银（ip['budget']）扣取，此处不再重复扣费，仅保留联动记事口径，
+    # 避免双重欠饷计数。欠饷状态与皇嗣领回由 chonghua_period_tick 处理。
     ch = getattr(game_state, 'chonghua', {})
     if isinstance(ch, dict) and ch.get('founded'):
         inside_count = 0
@@ -200,20 +209,11 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
                 inside_count = len([c for c in ch.get('children', []) if isinstance(c, dict)])
         except Exception:
             inside_count = len([c for c in ch.get('children', []) if isinstance(c, dict)])
-        upkeep_per = CHONGHUA_UPKEEP_PER_CHILD
-        due_ch = inside_count * upkeep_per
+        due_ch = inside_count * CHONGHUA_UPKEEP_PER_CHILD
         if due_ch > 0:
             cur_b = int(ip.get('budget', 0) or 0)
-            if cur_b >= due_ch:
-                ip['budget'] = cur_b - due_ch
-                ch['arrears'] = 0
-                _ip_log(ip, f'划拨重华宫用度{due_ch}两')
-            else:
-                short = due_ch - cur_b
-                ip['budget'] = 0
-                ch['arrears'] = int(ch.get('arrears', 0) or 0) + 1
-                msgs.append(f'💸 内务府无力全额拨付重华宫用度，欠饷{short}两')
-                _ip_log(ip, f'重华宫用度不足，欠饷{short}两')
+            if cur_b < due_ch:
+                _ip_log(ip, f'内务府库银仅余{cur_b}两，重华宫本旬需{due_ch}两，恐将欠饷')
 
     # ---------- 7. 克扣份例：到期递减 + 总管揭发 + 副作用 ----------
     cuts = ip.get('stipend_cuts')
@@ -412,9 +412,9 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
     # 重置本旬审计标记
     ip['audited_this_period'] = False
 
-    # 日志裁剪
+    # 日志裁剪（兼容 dict 结构与旧字符串）
     logs = ip.get('logs', [])
-    if isinstance(logs, list) and len(logs) > 50:
-        ip['logs'] = logs[-50:]
+    if isinstance(logs, list) and len(logs) > 80:
+        ip['logs'] = logs[-80:]
 
     return msgs

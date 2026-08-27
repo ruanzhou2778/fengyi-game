@@ -25,7 +25,7 @@
             --text-dark: #f4efe4;
             --text-mid: #d6cfc2;
             --text-body: #e6e0d4;
-            --text-light: #8a9a96;
+            --text-light: #aebdbe;
             --border-light: rgba(158, 190, 178, 0.12);
             --shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
             --radius: 20px;
@@ -74,7 +74,7 @@
             align-items: center;
             gap: 10px;
             font-size: 8px;
-            color: #5a6a66;
+            color: #9aaeab;
             letter-spacing: 1px;
         }
         .top-bar .left .highlight {
@@ -99,7 +99,7 @@
         .top-bar .right .tool-btn {
             background: transparent;
             border: none;
-            color: #5a6a66;
+            color: #9aaeab;
             font-size: 14px;
             cursor: pointer;
             padding: 2px 6px;
@@ -251,6 +251,50 @@
             }
             100% {
                 transform: rotate(360deg);
+            }
+        }
+
+        /* ===== 加载遮罩（loadingOverlay 由 compat_prep.js 注入 HTML，此处补样式）===== */
+        #loadingOverlay .loading-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 26px 42px;
+            background: rgba(20, 28, 26, 0.94);
+            border: 1px solid rgba(201, 168, 106, 0.35);
+            border-radius: 14px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.55);
+            animation: fadeIn 0.3s ease;
+            max-width: 80vw;
+        }
+        #loadingOverlay .loading-icon {
+            font-size: 36px;
+            line-height: 1;
+            animation: loadingPulse 1.4s ease-in-out infinite;
+        }
+        #loadingOverlay .loading-title {
+            margin-top: 14px;
+            color: #c9a86a;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 2px;
+        }
+        #loadingOverlay .loading-sub {
+            margin-top: 6px;
+            color: #8a9a96;
+            font-size: 10px;
+            letter-spacing: 1px;
+        }
+        @keyframes loadingPulse {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 0.82;
+            }
+            50% {
+                transform: scale(1.18);
+                opacity: 1;
             }
         }
 
@@ -1214,7 +1258,7 @@
             font-weight: 300;
         }
         .map-header .sub {
-            color: #5a6a66;
+            color: #9aaeab;
             font-size: 8px;
             letter-spacing: 2px;
         }
@@ -2221,6 +2265,222 @@ window.toggleMap = function() {
     if (!overlay) { showToast('🗺️ 暂无舆图'); return; }
     overlay.classList.toggle('active');
 };
+// ============================================================
+//  舆图 canvas 实时渲染（宫廷舆图）
+// ============================================================
+const MAP_PALACES = {
+    '乾清宫':  { x:225, y:30,  w:190, h:85,  c:'#c9a86a', label:'皇帝正殿' },
+    '坤宁宫':  { x:250, y:150, w:140, h:85,  c:'#b8443a', label:'皇后中宫' },
+    '慈宁宫':  { x:50,  y:100, w:115, h:80,  c:'#8a6a8a', label:'太后居所' },
+    '重华宫':  { x:475, y:100, w:115, h:80,  c:'#4a7a8a', label:'皇嗣居所' },
+    '西六宫':  { x:60,  y:230, w:160, h:140, c:'#4a7a5a', label:'妃嫔宫苑' },
+    '东六宫':  { x:420, y:230, w:160, h:140, c:'#4a7a5a', label:'妃嫔宫苑' },
+    '御花园':  { x:300, y:270, w:40,  h:52,  c:'#5f9a6a', label:'皇家园林' },
+    '内务府':  { x:245, y:390, w:150, h:55,  c:'#c9a040', label:'内廷事务' }
+};
+const EAST_SIX = ['景仁宫','承乾宫','钟粹宫','景阳宫','永和宫','延禧宫'];
+const WEST_SIX = ['永寿宫','翊坤宫','储秀宫','启祥宫','长春宫','咸福宫'];
+const EMPEROR_STOPS = {'卯时':'乾清宫','辰时':'乾清宫','巳时':'重华宫','午时':'御花园','未时':'御花园','申时':'坤宁宫','酉时':'乾清宫','戌时':'坤宁宫','亥时':'乾清宫'};
+const TIME_ICONS = {'子时':'🌙','丑时':'🌙','寅时':'🌗','卯时':'🌅','辰时':'🌅','巳时':'☀️','午时':'☀️','未时':'🌤️','申时':'🌇','酉时':'🌇','戌时':'🌙','亥时':'🌙'};
+const SEASON_WEATHER = {'春':['晴','和风','薄云','小雨'],'夏':['晴','骤雨','闷热','晚风'],'秋':['晴','凉爽','秋雨','薄雾'],'冬':['晴','初雪','寒风','霜晴']};
+
+function _hashStr(s){ var h=0; s=String(s||''); for(var i=0;i<s.length;i++){ h=(h*31+s.charCodeAt(i))>>>0; } return h; }
+function _seasonOf(month){ month=((Number(month)||1)-1)%12+1; if(month>=3&&month<=5)return '春'; if(month>=6&&month<=8)return '夏'; if(month>=9&&month<=11)return '秋'; return '冬'; }
+function _pickWeather(y,m,d){ var list=SEASON_WEATHER[_seasonOf(m)]||['晴']; var h=0; var seed=String(y)+'-'+m+'-'+d; for(var i=0;i<seed.length;i++){ h=(h*31+seed.charCodeAt(i))>>>0; } return list[h%list.length]; }
+
+function _npcPalace(np){
+    var rank=np.rank||'妃嫔';
+    if(np.palace){
+        var pw=String(np.palace).trim();
+        if(pw && MAP_PALACES[pw]) return pw;
+        if(EAST_SIX.indexOf(pw)>=0) return '东六宫';
+        if(WEST_SIX.indexOf(pw)>=0) return '西六宫';
+    }
+    if(rank.indexOf('皇后')>=0) return '坤宁宫';
+    if(rank.indexOf('太后')>=0) return '慈宁宫';
+    if(rank==='皇贵妃'||rank.indexOf('皇贵妃')>=0||rank==='贵妃'||rank==='妃'||rank==='贵太妃'||rank==='太妃') return (_hashStr(np.name||rank)%2)?'东六宫':'西六宫';
+    if(rank==='宫女'||rank.indexOf('宫女')>=0||rank==='御前侍奉') return '内务府';
+    return (_hashStr(np.name||rank)%2)?'东六宫':'西六宫';
+}
+
+function _mapRoundRect(ctx,x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+}
+function drawMap(data){
+    var canvas=document.getElementById('mapCanvas');
+    if(!canvas || !canvas.getContext) return;
+    var ctx=canvas.getContext('2d');
+    if(!ctx) return;
+    var W=canvas.width, H=canvas.height;
+    var d=data||window._lastGameData||{};
+
+    // 背景
+    var bg=ctx.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0,'#172622');
+    bg.addColorStop(1,'#0b1412');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='rgba(158,190,178,0.045)'; ctx.lineWidth=1;
+    for(var gx=0;gx<=W;gx+=40){ctx.beginPath();ctx.moveTo(gx,0);ctx.lineTo(gx,H);ctx.stroke();}
+    for(var gy=0;gy<=H;gy+=40){ctx.beginPath();ctx.moveTo(0,gy);ctx.lineTo(W,gy);ctx.stroke();}
+
+    // 时间/天气
+    var time=d.current_time||'辰时';
+    var icon=TIME_ICONS[time]||'🌅';
+    var weather=_pickWeather(d.year||1,d.month||1,d.day||1);
+    var sub=document.querySelector('.map-header .sub');
+    if(sub) sub.textContent=icon+' '+time+' · '+weather;
+    var emperorLoc=EMPEROR_STOPS[time]||'乾清宫';
+
+    // 收集住户
+    var residents={};
+    Object.keys(MAP_PALACES).forEach(function(k){ residents[k]=[]; });
+    var npcs=d.npcs||{};
+    Object.keys(npcs).forEach(function(name){
+        var np=npcs[name];
+        if(np && np.alive===false) return;
+        var key=_npcPalace(np||{});
+        if(!residents[key]) residents[key]=[];
+        residents[key].push({name:name,icon:(np&&np.icon)||'🌸',rank:(np&&np.rank)||'妃嫔',is_player:!!(np&&np.is_player),_color:MAP_PALACES[key].c});
+    });
+    if(d.dowager && d.dowager.alive!==false){
+        residents['慈宁宫'].push({name:d.dowager.name||'太后',icon:d.dowager.icon||'👵',rank:'太后',is_player:false,_color:MAP_PALACES['慈宁宫'].c});
+    }
+
+// 绘制宫苑
+    Object.keys(MAP_PALACES).forEach(function(pname){
+        var p=MAP_PALACES[pname];
+        if(pname==='御花园'){
+            ctx.fillStyle='rgba(95,154,106,0.10)';
+            ctx.beginPath(); ctx.ellipse(p.x+p.w/2,p.y+p.h/2,p.w/2,p.h/2,0,0,Math.PI*2); ctx.fill();
+            ctx.strokeStyle='rgba(126,168,149,0.28)'; ctx.lineWidth=1; ctx.stroke();
+            ctx.fillStyle='#8fbf9a'; ctx.font='9px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillText('御花园',p.x+p.w/2,p.y+p.h/2-4);
+            return;
+        }
+        var emp=(pname===emperorLoc);
+        _mapRoundRect(ctx,p.x,p.y,p.w,p.h,9);
+        ctx.fillStyle='rgba(13,24,22,0.55)'; ctx.fill();
+        ctx.strokeStyle=emp?'rgba(201,168,106,0.9)':'rgba(158,190,178,0.16)';
+        ctx.lineWidth=emp?2:1; ctx.stroke();
+        // 宫名
+        ctx.fillStyle=p.c;
+        ctx.font='bold 12px "Noto Serif SC","KaiTi",serif';
+        ctx.textAlign='center'; ctx.textBaseline='top';
+        ctx.fillText(pname,p.x+p.w/2,p.y+4);
+        ctx.font='6px "Noto Serif SC","KaiTi",serif';
+        ctx.fillStyle='rgba(158,190,178,0.45)';
+        ctx.fillText(p.label||'',p.x+p.w/2,p.y+19);
+        // 皇帝驻跸光晕 + 驾字
+        if(emp){
+            var cx=p.x+p.w/2, cy=p.y+30;
+            var glow=ctx.createRadialGradient(cx,cy,2,cx,cy,Math.max(p.w,p.h)*0.7);
+            glow.addColorStop(0,'rgba(201,168,106,0.32)');
+            glow.addColorStop(1,'rgba(201,168,106,0)');
+            ctx.fillStyle=glow;
+            ctx.beginPath(); ctx.arc(cx,cy,Math.max(p.w,p.h)*0.7,0,Math.PI*2); ctx.fill();
+            ctx.fillStyle='#f2d9a0'; ctx.font='bold 13px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillText('驾',p.x+p.w/2,p.y+38);
+        }
+        // 住户数角标
+        var cnt=residents[pname].length;
+        if(cnt>0){
+            ctx.fillStyle='#c9bca0';
+            ctx.font='7px serif'; ctx.textAlign='right'; ctx.textBaseline='bottom';
+            ctx.fillText(cnt+'人',p.x+p.w-5,p.y+p.h-4);
+        }
+    });
+
+    // 绘制住户圆点
+    Object.keys(residents).forEach(function(key){
+        var p=MAP_PALACES[key];
+        var list=residents[key];
+        if(!p || list.length===0) return;
+        var cols=Math.ceil(Math.sqrt(list.length));
+        var rows=Math.ceil(list.length/cols);
+        var cw=p.w/(cols+1), ch=(p.h-34)/(rows+1);
+        list.forEach(function(n,idx){
+            var col=idx%cols, row=Math.floor(idx/cols);
+            var jx=(_hashStr(n.name)%21)-10;
+            var jy=(_hashStr(n.name+'y')%21)-10;
+            var px=p.x+cw*(col+1)+jx;
+            var py=p.y+30+ch*(row+1)+jy;
+            px=Math.max(p.x+5,Math.min(p.x+p.w-5,px));
+            py=Math.max(p.y+28,Math.min(p.y+p.h-6,py));
+            n._x=px; n._y=py; n._pname=key;
+            ctx.beginPath(); ctx.arc(px,py,3.5,0,Math.PI*2);
+            ctx.fillStyle=n._color; ctx.globalAlpha=0.92; ctx.fill();
+            ctx.globalAlpha=1;
+            ctx.strokeStyle='rgba(10,18,16,0.9)'; ctx.lineWidth=1; ctx.stroke();
+        });
+    });
+
+    // 皇帝巡幸
+    var ep=MAP_PALACES[emperorLoc];
+    if(ep){
+        var ex=ep.x+ep.w/2, ey=ep.y+ep.h/2;
+        var pulse=2.5+1.5*Math.sin(Date.now()/300);
+        ctx.beginPath(); ctx.arc(ex,ey,pulse,0,Math.PI*2);
+        ctx.fillStyle='#c9a040'; ctx.fill();
+        ctx.strokeStyle='rgba(201,160,64,0.8)'; ctx.lineWidth=1.5; ctx.stroke();
+    }
+
+    canvas._residents=residents;
+    canvas._palaces=MAP_PALACES;
+} // end drawMap
+function initMapCanvas(){
+    var canvas=document.getElementById('mapCanvas');
+    if(!canvas || canvas._mapBound) return;
+    canvas._mapBound=true;
+    var tip=document.createElement('div');
+    tip.style.cssText='position:absolute;pointer-events:none;z-index:6;background:rgba(10,18,16,0.94);border:1px solid rgba(201,168,106,0.22);border-radius:8px;padding:6px 9px;font-size:8px;color:#e8e2d6;line-height:1.55;max-width:190px;display:none;box-shadow:0 8px 22px rgba(0,0,0,0.55);';
+    canvas.parentNode.appendChild(tip);
+    function coords(e){
+        var r=canvas.getBoundingClientRect();
+        if(!r.width) return {x:0,y:0};
+        return { x:(e.clientX-r.left)*(canvas.width/r.width), y:(e.clientY-r.top)*(canvas.height/r.height) };
+    }
+    function hit(x,y){
+        var res=canvas._residents||{}; var found=null;
+        Object.keys(res).forEach(function(k){ res[k].forEach(function(n){ var dx=n._x-x, dy=n._y-y; if(dx*dx+dy*dy<=9*9) found=n; }); });
+        return found;
+    }
+    canvas.addEventListener('mousemove',function(e){
+        var c=coords(e); var n=hit(c.x,c.y);
+        if(n){
+            var list=canvas._residents[n._pname]||[];
+            var shown=list.slice(0,8).map(function(m){ return (m.icon||'')+' '+(m.is_player?'(你)':'')+m.name+(m.rank?' · '+m.rank:''); }).join('<br>');
+            if(list.length>8) shown+='<br>…等 '+(list.length-8)+' 人';
+            tip.innerHTML='<div style="color:'+n._color+';font-weight:600;margin-bottom:2px;letter-spacing:1px;">🏯 '+n._pname+'</div>'+shown;
+            var pr=canvas.parentNode.getBoundingClientRect();
+            tip.style.left=(e.clientX-pr.left+12)+'px';
+            tip.style.top=(e.clientY-pr.top+12)+'px';
+            tip.style.display='block';
+            canvas.style.cursor='pointer';
+        }else{ tip.style.display='none'; canvas.style.cursor='default'; }
+    });
+    canvas.addEventListener('mouseleave',function(){ tip.style.display='none'; canvas.style.cursor='default'; });
+    canvas.addEventListener('click',function(e){
+        var c=coords(e); var n=hit(c.x,c.y);
+        if(n && !n.is_player && typeof openInteract==='function'){
+            openInteract('npc', n.name);
+        }
+    });
+    // 打开舆图时重绘（兼容 compat_ui 的 toggleMap 覆盖）
+    var overlay=document.getElementById('mapOverlay');
+    if(overlay && window.MutationObserver){
+        var obs=new MutationObserver(function(){ if(overlay.classList.contains('active')) drawMap(window._lastGameData); });
+        obs.observe(overlay,{attributes:true,attributeFilter:['class']});
+    }
+}
+
+
 window.openLedger = async function() {
     var d = window._lastGameData;
     var personal = d ? '<p>🪙 个人银两：' + (d.silver || 0) + '</p>' +
@@ -2249,6 +2509,7 @@ window.openLedger = async function() {
         var pj = Object.keys(projects).map(function(n){ return n + 'Lv' + (projects[n].level||0); }).join('、');
         body.innerHTML =
             '<p>💰 后宫库银：' + (ip.budget ?? 0) + '两</p>' +
+            '<p><button onclick="window.openIpLogs && window.openIpLogs()" class="chonghua-btn" style="padding:2px 8px;font-size:8px;border:1px solid var(--border-light);border-radius:4px;background:rgba(201,168,106,.15);color:var(--text-dark);cursor:pointer;">📒 内务府记事（分旬）</button></p>' +
             '<p>👤 总管：' + (chief.name || '空缺') + ' <span style="font-size:7px;color:var(--text-mid);">[' + (chief.faction || '中立') + '] 忠' + (chief.loyalty ?? '-') + '/贪' + (chief.corruption ?? '-') + '/能' + (chief.skill ?? '-') + '</span>' + (ip.corruption_evidence ? ' <span style="color:#e08080;">罪证' + ip.corruption_evidence + '</span>' : '') + '</p>' +
             '<p>📦 库存：' + (shItems || '空') + '</p>' +
             '<p>🏦 私库：' + (purse.enabled ? '累计转入' + (purse.total_transferred ?? 0) + '两' : '未开通（威望≥80）') + '</p>' +
@@ -3514,12 +3775,8 @@ function renderHeirPalaceUI(data) {
             <div style="font-weight:600;color:var(--gold-dark);">👑 储君：${heir.heir_name || '皇子'}</div>
             <div style="font-size:7px;color:var(--text-mid);">${(() => {
     const child = (data.children || []).find(c => c.name === heir.heir_name || c.uid === heir.heir_id);
-    const birth = child?.birth_mother;
-    const adoptive = heir.heir_mother;
-    if (birth && adoptive && birth !== adoptive) {
-        return `${heir.established_at || ''} · 生母${birth}（养母${adoptive}）`;
-    }
-    return `${heir.established_at || ''} · 生母${heir.heir_mother || '不详'}`;
+    const foster = child?.adoptive_mother || child?.birth_mother || (data.heir_panel?.heir_foster_mother) || heir.heir_mother || '';
+    return `${heir.established_at || ''} · 母${foster || '不详'}`;
 })()}</div>
             ${heir.regent_active ? `<div style="font-size:7px;color:#e59a8a;">⚡ 摄政：${heir.regent || ''}</div>` : ''}
         </div>`;
@@ -3606,21 +3863,13 @@ function renderRegencyPanel(data) {
     // 待议政务
     const pending = hp.pending_regency_event;
     if (pending && pending.choices) {
-        html += `<div style="background:var(--bg-card);border:1px solid var(--gold);border-radius:6px;padding:4px 6px;margin-bottom:4px;">
-            <div style="font-weight:600;color:var(--gold-dark);">🖋️ 待议政务${pending.category ? `·${escapeHtmlText(pending.category)}` : ''}</div>
+        html += `<div onclick="openRegencyModal()" style="background:var(--bg-card);border:1px solid var(--gold);border-radius:6px;padding:4px 6px;margin-bottom:4px;cursor:pointer;">
+            <div style="font-weight:600;color:var(--gold-dark);">🖋️ 待议政务${pending.category ? `·${escapeHtmlText(pending.category)}` : ''}<span style="float:right;color:var(--gold);font-size:7px;">御览 ▸</span></div>
             <div style="font-size:7px;color:var(--text-mid);margin:2px 0;">${escapeHtmlText(pending.description || '')}</div>
-            ${pending.flavor ? `<div style="font-size:7px;color:var(--text-light);font-style:italic;margin-bottom:2px;">${escapeHtmlText(pending.flavor)}</div>` : ''}`;
-        if (hp.can_advise) {
-            html += `<div style="display:flex;flex-direction:column;gap:2px;">`;
-            Object.keys(pending.choices).forEach(k => {
-                const c = pending.choices[k] || {};
-                html += `<button onclick="heirRegencyAdvise('${k}')" style="text-align:left;padding:2px 5px;border:1px solid var(--gold);border-radius:5px;background:var(--gold-light);color:var(--text-mid);font-size:7px;cursor:pointer;font-family:inherit;">${k}. ${escapeHtmlText(c.text || '')}</button>`;
-            });
-            html += `</div><div style="font-size:7px;color:var(--text-light);margin-top:2px;">进言未必被采纳：宠爱、威望、心计与母子亲近皆有加成。</div>`;
-        } else {
-            html += `<div style="font-size:7px;color:#b8945a;">🔒 本旬已进言，静待太子批红。</div>`;
-        }
-        html += `</div>`;
+            <div style="font-size:7px;color:var(--text-light);">${hp.can_advise ? '点击御览并进言（每旬一次）' : '🔒 本旬已进言，静待太子批红'}</div>
+        </div>`;
+    } else {
+        html += `<div style="font-size:7px;color:var(--text-light);padding:3px 0;">🖋️ 暂无待议政务</div>`;
     }
 
     // 待处置东宫事件
@@ -3662,6 +3911,25 @@ function renderRegencyPanel(data) {
     }
 
     panel.innerHTML = html;
+}
+
+function openRegencyModal(){
+    const hp = (window._lastGameData || {}).heir_panel || {};
+    const pending = hp.pending_regency_event;
+    if(!pending || !pending.choices){ showToast('当前暂无待议政务'); return; }
+    let body = `<div style="font-size:9px;color:var(--text-dark);line-height:1.7;">${escapeHtmlText(pending.description || '')}</div>`;
+    if(pending.flavor) body += `<div style="font-size:8px;color:var(--text-light);font-style:italic;margin-top:4px;">${escapeHtmlText(pending.flavor)}</div>`;
+    if(hp.can_advise){
+        body += `<div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">`;
+        Object.keys(pending.choices).forEach(k => {
+            const c = pending.choices[k] || {};
+            body += `<button onclick="heirRegencyAdvise('${k}')" style="text-align:left;padding:6px 8px;border:1px solid var(--gold);border-radius:5px;background:var(--gold-light);color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;">${k}. ${escapeHtmlText(c.text || '')}</button>`;
+        });
+        body += `</div><div style="font-size:8px;color:var(--text-light);margin-top:6px;">进言未必被采纳：宠爱、威望、心计与母子亲近皆有加成。每旬限一次。</div>`;
+    } else {
+        body += `<div style="font-size:8px;color:#b8945a;margin-top:8px;">🔒 本旬已进言，静待太子批红。</div>`;
+    }
+    openModal('🖋️ 待议政务御览', body, '退 下', null, true);
 }
 
 // ============================================================
@@ -3737,11 +4005,17 @@ function renderConsortPanel(data) {
         (g.members || []).forEach(m => {
             const favor = Number(m.favor || 0);
             const fc = favor >= 70 ? '#4a8a5a' : (favor <= 30 ? '#8a3a2a' : '#8a6a20');
+            const kids = (m.offspring || []).filter(k => k.alive !== false);
+            const kidCount = kids.length;
+            const kidLabel = kidCount ? ` · ${kidCount}个${kids[0]?.relation?.includes('外') ? '外孙' : '皇孙'}` : '';
+            const urgeable = !m.is_pregnant && !(m.postpartum_cooldown > 0) && !m.conceive_boost;
             html += `<div style="border:1px solid var(--border-light);border-radius:5px;padding:2px 5px;background:var(--bg-card);min-width:88px;">
-                <div style="font-size:7px;font-weight:600;color:var(--text-mid);">${escapeHtmlText(m.name || '')}${m.is_pregnant ? ' 🤰' : ''}</div>
+                <div style="font-size:7px;font-weight:600;color:var(--text-mid);">${escapeHtmlText(m.name || '')}${m.is_pregnant ? ' 🤰' : ''}${kidLabel}</div>
                 <div style="font-size:7px;color:var(--text-light);">宠 ${heirBar(favor, 100, fc)} <span style="color:${fc};">${favor}</span></div>
                 ${m.fun_tag ? `<div style="font-size:7px;color:#7a5a20;">${escapeHtmlText(m.fun_tag)}</div>` : ''}
                 ${m.faction ? `<div style="font-size:7px;color:var(--text-light);">${escapeHtmlText(m.faction)}</div>` : ''}
+                ${kidCount > 0 ? `<div style="font-size:6px;color:var(--text-light);margin-top:1px;">${kids.slice(0,3).map(k => escapeHtmlText(k.name)).join('、')}${kidCount > 3 ? '…' : ''}</div>` : ''}
+                ${urgeable ? `<button onclick="progenyUrge('heir','','${escapeHtmlText(m.name || '')}')" style="margin-top:2px;padding:1px 5px;border:1px solid rgba(158,190,178,0.5);border-radius:4px;background:rgba(158,190,178,0.12);color:var(--text-mid);font-size:6px;cursor:pointer;font-family:inherit;">🍼 催生</button>` : ''}
             </div>`;
         });
         html += `</div></div>`;
@@ -3796,6 +4070,9 @@ async function heirApiPost(path, body, okPrefix) {
 async function heirRegencyAdvise(choice) {
     const res = await heirApiPost('/api/heir/regency', { choice }, '📜 已进言');
     if (res && res.accepted === false) showToast('🖋️ 太子未纳你的进言');
+    if (res && res.narration) {
+        openModal('🖋️ 批红已落', `<div style="font-size:10px;color:var(--text-dark);line-height:1.8;text-align:center;">${escapeHtmlText(res.narration)}</div>`, '知 晓', null, true);
+    }
 }
 
 async function heirEventResolve(choice) {
@@ -3823,6 +4100,28 @@ async function heirConsortFill() {
 
 
 
+
+async function progenyUrge(scope, childUid, target){
+    if(!playerId){ showToast('❌ 请先开始游戏'); return; }
+    try{
+        const r = await myFetch(`${API_BASE}/api/progeny/urge`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({player_id: playerId, scope, child_uid: childUid||undefined, target: target||undefined})
+        });
+        const res = await r.json();
+        if(!res.success){ showToast('❌ ' + (res.error||'催生失败'), 'error'); return; }
+        showToast('🍼 ' + (res.message||'已催生'));
+        if(typeof addLogEntry==='function') addLogEntry('🍼 ' + (res.message||'催皇嗣生'), 'event');
+        const d = window._lastGameData || {};
+        if(res.silver !== undefined) d.silver = res.silver;
+        if(res.remaining_actions !== undefined) d.remaining_actions = res.remaining_actions;
+        if(res.heir_panel) d.heir_panel = res.heir_panel;
+        updateUI(d);
+        if(scope==='heir' && typeof renderConsortPanel==='function'){ renderConsortPanel(d); }
+        if(scope==='prince' && typeof renderPrinceInline==='function'){ renderPrinceInline(); }
+        if(scope==='princess' && typeof renderPrincessInline==='function'){ renderPrincessInline(); }
+    }catch(e){ showToast('❌ 操作失败','error'); console.error(e); }
+}
 
 async function heirRaceAction(action, uid, name) {
     const childIndex = findPlayerChildIndex(uid);
@@ -4063,6 +4362,7 @@ if(data.death_events && data.death_events.length>0){data.death_events.forEach(ms
 if(data.intrigue_events && data.intrigue_events.length>0){data.intrigue_events.forEach(msg=>addLogEntry(msg,'intel'));}
 }
 window._lastGameData={...data,age:playerAge};
+drawMap(data);
 // ===== 终局处理：放在最后，锁死操作并覆盖行动点相关的启用状态 =====
 if(handleEndingPayload(data)) return;
 if(!data._skipFlip) triggerFlip(data);
@@ -6021,6 +6321,8 @@ userInput.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDe
 nextPeriodBtn.addEventListener('click',nextPeriod);
 
 createScenarioOverlay();
+initMapCanvas();
+drawMap();
 document.body.classList.add('ui-ready');
 // 兜底保障：若上方脚本因异常未执行，2秒后强制显示界面
 setTimeout(function(){ if(!document.body.classList.contains('ui-ready')) document.body.classList.add('ui-ready'); }, 2000);
@@ -6100,14 +6402,12 @@ async function renderChonghuaInline(){
                 const permLabel = perm === 'full' ? '👑 统管全宫'
                     : (perm === 'view' ? '👁️ 可阅全宫名册' : '🔒 仅本宫皇嗣');
                 const due = info.upkeep_due || 0;
-                const budget = ch.budget || 0;
+                const budget = info.inner_budget ?? 0;
                 const short = due > budget;
                 const arrears = info.arrears || 0;
-                const stipend = info.stipend || 0;
                 statsEl.innerHTML = `🏛️ ${ch.level||1}/${info.max_level||5}级 · 👶 ${totalInside}/${capacity}人 · ${permLabel}`
-                    + `<br>💰 用度${budget}两 · 每旬需<span style="color:${short?'#e59a8a':'inherit'};">${due}两</span>`
-                    + (stipend ? ` · <span style="color:#7ac08a;">月俸${stipend}两</span>` : '')
-                    + (arrears ? ` · <span style="color:#e59a8a;">已欠${arrears}旬</span>` : (short ? ' · <span style="color:#e59a8a;">下旬将短缺</span>' : ''));
+                    + `<br>🗃️ 内务府库银${budget}两 · 本旬需${due}两` + (due ? `（重华宫用度）` : '')
+                    + (arrears ? ` · <span style="color:#e59a8a;">已欠${arrears}旬</span>` : (short && due ? ' · <span style="color:#e59a8a;">下旬恐短缺</span>' : ''));
             }
         }
 
@@ -6141,12 +6441,8 @@ async function renderChonghuaInline(){
                         : `<button onclick="chonghuaAction('upgrade')" class="chonghua-btn">📈 扩建（${info.upgrade_cost||0}两）</button>`)
                     : '';
                 barEl.innerHTML = upgradeBtn + `
-                    <input id="chonghuaBudget" type="number" min="1" placeholder="拨用度" style="width:56px;font-size:7px;padding:1px 3px;font-family:inherit;">
-                    <button onclick="chonghuaPatronize()" class="chonghua-btn">💰 拨用度</button>
-                ` + (perm === 'full' ? `
-                    <input id="chonghuaStipend" type="number" min="0" value="${ch.stipend||0}" placeholder="月俸" style="width:56px;font-size:7px;padding:1px 3px;font-family:inherit;">
-                    <button onclick="chonghuaSetStipend()" class="chonghua-btn">📥 定月俸</button>
-                ` : '');
+                    <span style="font-size:8px;color:var(--text-mid);padding:2px 6px;display:inline-flex;align-items:center;gap:2px;">🗃️ 内务府库银：<b style="color:var(--gold-dark);">${info.inner_budget ?? '--'}两</b></span>
+                `;
             }
         }
 
@@ -6263,21 +6559,6 @@ async function chonghuaAction(action, uid, amount){
     }
     await renderChonghuaInline();   // 刷新内联面板
     await chonghuaRefreshState();   // 同步银钱、威望、子嗣等主界面数据
-}
-
-async function chonghuaPatronize(){
-    const input = document.getElementById('chonghuaBudget');
-    const amount = parseInt(input && input.value, 10);
-    if(!amount || amount <= 0){ showToast('请输入有效金额'); return; }
-    await chonghuaAction('patronize', null, amount);
-    if(input) input.value = '';
-}
-
-async function chonghuaSetStipend(){
-    const input = document.getElementById('chonghuaStipend');
-    const amount = parseInt(input && input.value, 10);
-    if(isNaN(amount) || amount < 0){ showToast('请输入有效月俸金额'); return; }
-    await chonghuaAction('set_stipend', null, amount);
 }
 
 // ---------- 公主择婿与省亲（内联面板） ----------
@@ -6451,6 +6732,15 @@ function princessMarriedHtml(p){
     if(evs.length){
         html += `<div style="font-size:6px;color:var(--text-light);margin-top:2px;">${evs.slice(0,3).map(e=>`<div>${escapeHtmlText(e)}</div>`).join('')}</div>`;
     }
+    const kids = (c.offspring || []).filter(k => k.alive !== false);
+    if(kids.length){
+        const kidLabel = kids[0]?.relation?.includes('外') ? '外孙' : '孙辈';
+        html += `<div style="font-size:7px;color:#8a6a3a;margin-top:2px;">👶 ${kids.length}个${kidLabel}：${kids.slice(0,4).map(k=>escapeHtmlText(k.name)).join('、')}${kids.length>4?'…':''}</div>`;
+    }
+    const urgeable = !c.is_pregnant && !(c.postpartum_cooldown > 0) && !c.conceive_boost;
+    if(urgeable && p.marriage_status !== '和亲'){
+        html += `<button class="chonghua-btn" onclick="progenyUrge('princess','${uid}','')" style="margin-top:2px;">🍼 催生</button>`;
+    }
     return html;
 }
 
@@ -6616,6 +6906,15 @@ function princeMarriedHtml(p){
     if(evs.length){
         html += `<div style="font-size:6px;color:var(--text-light);margin-top:2px;">${evs.slice(0,3).map(e=>`<div>${escapeHtmlText(e)}</div>`).join('')}</div>`;
     }
+    const kids = (c.offspring || []).filter(k => k.alive !== false);
+    if(kids.length){
+        const kidLabel = kids[0]?.relation?.includes('外') ? '外孙' : '皇孙';
+        html += `<div style="font-size:7px;color:#8a6a3a;margin-top:2px;">👶 ${kids.length}个${kidLabel}：${kids.slice(0,4).map(k=>escapeHtmlText(k.name)).join('、')}${kids.length>4?'…':''}</div>`;
+    }
+    const urgeable = !c.is_pregnant && !(c.postpartum_cooldown > 0) && !c.conceive_boost;
+    if(urgeable){
+        html += `<button class="chonghua-btn" onclick="progenyUrge('prince','${p.uid}','')" style="margin-top:2px;">🍼 催生</button>`;
+    }
     return html;
 }
 
@@ -6651,6 +6950,6 @@ if(typeof renderPrinceInline === 'function') setTimeout(renderPrinceInline, 800)
 
 </script>
 <script src="js/compat_ui.js"></script>
-<script src="ip_panel.js?v=4"></script>
+<script src="ip_panel.js?v=6"></script>
 </body>
 </html>

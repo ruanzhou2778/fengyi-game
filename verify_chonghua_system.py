@@ -194,7 +194,10 @@ with m.app.test_client() as client:
     gs.rank = Rank.皇后
 
     # ---------- 6. 扩建 ----------
-    gs.silver = 5000
+    # 用度已并入内务府：扩建费用从内务府库银扣取
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 5000
     code, res = act(client, pid, 'upgrade')
     ck('扩建成功', code == 200 and gs.chonghua['level'] == 2, gs.chonghua['level'])
     ck('扩建后容量提升', m.chonghua_capacity(gs.chonghua) == 2 * m.CHONGHUA_PER_LEVEL_CAPACITY,
@@ -202,29 +205,42 @@ with m.app.test_client() as client:
     gs.chonghua['level'] = m.CHONGHUA_MAX_LEVEL
     code, res = act(client, pid, 'upgrade')
     ck('满级不得再扩建', code == 400, res.get('error'))
+    # 内务府库银不足不得扩建
+    gs.chonghua['level'] = 1
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 0
+    code, res = act(client, pid, 'upgrade')
+    ck('库银不足不得扩建', code == 400, res.get('error'))
+    # 恢复扩建等级与库银，避免影响后续测试（亲养/迁出需足够容量）
+    gs.chonghua['level'] = 2
+    ip_d['budget'] = 5000
 
-    # ---------- 7. 拨用度 ----------
+    # ---------- 7. 拨用度（已并入内务府，手动拨用度废弃） ----------
     gs.silver = 1000
     gs.chonghua['budget'] = 0
     gs.chonghua['arrears'] = 2
     code, res = act(client, pid, 'patronize', amount=300)
-    ck('拨用度成功', code == 200 and gs.chonghua['budget'] == 300, gs.chonghua['budget'])
-    ck('拨用度清欠饷', gs.chonghua['arrears'] == 0, gs.chonghua['arrears'])
-    code, res = act(client, pid, 'patronize', amount=-5)
-    ck('负金额被拒', code == 400, res.get('error'))
-    code, res = act(client, pid, 'patronize', amount=999999)
-    ck('超额拨款被拒', code == 400, res.get('error'))
+    ck('拨用度已废弃返回400', code == 400, res.get('error'))
+    code, res = act(client, pid, 'set_stipend', amount=100)
+    ck('定月俸已废弃返回400', code == 400, res.get('error'))
 
     # ---------- 8. 授业 ----------
     target = gs.children[0]
     target['age'] = 6
     gs.silver = 1000
-    gs.chonghua['budget'] = 500
+    # 用度已并入内务府：束脩优先从内务府库银抵扣
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 500
+    ip_budget0 = ip_d['budget']
     lvl0, talent0 = target['tutor_level'], target['talent']
     code, res = act(client, pid, 'tutor', uid=target['uid'])
     ck('授业成功', code == 200 and target['tutor_level'] == lvl0 + 1, target['tutor_level'])
     ck('授业提升才情', target['talent'] >= talent0, f'{talent0}->{target["talent"]}')
-    ck('授业优先动用用度', gs.chonghua['budget'] < 500, gs.chonghua['budget'])
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ck('授业优先动用内务府库银', ip_d.get('budget', 0) < ip_budget0, ip_d.get('budget'))
     code, res = act(client, pid, 'tutor', uid=target['uid'])
     ck('同旬二次授业被拒', code == 400 and '本旬' in (res.get('error') or ''), res.get('error'))
 
@@ -313,9 +329,13 @@ with m.app.test_client() as client:
 
     # 自动收容
     gs.chonghua['level'] = m.CHONGHUA_MAX_LEVEL
-    gs.chonghua['budget'] = 5000
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 5000
     infant = new_child(gs, '萧襁褓', '公主', 1, npc_name)
     infant['guardian'] = ''
+    # 固定生母位份低于嫔，确保满足自动收容条件（用字符串避免序列化问题）
+    gs.npcs[npc_name]['rank'] = '贵人'
     gs.npcs[npc_name]['children'].append(infant)
     m.chonghua_period_tick(gs)
     ck('年幼者自动入馆', m.chonghua_is_inside(infant), infant.get('palace'))
@@ -327,25 +347,33 @@ with m.app.test_client() as client:
     m.chonghua_period_tick(gs)
     ck('有监护人者不自动入馆', not m.chonghua_is_inside(kept), kept.get('guardian'))
 
-    # 用度扣减
-    gs.chonghua['budget'] = 5000
-    budget_before = gs.chonghua['budget']
+    # 用度扣减（已并入内务府：从内务府库银扣取）
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 5000
+    ip_budget_before = ip_d['budget']
     inside_now = m.chonghua_count_inside(gs)
     m.chonghua_period_tick(gs)
-    ck('转旬扣用度',
-       gs.chonghua['budget'] == budget_before - inside_now * m.CHONGHUA_UPKEEP_PER_CHILD,
-       f'{budget_before}->{gs.chonghua["budget"]} inside={inside_now}')
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ck('转旬扣用度（内务府库银）',
+       ip_d.get('budget', 0) == ip_budget_before - inside_now * m.CHONGHUA_UPKEEP_PER_CHILD,
+       f'{ip_budget_before}->{ip_d.get("budget")} inside={inside_now}')
 
     # 教养收益
     watch = next(c for _o, _t, _i, c in m.chonghua_collect_all_children(gs) if m.chonghua_is_inside(c))
     watch['talent'] = 40
-    gs.chonghua['budget'] = 5000
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 5000
     for _ in range(8):
         m.chonghua_period_tick(gs)
     ck('在馆教养提升才情', watch['talent'] > 40, watch['talent'])
 
     # 欠饷
-    gs.chonghua['budget'] = 0
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 0
     gs.chonghua['arrears'] = 0
     msgs = m.chonghua_period_tick(gs)
     ck('用度不足计欠饷', gs.chonghua['arrears'] == 1, gs.chonghua['arrears'])
@@ -358,7 +386,9 @@ with m.app.test_client() as client:
        f'{inside_pre}->{m.chonghua_count_inside(gs)}')
 
     # 授业限次随转旬重置
-    gs.chonghua['budget'] = 2000
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 2000
     gs.silver = 2000
     stu = next((c for _o, _t, _i, c in m.chonghua_collect_all_children(gs)
                 if m.chonghua_is_inside(c) and float(c.get('age', 0) or 0) >= m.CHONGHUA_TUTOR_MIN_AGE), None)
@@ -375,7 +405,9 @@ with m.app.test_client() as client:
     ck('转旬重置授业次数', code == 200, res.get('error') or res.get('message'))
 
     # ---------- 12. next_period 集成 ----------
-    gs.chonghua['budget'] = 3000
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 3000
     gs.remaining_actions = gs.max_actions
     r = post(client, '/api/next_period', {'player_id': pid})
     ck('next_period 200', r.status_code == 200, r.status_code)
@@ -386,7 +418,9 @@ with m.app.test_client() as client:
        npd.get('chonghua'))
 
     # ---------- 13. 持久化 ----------
-    gs.chonghua['budget'] = 777
+    ip_d = m.normalize_inner_palace(getattr(gs, 'inner_palace', None))
+    gs.inner_palace = ip_d
+    ip_d['budget'] = 777
     gs.chonghua['arrears'] = 0
     roster_before = list(gs.chonghua['children'])
     level_before = gs.chonghua['level']
@@ -396,7 +430,9 @@ with m.app.test_client() as client:
     r = post(client, '/api/load', {'player_id': pid, 'slot_name': 'chonghua_check'})
     ck('读档成功', r.status_code == 200, r.status_code)
     gs2 = m.sessions.get(pid)
-    ck('读档保留用度', gs2 and gs2.chonghua.get('budget') == 777, gs2.chonghua.get('budget') if gs2 else None)
+    ip2 = m.normalize_inner_palace(getattr(gs2, 'inner_palace', None)) if gs2 else None
+    gs2.inner_palace = ip2
+    ck('读档保留内务府库银', ip2 and ip2.get('budget') == 777, ip2.get('budget') if ip2 else None)
     ck('读档保留等级', gs2 and gs2.chonghua.get('level') == level_before, gs2.chonghua.get('level') if gs2 else None)
     ck('读档保留名册', gs2 and list(gs2.chonghua.get('children') or []) == roster_before,
        gs2.chonghua.get('children') if gs2 else None)

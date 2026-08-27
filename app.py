@@ -3032,7 +3032,7 @@ def prince_serialize(game_state, child):
         "title": child.get("title", ""),
         "marriage_status": child.get("marriage_status", "未议"),
         "suitors": suitor_views,
-        "consort": child.get("consort"),
+        "consort": serialize_offspring_holder(child.get("consort")),
         "mansion": child.get("mansion"),
         "marriage_events": (child.get("marriage_events") or [])[:8],
         "mother": mother_name,
@@ -4143,6 +4143,163 @@ def process_heir_consorts(game_state):
     return msgs
 
 
+# ============================================================
+#  婚后子嗣系统：皇子 / 公主 / 东宫内宅 —— 婚后持续生子（孙辈）
+# ============================================================
+PROGENY_CONCEPTION_BASE = 0.10        # 每旬基础受孕概率（依生育力修正）
+PROGENY_URGE_COST = 20                # 催皇嗣生：耗银两
+PROGENY_URGE_BOOST = 0.18             # 催生当旬受孕概率加成
+PROGENY_URGE_ACTION = 1               # 催生耗行动点（经 guard_action 扣除）
+PROGENY_POSTPARTUM_COOLDOWN = 2       # 分娩后休养旬数（避免连续怀孕）
+PROGENY_AGE_STEP = CHILD_AGE_STEP
+
+
+def ensure_offspring_fields(holder):
+    """补全「婚配对象」的子嗣字段（兼容旧存档 / 结构缺失）。"""
+    if not isinstance(holder, dict):
+        return holder
+    holder.setdefault("offspring", [])           # 孙辈出生记录（出生即写入）
+    holder.setdefault("is_pregnant", False)
+    holder.setdefault("pregnancy_month", 0.0)    # 怀胎月数（0→10）
+    holder.setdefault("fertility", random.randint(35, 85))
+    holder.setdefault("conceive_boost", 0)       # 当旬催生加成（0/1）
+    holder.setdefault("postpartum_cooldown", 0)  # 产后休养旬数
+    holder.setdefault("urged_this_period", False)
+    return holder
+
+
+def _grandchild_name(game_state, holder, parent_gender, name_gender):
+    """为婚配对象生育的孙辈取名。
+    皇子/太子之孙随国姓；公主出降之孙随驸马姓；和亲之孙取民间姓。
+    """
+    if parent_gender == "公主":
+        surname = extract_surname(holder.get("name", ""))
+        if not surname or surname == "某":
+            surname = random_surname(NPC_SURNAMES)
+        used = collect_used_child_names(game_state)
+        return generate_child_name(name_gender, used=used, surname=surname)
+    return new_child_name(name_gender, game_state)
+
+
+def _grandchild_birth_record(game_state, holder, parent_gender, royal_parent_name, consort_name):
+    """生成一名孙辈记录。"""
+    sex = random.choice(["男", "女"])
+    name_gender = "皇子" if sex == "男" else "公主"
+    name = _grandchild_name(game_state, holder, parent_gender, name_gender)
+    royal = parent_gender == "皇子"
+    relation = (("皇孙" if sex == "男" else "皇孙女") if royal
+                else ("外孙" if sex == "男" else "外孙女"))
+    return {
+        "name": name,
+        "sex": sex,
+        "relation": relation,
+        "age": 0.0,
+        "birth_year": getattr(game_state, "year", 1),
+        "birth_month": getattr(game_state, "month", 1),
+        "birth_day": getattr(game_state, "day", 1),
+        "father": royal_parent_name,          # 皇子/太子/公主名
+        "spouse": consort_name,               # 驸马/正妃名
+        "alive": True,
+    }
+
+
+def process_offspring_for_holder(game_state, holder, royal_parent_name, consort_name, parent_gender, father_is_royal):
+    """结算一处婚配对象的转旬生育：怀胎 → 分娩 → 孙辈成长。返回事件消息列表。"""
+    msgs = []
+    ensure_offspring_fields(holder)
+    # 孙辈成长
+    for gc in holder.get("offspring", []):
+        if isinstance(gc, dict) and gc.get("alive", True):
+            gc["age"] = float(gc.get("age", 0) or 0) + PROGENY_AGE_STEP
+    # 产后休养倒计时
+    if int(holder.get("postpartum_cooldown", 0) or 0) > 0:
+        holder["postpartum_cooldown"] = max(0, int(holder.get("postpartum_cooldown", 0) or 0) - 1)
+    # 怀胎推进 / 分娩
+    if holder.get("is_pregnant"):
+        month = float(holder.get("pregnancy_month", 0) or 0) + PREGNANCY_STEP
+        holder["pregnancy_month"] = month
+        if month >= 10:
+            gc = _grandchild_birth_record(game_state, holder, parent_gender, royal_parent_name, consort_name)
+            holder.setdefault("offspring", []).insert(0, gc)
+            holder["is_pregnant"] = False
+            holder["pregnancy_month"] = 0.0
+            holder["postpartum_cooldown"] = PROGENY_POSTPARTUM_COOLDOWN
+            if father_is_royal:
+                msg = (f"🎉 {royal_parent_name}喜得{gc['relation']}：{gc['name']}"
+                       f"（生母{consort_name}），皇嗣绵延，宗庙有继")
+            else:
+                msg = (f"🎉 {royal_parent_name}与驸马{consort_name}喜得{gc['relation']}：{gc['name']}，"
+                       f"公主府添丁进喜")
+            msgs.append(msg)
+    # 受孕（未怀孕且已过休养期）
+    if not holder.get("is_pregnant") and not int(holder.get("postpartum_cooldown", 0) or 0):
+        fertility = int(holder.get("fertility", 50) or 50)
+        chance = PROGENY_CONCEPTION_BASE * (0.6 + fertility / 200.0)
+        boost = int(holder.get("conceive_boost", 0) or 0)
+        if boost:
+            chance += PROGENY_URGE_BOOST
+            holder["conceive_boost"] = 0
+            holder["urged_this_period"] = False
+        if random.random() < chance:
+            holder["is_pregnant"] = True
+            holder["pregnancy_month"] = 0.0
+            who = f"{royal_parent_name}的{holder.get('rank', '')}" if holder.get("rank") else royal_parent_name
+            msgs.append(f"🤰 {who}传出有孕之喜，{('东宫' if father_is_royal else '府中')}上下皆欢")
+    return msgs
+
+
+def process_offspring_system(game_state):
+    """婚后子嗣系统总入口（转旬调用）：处理玩家与 NPC 的皇子/公主/东宫内宅生育。"""
+    msgs = []
+    # 1. 公主（出降 / 和亲）
+    for _owner, _otype, _idx, c in iter_all_princesses(game_state):
+        if c.get("marriage_status") not in ("已嫁", "和亲"):
+            continue
+        ensure_child_fields(c)
+        consort = ensure_offspring_fields(c.get("consort"))
+        if not isinstance(consort, dict):
+            continue
+        msgs.extend(process_offspring_for_holder(
+            game_state, consort, c.get("name", "公主"),
+            consort.get("name", "驸马"), "公主", False))
+    # 2. 皇子（已婚）
+    for _uid, c, _mother, _is_player in _iter_all_princes(game_state):
+        if c.get("marriage_status") not in ("已婚", "已娶"):
+            continue
+        ensure_child_fields(c)
+        consort = ensure_offspring_fields(c.get("consort"))
+        if not isinstance(consort, dict):
+            continue
+        msgs.extend(process_offspring_for_holder(
+            game_state, consort, c.get("name", "皇子"),
+            consort.get("name", "正妃"), "皇子", True))
+    # 3. 东宫内宅
+    hs = heir_state(game_state)
+    if hs.get("heir_id"):
+        heir_child = get_heir_child(game_state)
+        heir_name = hs.get("heir_name") or (heir_child.get("name") if heir_child else "太子")
+        for member in heir_consort_members(game_state):
+            msgs.extend(process_offspring_for_holder(
+                game_state, member, heir_name, member.get("name", "内眷"),
+                "皇子", True))
+    return msgs
+
+
+def serialize_offspring_holder(holder):
+    """将婚配对象序列化给前端：孙辈 / 怀孕 / 生育力 / 可否催生。"""
+    if not isinstance(holder, dict):
+        return holder
+    ensure_offspring_fields(holder)
+    out = dict(holder)
+    out["offspring"] = holder.get("offspring", [])
+    out["is_pregnant"] = bool(holder.get("is_pregnant", False))
+    out["pregnancy_month"] = float(holder.get("pregnancy_month", 0) or 0)
+    out["fertility"] = int(holder.get("fertility", 50) or 50)
+    out["conceive_boost"] = int(holder.get("conceive_boost", 0) or 0)
+    out["postpartum_cooldown"] = int(holder.get("postpartum_cooldown", 0) or 0)
+    return out
+
+
 def process_heir_defiance(game_state):
     """不孝 / 逼宫四阶段事件链：按亲近度递降推进。返回消息列表。"""
     msgs = []
@@ -4307,6 +4464,11 @@ def heir_consort_payload(game_state):
                 "is_pregnant": m.get("is_pregnant", False),
                 "children": m.get("children", []),
                 "entered_at": m.get("entered_at", ""),
+                "offspring": m.get("offspring", []),
+                "pregnancy_month": float(m.get("pregnancy_month", 0) or 0),
+                "fertility": int(m.get("fertility", 50) or 50),
+                "conceive_boost": int(m.get("conceive_boost", 0) or 0),
+                "postpartum_cooldown": int(m.get("postpartum_cooldown", 0) or 0),
             } for m in members],
         })
     return {
@@ -4334,6 +4496,7 @@ def heir_panel_payload(game_state):
         "has_heir": bool(hs.get("heir_id")),
         "heir_name": hs.get("heir_name", ""),
         "heir_age": int(age),
+        "heir_foster_mother": get_heir_mother_name(game_state),
         "regency_active": bool(hs.get("regency_active")),
         "regency_merit": hs.get("regency_merit", 0),
         "ruling_style": hs.get("heir_ruling_style"),
@@ -4356,6 +4519,8 @@ def heir_panel_payload(game_state):
         "incognito_action_cost": HEIR_INCOGNITO_ACTION,
         "silver": game_state.silver,
         "remaining_actions": game_state.remaining_actions,
+        "urge_cost": PROGENY_URGE_COST,
+        "urge_action_cost": PROGENY_URGE_ACTION,
     }
 
 
@@ -6812,6 +6977,9 @@ def next_period():
     heir_system_events = process_heir_system(game_state)
     for evt in heir_system_events:
         intelligence.append(evt)
+    # ---- 婚后子嗣系统：皇子 / 公主 / 东宫内宅生子 ----
+    for evt in process_offspring_system(game_state):
+        intelligence.append(evt)
     if prince_events:
         for evt in prince_events:
             game_state.add_memory(evt)
@@ -9153,6 +9321,113 @@ def heir_event_resolve():
         **heir_panel_payload(game_state),
     })
 
+@app.route('/api/progeny/urge', methods=['POST'])
+def progeny_urge():
+    """催皇嗣生子：耗银 + 行动点，提升指定婚配对象当旬受孕概率。
+    scope: heir(东宫内宅，需 target=成员名) / prince / princess。
+    """
+    data = request.get_json() or {}
+    player_id = data.get('player_id')
+    scope = (data.get('scope') or '').strip()
+    child_uid = data.get('child_uid')
+    target = (data.get('target') or '').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    if game_state.silver < PROGENY_URGE_COST:
+        return jsonify({"success": False, "error": f"银两不足，催生需{PROGENY_URGE_COST}两"}), 400
+
+    holder = None
+    parent_name = ""
+    consort_name = ""
+    child = None
+    if scope == 'heir':
+        hs = heir_state(game_state)
+        if not hs.get("heir_id"):
+            return jsonify({"success": False, "error": "储君之位空悬，无东宫可催"}), 400
+        heir_child = get_heir_child(game_state)
+        parent_name = hs.get("heir_name") or (heir_child.get("name") if heir_child else "太子")
+        if not target:
+            return jsonify({"success": False, "error": "请指定东宫内宅成员"}), 400
+        for m in heir_consort_members(game_state):
+            if m.get("name") == target:
+                holder = m
+                break
+        if holder is None:
+            return jsonify({"success": False, "error": "东宫内宅并无此人"}), 400
+        consort_name = holder.get("name", "内眷")
+    else:
+        if scope == 'prince':
+            _idx, c = find_player_prince(game_state, child_uid)
+            if c is None or c.get("marriage_status") not in ("已婚", "已娶"):
+                return jsonify({"success": False, "error": "未找到已大婚的皇子"}), 404
+            parent_name = c.get("name", "皇子")
+            consort_name = (c.get("consort") or {}).get("name", "正妃")
+        elif scope == 'princess':
+            _idx, c = find_player_princess(game_state, child_uid)
+            if c is None or c.get("marriage_status") not in ("已嫁", "和亲"):
+                return jsonify({"success": False, "error": "未找到已出降的公主"}), 404
+            parent_name = c.get("name", "公主")
+            consort_name = (c.get("consort") or {}).get("name", "驸马")
+        else:
+            return jsonify({"success": False, "error": "未知的催生对象"}), 400
+        child = c
+        ensure_child_fields(c)
+        consort = ensure_offspring_fields(c.get("consort"))
+        if not isinstance(consort, dict):
+            return jsonify({"success": False, "error": "该婚配对象状态异常"}), 400
+        holder = consort
+
+    # 校验：已怀孕 / 产后休养 / 本旬已催 则不可催
+    if holder.get("is_pregnant"):
+        return jsonify({"success": False, "error": f"{consort_name}已有身孕，不必催生"}), 400
+    if int(holder.get("postpartum_cooldown", 0) or 0):
+        return jsonify({"success": False, "error": f"{consort_name}产后尚需静养，不宜催生"}), 400
+    if int(holder.get("conceive_boost", 0) or 0):
+        return jsonify({"success": False, "error": "本旬已为此人催生，且待下旬"}), 400
+
+    game_state.silver -= PROGENY_URGE_COST
+    holder["conceive_boost"] = 1
+    holder["urged_this_period"] = True
+    if "favor" in holder:
+        try:
+            holder["favor"] = min(100, int(holder.get("favor", 50) or 50) + random.randint(1, 3))
+        except (TypeError, ValueError):
+            holder["favor"] = 52
+    narration = (f"🍼 你赐下补品、遣太医诊脉，着人尽心照拂，{parent_name}之"
+                 f"{consort_name}承雨露之恩，本旬有望受孕")
+    game_state.add_memory(narration)
+
+    if scope == 'heir':
+        heir_log_push(hs, "consort_events", {
+            "period": heir_period_label(game_state),
+            "title": "催皇嗣生",
+            "choice": consort_name,
+            "detail": narration,
+        }, limit=10)
+        autosave_session(player_id)
+        return jsonify({"success": True, "message": narration,
+                        "silver": game_state.silver,
+                        **heir_panel_payload(game_state)})
+    # prince / princess
+    c.setdefault("marriage_events", []).insert(0, narration)
+    add_child_event(c, narration)
+    autosave_session(player_id)
+    return jsonify({
+        "success": True, "message": narration,
+        "silver": game_state.silver,
+        "consort": serialize_offspring_holder(holder),
+        "prince": prince_serialize(game_state, c) if scope == 'prince' else None,
+        "princess": princess_serialize(game_state, c) if scope == 'princess' else None,
+        **heir_panel_payload(game_state),
+    })
+
+
 @app.route('/api/heir/incognito', methods=['POST'])
 def heir_incognito():
     """陪太子微服私访。耗银 30 两 + 1 行动点，必定触发一条市井奇遇。"""
@@ -9790,18 +10065,8 @@ def chonghua_period_tick(game_state):
     ch['tutored'] = {}
     entries = chonghua_collect_all_children(game_state)
 
-    # 0) 月俸固定发放：皇帝每月拨给重华宫的用度（金额由主控自行填写）
-    stipend = int(ch.get('stipend', 0) or 0)
-    if stipend > 0:
-        month_key = f'{getattr(game_state, "year", 0)}-{getattr(game_state, "month", 0)}'
-        if ch.get('stipend_period') != month_key:
-            ch['budget'] = int(ch.get('budget', 0) or 0) + stipend
-            ch['stipend_period'] = month_key
-            if ch.get('arrears'):
-                ch['arrears'] = 0
-            msg = f'📥 皇帝按月拨给重华宫用度{stipend}两'
-            msgs.append(msg)
-            chonghua_add_log(game_state, ch, f'月俸入账{stipend}两')
+    # 0) 用度已与内务府合并：重华宫不再设独立预算，月俸（皇帝拨用度）已取消，
+    #    每旬在馆抚养费统一由下方第3节从内务府库银自动扣取。
 
     # 1) 学成出馆：年满则迁出，交回生母/养母
     for owner, _otype, _idx, c in entries:
@@ -9849,16 +10114,26 @@ def chonghua_period_tick(game_state):
         msgs.append(f'🏛️ {c.get("name") or "皇嗣"}生母位卑，已入重华宫共育')
         inside += 1
 
-    # 3) 用度支给：不足则欠饷，连欠三旬有皇嗣被生母领回
+    # 3) 用度支给：用度已与内务府合并，每旬在馆抚养费直接从内务府库银扣取；
+    #    库银不足则欠饷，连欠三旬有皇嗣被生母领回
     due = inside * CHONGHUA_UPKEEP_PER_CHILD
     if due > 0:
-        budget = int(ch.get('budget', 0) or 0)
-        if budget >= due:
-            ch['budget'] = budget - due
+        ip_d = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+        game_state.inner_palace = ip_d
+        ip_budget = int(ip_d.get('budget', 0) or 0)
+        if ip_budget >= due:
+            ip_d['budget'] = ip_budget - due
             ch['arrears'] = 0
+            chonghua_add_log(game_state, ch, f'本旬俸给{due}两（内务府划拨）')
+            # 记录内务府记事
+            try:
+                from inner_palace_system import _ip_log
+                _ip_log(ip_d, f'拨重华宫用度{due}两')
+            except Exception:
+                pass
         else:
-            short = due - budget
-            ch['budget'] = 0
+            short = due - ip_budget
+            ip_d['budget'] = 0
             ch['arrears'] = int(ch.get('arrears', 0) or 0) + 1
             msgs.append(f'💸 重华宫用度短缺{short}两，膳食减半，皇嗣颇有怨言（已欠{ch["arrears"]}旬）')
             chonghua_add_log(game_state, ch, f'用度短缺{short}两')
@@ -9985,6 +10260,9 @@ def get_chonghua():
     total_inside = len(ch['children'])
 
     rank_name = chonghua_rank_name(game_state)
+    # 用度已并入内务府：重华宫不再有独立预算，前端显示内务府库银
+    ip_snapshot = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+    inner_budget = int(ip_snapshot.get('budget', 0) or 0)
     info = {
         'manage_ranks': CHONGHUA_MANAGE_RANKS,
         'view_min_rank': CHONGHUA_VIEW_MIN_RANK,
@@ -9998,7 +10276,7 @@ def get_chonghua():
         'auto_admit_age': CHONGHUA_AUTO_ADMIT_AGE,
         'upkeep_per_child': CHONGHUA_UPKEEP_PER_CHILD,
         'upkeep_due': total_inside * CHONGHUA_UPKEEP_PER_CHILD,
-        'stipend': int(ch.get('stipend', 0) or 0),
+        'inner_budget': inner_budget,
         'arrears': int(ch.get('arrears', 0) or 0),
         'permission': perm,
         'has_permission': can_manage_all,
@@ -10016,6 +10294,8 @@ def get_chonghua():
         'can_see_all': can_see_all,
         'player_name': game_state.name,
         'silver': getattr(game_state, 'silver', 0),
+        'inner_budget': inner_budget,
+        'inner_palace': ip_snapshot,
         'info': info,
     })
 
@@ -10106,55 +10386,20 @@ def chonghua_action():
         if level >= CHONGHUA_MAX_LEVEL:
             return jsonify({'success': False, 'error': f'重华宫已达最高等级（{CHONGHUA_MAX_LEVEL}级）'}), 400
         cost = chonghua_upgrade_cost(ch)
-        budget = int(ch.get('budget', 0) or 0)
-        if budget < cost:
-            return jsonify({'success': False, 'error': f'重华宫用度不足（现存{budget}两，需{cost}两），请先拨用度'}), 400
-        ch['budget'] = budget - cost
+        # 用度已并入内务府，扩建费用直接从内务府库银扣取
+        ip_d = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+        game_state.inner_palace = ip_d
+        ip_budget = int(ip_d.get('budget', 0) or 0)
+        if ip_budget < cost:
+            return jsonify({'success': False, 'error': f'内务府库银不足（现存{ip_budget}两，扩建需{cost}两），请先充实内帑'}), 400
+        ip_d['budget'] = ip_budget - cost
         ch['level'] = level + 1
         add_log(f'重华宫扩建至等级{ch["level"]}')
-        return ok(f'扩建成功，等级提升至{ch["level"]}（容量{chonghua_capacity(ch)}人），从宫中用度扣除{cost}两，余{ch["budget"]}两')
+        return ok(f'扩建成功，等级提升至{ch["level"]}（容量{chonghua_capacity(ch)}人），从内务府库银扣除{cost}两，余{ip_d["budget"]}两')
 
-    if action == 'patronize':
-        if not ch.get('founded'):
-            return jsonify({'success': False, 'error': '重华宫尚未开设'}), 400
-        try:
-            amt = int(amount or 0)
-        except (TypeError, ValueError):
-            amt = 0
-        if amt <= 0:
-            return jsonify({'success': False, 'error': '金额无效'}), 400
-        if game_state.silver < amt:
-            return jsonify({'success': False, 'error': '银两不足'}), 400
-        game_state.silver -= amt
-        ch['budget'] = int(ch.get('budget', 0) or 0) + amt
-        # 拨用度即刻缓解欠饷
-        if ch.get('arrears'):
-            ch['arrears'] = 0
-        add_log(f'拨用度{amt}两')
-        gain = 1 if amt >= 100 else 0
-        if gain:
-            game_state.attributes['威望'] = min(game_state.get_attr_max('威望'),
-                                              game_state.attributes.get('威望', 0) + gain)
-        due = chonghua_upkeep_due(game_state, ch)
-        tail = f'，现存用度{ch["budget"]}两（每旬需{due}两）'
-        return ok(f'拨用度{amt}两成功' + tail + ('，威望+1' if gain else ''))
-
-    if action == 'set_stipend':
-        if not ch.get('founded'):
-            return jsonify({'success': False, 'error': '重华宫尚未开设'}), 400
-        if not can_manage_all:
-            return jsonify({'success': False, 'error': '月俸支给须皇后或协理六宫者定夺'}), 403
-        try:
-            amt = int(amount or 0)
-        except (TypeError, ValueError):
-            amt = 0
-        if amt < 0:
-            return jsonify({'success': False, 'error': '月俸金额无效'}), 400
-        ch['stipend'] = amt
-        add_log(f'设定月俸{amt}两' if amt else '停发月俸')
-        if amt:
-            return ok(f'已设定皇帝月俸{amt}两，自下月起按月拨入重华宫用度')
-        return ok('已停发重华宫月俸')
+    if action == 'patronize' or action == 'set_stipend':
+        # 用度已与内务府合并，手动拨用度/定月俸交互已取消
+        return jsonify({'success': False, 'error': '重华宫用度已并入内务府，每旬自动从内务府库银划拨，无需手动拨用度'}), 400
 
     if action not in ('admit', 'tutor', 'adopt', 'release'):
         return jsonify({'success': False, 'error': '未知操作'}), 400
@@ -10214,12 +10459,14 @@ def chonghua_action():
         if tutored.get(child_uid) == period:
             return jsonify({'success': False, 'error': f'{child_name}本旬已授业，且待下旬'}), 400
         cost = CHONGHUA_TUTOR_COST + tutor_level * 5
-        # 优先动用重华宫用度，不足再自掏银两
-        from_budget = min(int(ch.get('budget', 0) or 0), cost)
+        # 用度已并入内务府：束脩优先从内务府库银抵扣，不足再自掏银两
+        ip_d = normalize_inner_palace(getattr(game_state, 'inner_palace', None))
+        game_state.inner_palace = ip_d
+        from_budget = min(int(ip_d.get('budget', 0) or 0), cost)
         need_silver = cost - from_budget
         if game_state.silver < need_silver:
-            return jsonify({'success': False, 'error': f'束脩需{cost}两（宫中用度可抵{from_budget}两），银两不足'}), 400
-        ch['budget'] = int(ch.get('budget', 0) or 0) - from_budget
+            return jsonify({'success': False, 'error': f'束脩需{cost}两（内务府库银可抵{from_budget}两），银两不足'}), 400
+        ip_d['budget'] = int(ip_d.get('budget', 0) or 0) - from_budget
         game_state.silver -= need_silver
         tutored[child_uid] = period
         child['tutor_level'] = tutor_level + 1
@@ -10326,7 +10573,7 @@ def princess_serialize(game_state, child):
         "marriage_decider": decider,
         "decision_type": emperor_decision_type(game_state, child),
         "suitors": suitor_views,
-        "consort": child.get("consort"),
+        "consort": serialize_offspring_holder(child.get("consort")),
         "mansion": child.get("mansion"),
         "marriage_events": (child.get("marriage_events") or [])[:8],
         "prestige_tier": princess_prestige_tier(game_state, child),
