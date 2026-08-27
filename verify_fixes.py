@@ -27,8 +27,10 @@ with m.app.test_client() as c:
     gs = m.sessions.get(pid)
     ck('会话建立', gs is not None, pid)
 
-    # 需求4: 重华宫默认开设
-    ck('重华宫默认开设(founded=True)', gs.chonghua.get('founded') is True, gs.chonghua.get('founded'))
+    # 需求4: 宫中有皇后则由皇后自动开设重华宫
+    _qn = m.get_queen_name(gs, include_player=True)
+    ck('有皇后时重华宫自动开设', (_qn is not None) == (gs.chonghua.get('founded') is True),
+       f'queen={_qn} founded={gs.chonghua.get("founded")}')
 
     # 需求2/3: inner_palace/status 返回 can_manage 字段
     r = c.get(f'/api/inner_palace/status?player_id={pid}')

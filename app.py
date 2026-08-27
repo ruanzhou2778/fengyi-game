@@ -7513,6 +7513,16 @@ def start_game():
     user_configs[player_id] = {"custom_prompt": "", "romance_mode": False, "api_base": api_config.get('api_base', 'https://cn.jixiangai.xyz/v1'), "api_key": api_config.get('api_key', ''), "api_model": api_config.get('api_model', '')}
     npc_names = list(game_state.npcs.keys())
     story = generate_story(game_state, "入宫选秀，开启了后宫生涯", npc_names, api_config.get('api_key'), api_config.get('api_base'), api_config.get('api_model'))
+    # 宫中有皇后则由皇后设立重华宫（六宫公器，无需主控手动奏请，亦不卡威望/银两）
+    _queen = get_queen_name(game_state, include_player=True)
+    if _queen:
+        _ch = chonghua_state(game_state)
+        if not _ch.get('founded'):
+            _ch['founded'] = True
+            _ch['level'] = 1
+            _ch['arrears'] = 0
+            chonghua_add_log(game_state, _ch, f'皇后{_queen}设立重华宫')
+            game_state.add_memory(f'🏛️ 皇后{_queen}设立重华宫，皇嗣共育之所自此立起')
     
     npcs_with_children = serialize_npcs_for_client(game_state)
     dowager_data = game_state.npcs.get("太后")
@@ -9568,7 +9578,7 @@ def chonghua_state(game_state):
     ch = getattr(game_state, 'chonghua', None)
     if not isinstance(ch, dict):
         ch = {}
-    ch.setdefault('founded', True)
+    ch.setdefault('founded', False)
     ch.setdefault('level', 1)
     ch.setdefault('budget', 0)
     ch.setdefault('stipend', 0)        # 皇帝每月固定拨发的用度（主控自行填写）

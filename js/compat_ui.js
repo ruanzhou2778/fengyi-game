@@ -67,14 +67,17 @@
             if (!overlay) { showToast('🗺️ 暂无舆图'); return; }
             overlay.classList.toggle('active');
         };
-        window.openLedger = function() {
-            var d = window._lastGameData;
-            openModal('📜 宫中账目', '<div style="font-size:9px;line-height:1.6;">' +
-                (d ? '<p>🪙 银两：' + (d.silver || 0) + '</p>' +
-                '<p>📅 日期：' + (d.calendar_str || '-') + '</p>' +
-                '<p>⚡ 行动点：' + (d.remaining_actions || 0) + '/' + (d.max_actions || 7) + '</p>'
-                : '<p>暂无游戏数据</p>') + '</div>', '关闭');
-        };
+        // 仅在 index.html 未定义新版 openLedger（后宫账目）时兜底，避免覆盖新版
+        if (!window.openLedger) {
+            window.openLedger = function() {
+                var d = window._lastGameData;
+                openModal('📜 宫中账目', '<div style="font-size:9px;line-height:1.6;">' +
+                    (d ? '<p>🪙 银两：' + (d.silver || 0) + '</p>' +
+                    '<p>📅 日期：' + (d.calendar_str || '-') + '</p>' +
+                    '<p>⚡ 行动点：' + (d.remaining_actions || 0) + '/' + (d.max_actions || 7) + '</p>'
+                    : '<p>暂无游戏数据</p>') + '</div>', '关闭');
+            };
+        }
         window.closeLedger = function() { closeModal(); };
 
         // ---- 2. 替换新UI中的 mock 按钮 onclick ----

@@ -220,6 +220,9 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
     if not isinstance(cuts, dict) or not cuts:
         cuts = None
     if cuts:
+        # 是否由主控掌管内务府：克扣副作用（好感/威望）仅累及掌管者，不牵连非掌管的主控
+        player_manages = (getattr(getattr(game_state, 'rank', None), 'name', '') == '皇后') \
+            or (getattr(game_state, 'six_palace_assistant', None) == getattr(game_state, 'name', None))
         chief = ip.get('chief') or {}
         exposure = max(0.05, min(0.65,
                     (1 - int(chief.get('loyalty', 50) or 50) / 200.0)
@@ -240,15 +243,20 @@ def inner_palace_period_tick(game_state, normalize_inner_palace, RANK_POWER, cho
             v['periods'] = left
             pct = int(v.get('amount', 0) or 0)
             npc['health'] = max(0, int(npc.get('health', 50) or 50) - 1)
-            rel = (game_state.relationships or {}).get(tgt)
-            if isinstance(rel, dict):
-                rel['好感'] = max(-100, int(rel.get('好感', 0) or 0) - 3)
+            if player_manages:
+                rel = (game_state.relationships or {}).get(tgt)
+                if isinstance(rel, dict):
+                    rel['好感'] = max(-100, int(rel.get('好感', 0) or 0) - 3)
             if random.random() < exposure:
                 ev = random.randint(5, 10)
                 ip['corruption_evidence'] = int(ip.get('corruption_evidence', 0) or 0) + ev
-                game_state.attributes['威望'] = max(0, int(game_state.attributes.get('威望', 0) or 0) - 5)
-                _ip_log(ip, f'{chief.get("name", "总管")}揭发你克扣{tgt}份例，罪证+{ev}')
-                msgs.append(f'💥 克扣{tgt}份例被揭发！你威望-5，罪证+{ev}')
+                if player_manages:
+                    game_state.attributes['威望'] = max(0, int(game_state.attributes.get('威望', 0) or 0) - 5)
+                    _ip_log(ip, f'{chief.get("name", "总管")}揭发你克扣{tgt}份例，罪证+{ev}')
+                    msgs.append(f'💥 克扣{tgt}份例被揭发！你威望-5，罪证+{ev}')
+                else:
+                    _ip_log(ip, f'{chief.get("name", "总管")}克扣{tgt}份例被揭发，罪证+{ev}')
+                    msgs.append(f'💥 内务府克扣{tgt}份例被揭发！罪证+{ev}')
                 expired.append(tgt)
         for t in expired:
             cuts.pop(t, None)

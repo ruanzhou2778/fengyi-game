@@ -562,7 +562,7 @@ class GameState:
         self.heir_consorts = default_heir_consorts()
         # 重华宫与陷害系统新属性
         # chonghua.children 保存在馆子嗣的 uid 列表；log/events 为流水记录
-        self.chonghua = {"founded": True, "level": 1, "budget": 0, "children": [], "log": [], "events": []}
+        self.chonghua = {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}
         self.frameups = {"seq": 1, "cases": [], "log": []}
         # 公主择婿——三大朝堂势力好感度（默认各 50）
         self.court_faction_favor = default_court_faction_favor()
@@ -777,7 +777,7 @@ class GameState:
             "heir_status": normalize_heir_status(getattr(self, "heir_status", None)),
             "draft": getattr(self, "draft", None),
             "heir_consorts": normalize_heir_consorts(getattr(self, "heir_consorts", None)),
-            "chonghua": getattr(self, "chonghua", {"founded": True, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
+            "chonghua": getattr(self, "chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
             "court_faction_favor": normalize_court_faction_favor(getattr(self, "court_faction_favor", None)),
             "heir_race": normalize_heir_race(getattr(self, "heir_race", None)),
@@ -888,7 +888,7 @@ class GameState:
             game_state.queen_authority_uses = data.get("queen_authority_uses", 0)
             game_state.queen_assistance_count = data.get("queen_assistance_count", 0)
             game_state.six_palace_assistant = data.get("six_palace_assistant")
-            game_state.chonghua = data.get("chonghua", {"founded": True, "level": 1, "budget": 0, "children": [], "log": [], "events": []})
+            game_state.chonghua = data.get("chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []})
             game_state.frameups = data.get("frameups", {"seq": 1, "cases": [], "log": []})
             game_state.court_faction_favor = normalize_court_faction_favor(data.get("court_faction_favor"))
             game_state.heir_race = normalize_heir_race(data.get("heir_race"))
