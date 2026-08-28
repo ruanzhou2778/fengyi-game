@@ -326,10 +326,171 @@ def get_family_score(family, family_meta=None):
     return 45
 
 
-# 兼容旧版 app.py 导入（世家名录已改为官家出身）
-def random_family_clan(surname=None):
-    bg = generate_official_background(surname or random_surname())
-    return bg["label"]
+# ============================================================
+#  前朝关联系统 · 家族生成引擎（v2.0）
+# ============================================================
+CLAN_FACTIONS = ["文官党", "武官党", "宗室党"]
+
+# 官职类型 → 派系（兵部/武职 → 武官党，余多为文官党）
+MILITARY_TITLE_KEYWORDS = ("兵", "参将", "副将", "将军", "巡抚", "总督", "按察")
+MILITARY_KEYWORDS = ("参将", "副将", "将军")
+
+
+def _faction_for_title(title):
+    t = str(title or "")
+    if any(k in t for k in MILITARY_KEYWORDS) or "兵部" in t:
+        return "武官党"
+    return random.choices(CLAN_FACTIONS, weights=[55, 25, 20])[0] if random.random() < 0.85 else "宗室党"
+
+
+def _clan_tags(faction, grade, daughter_status=None):
+    tags = []
+    if faction == "文官党":
+        tags.append("清流世家" if grade <= 3 else "书香门第")
+    elif faction == "武官党":
+        tags.append("将门之后" if grade <= 4 else "边军之后")
+    else:
+        tags.append("宗室远亲")
+    if grade <= 2:
+        tags.append("簪缨世族")
+    if daughter_status == "庶":
+        tags.append("庶出旁支")
+    return tags
+
+
+def _clan_member_name(surname):
+    return f"{surname}{random_given(EMPEROR_GIVEN, 0.55)}"
+
+
+def _clan_brother(surname, father_grade):
+    """父亲官阶越高，兄弟起点越高（恩荫）。"""
+    grade = max(4, min(9, father_grade + random.randint(2, 5)))
+    title = _pick_official_title(grade)
+    return {
+        "name": _clan_member_name(surname),
+        "官职": title,
+        "grade": grade,
+        "age": random.randint(18, 45),
+        "健康": random.randint(60, 95),
+        "alive": True,
+        "派系": None,  # 与父亲同派系（外层填充）
+        "政绩": random.randint(40, 75),
+        "忠诚": random.randint(60, 90),
+    }
+
+
+def build_clan(surname, official_name, official_title, official_grade,
+               faction=None, is_player=False, daughter_status=None):
+    """构建一个前朝家族的完整结构。位份/官阶决定家族量级。"""
+    surname = (surname or "沈").strip() or "沈"
+    faction = faction or _faction_for_title(official_title)
+    grade = int(official_grade or 5)
+    prestige = max(10, min(95, get_family_score("", {"score": GRADE_BASE_SCORE.get(grade, 40)})))
+    brothers = []
+    n_bro = random.choices([0, 1, 2, 3], weights=[25, 40, 25, 10])[0]
+    for _ in range(n_bro):
+        brothers.append(_clan_brother(surname, grade))
+    for b in brothers:
+        b["派系"] = faction
+    return {
+        "surname": surname,
+        "father": {
+            "name": official_name,
+            "官职": official_title,
+            "grade": grade,
+            "age": random.randint(42, 62),
+            "健康": random.randint(55, 90),
+            "alive": True,
+            "派系": faction,
+            "政绩": random.randint(45, 85),
+            "忠诚": random.randint(50, 90),
+        },
+        "brothers": brothers,
+        "家族威望": prestige,
+        "家族银两": random.randint(300, 900) + (10 - grade) * 60,
+        "政治倾向": faction,
+        "恩荫次数": 0,
+        "风险值": random.randint(0, 15),
+        "标记": _clan_tags(faction, grade, daughter_status),
+        "历史事件": [f"家族于{official_title}门下立身，世代{('清誉' if faction == '文官党' else '武名' if faction == '武官党' else '显贵')}"],
+        "last_rank": None,  # NPC 家族：上次结算时的位份（用于检测晋升/降位）
+        "与玩家家族关系": None,  # {好感, 关系, 历史}
+        "is_player": bool(is_player),
+    }
+
+
+def generate_player_clan(surname, family_meta):
+    """由开局家世（family_meta）生成玩家家族，保证与父亲官职/姓名一致。"""
+    meta = family_meta or {}
+    title = meta.get("official_title") or _pick_official_title(meta.get("official_grade", 5))
+    return build_clan(
+        meta.get("surname") or surname,
+        meta.get("official_name") or (str(surname) + _clan_member_name("")),
+        title,
+        meta.get("official_grade", 5),
+        daughter_status=meta.get("daughter_status"),
+        is_player=True,
+    )
+
+
+# NPC 位份 → 父亲官阶区间（设计 3.3）
+NPC_RANK_GRADE = {
+    "皇后": (1, 2), "皇贵妃": (1, 2), "贵妃": (2, 3), "妃": (2, 3),
+    "嫔": (3, 4), "婕妤": (3, 4), "美人": (3, 5), "才人": (4, 6),
+    "贵人": (4, 6), "常在": (4, 7), "答应": (6, 9), "官女子": (6, 9), "秀女": (6, 9),
+}
+
+
+def generate_npc_clan(npc_name, npc_rank, family_meta=None):
+    """为 NPC 生成家族；若已有同姓家世 meta 则以其为准（保证姓氏/官职一致）。"""
+    meta = family_meta or {}
+    surname = meta.get("surname") or str(npc_name)[:1]
+    grade = int(meta.get("official_grade") or random.randint(*NPC_RANK_GRADE.get(npc_rank, (4, 7))))
+    title = meta.get("official_title") or _pick_official_title(grade)
+    father_name = meta.get("official_name") or (surname + random_given(EMPEROR_GIVEN, 0.55))
+    return build_clan(surname, father_name, title, grade, daughter_status=meta.get("daughter_status"))
+
+
+# 两家族初始关系（设计 3.4）
+def initial_clan_relation(player_clan, npc_clan, player_rank_name):
+    pf, nf = player_clan["政治倾向"], npc_clan["政治倾向"]
+    player_high = player_rank_name in ("贵妃", "妃", "嫔", "婕妤", "皇后", "皇贵妃")
+    if pf == nf and player_high:
+        rel, fav = "故交", random.randint(10, 30)
+    elif pf == nf:
+        rel, fav = "中立", random.randint(-5, 10)
+    elif player_high:
+        rel, fav = "政敌", random.randint(-15, -5)
+    else:
+        rel, fav = "政敌", random.randint(-20, -10)
+    if random.random() < 0.12:
+        rel, fav = "姻亲", random.randint(15, 35)
+    elif random.random() < 0.08:
+        rel, fav = "世仇", random.randint(-30, -18)
+    return {"好感": fav, "关系": rel, "历史": [f"两族入宫前便已{('交好' if fav >= 10 else '对立' if fav <= -10 else '平素')}于朝堂"]}
+
+
+def clan_relation_label(fav):
+    if fav >= 40:
+        return "世交"
+    if fav >= 15:
+        return "故交"
+    if fav >= -10:
+        return "中立"
+    if fav >= -25:
+        return "政敌"
+    return "世仇"
+
+
+def default_court_state():
+    return {
+        "派系好感": {"文官党": 50, "武官党": 50, "宗室党": 50},
+        "所有家族": {},
+        "当前热点": [],
+        "奏章队列": [],
+        "政治局势": "平稳",
+        "每旬动态": [],
+    }
 
 
 PLAYER_FAMILY_OPTIONS = []

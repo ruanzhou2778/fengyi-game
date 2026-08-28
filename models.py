@@ -3,7 +3,8 @@ from enum import Enum
 import random
 from datetime import datetime
 
-FOUR_CONSORTS = ["淑妃", "德妃", "贤妃", "宸妃"]
+# 位份顺序（低→高），供 app/scenarios 等模块统一引用
+RANK_ORDER = ["宫女", "更衣", "官女子", "秀女", "答应", "常在", "贵人", "才人", "美人", "婕妤", "嫔", "妃", "贵妃", "皇贵妃", "皇后"]
 # 方案 B：四妃改为「妃」位份下的专属封号（各限 1 人），不再是独立位份。
 FOUR_CONSORT_TITLES = ["淑", "德", "贤", "宸"]
 # 旧存档兼容：把旧的四妃「位份」迁移为 妃 + 对应封号。
@@ -596,6 +597,9 @@ class GameState:
         self.governance_history = []
         self.governance_cooldown = 0
         self.governance_handled_streak = 0
+        # 前朝关联系统：玩家家族 + 前朝总览（NPC 家族挂在 npcs[name]["clan"]）
+        self.player_clan = None
+        self.court = None
         # NPC 妃嫔关系网：{A: {B: {好感, 印象, 关系类型, 历史事件, 最后互动旬}}}
         self.npc_relationships = {}
         self.relationship_events = []   # 待推送的关系变化事件
@@ -617,10 +621,8 @@ class GameState:
         self.npcs = {}
         self.created_at = datetime.now().isoformat()
         self.updated_at = self.created_at
-        # 晋升事件标记
-        self._pending_promotion = None
-        self._promotion_fail_count = 0
-        self._promotion_done = False  # 本旬晋升标志
+        # 本旬晋升标志（晋升已改为自动触发，无选择事件）
+        self._promotion_done = False
         self.scandal_strikes = 0  # 宫斗丑闻累积，满则更易降位
         self.rank_periods = 0  # 现任位份已历旬数（资历）
         self.last_duel_period = None
@@ -825,6 +827,8 @@ class GameState:
             "chief_faction": getattr(self, "chief_faction", "中立"),
             "confidant": getattr(self, "confidant", None),
             "confidant_memory": getattr(self, "confidant_memory", [])[-20:],
+            "player_clan": getattr(self, "player_clan", None),
+            "court": getattr(self, "court", None),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -921,6 +925,9 @@ class GameState:
                         break
             cm = data.get("confidant_memory", [])
             game_state.confidant_memory = [str(x) for x in cm][-20:] if isinstance(cm, list) else []
+            # 前朝关联系统：还原玩家家族与前朝总览（旧存档缺失时置空，由 app 层兜底生成）
+            game_state.player_clan = data.get("player_clan") if isinstance(data.get("player_clan"), dict) else None
+            game_state.court = data.get("court") if isinstance(data.get("court"), dict) else None
             game_state.max_servants = 6 + game_state.rank.value // 2
             game_state.is_pregnant = data.get("is_pregnant", False)
             game_state.pregnancy_month = data.get("pregnancy_month", 0)
@@ -981,8 +988,6 @@ class GameState:
             game_state.max_actions = data.get("max_actions", 7)
             game_state.remaining_actions = data.get("remaining_actions", 7)
             game_state.last_duel_period = data.get("last_duel_period")
-            game_state._pending_promotion = None
-            game_state._promotion_fail_count = data.get("_promotion_fail_count", 0)
             game_state._promotion_done = data.get("_promotion_done", False)
             game_state.scandal_strikes = data.get("scandal_strikes", 0)
             game_state.rank_periods = data.get("rank_periods", 0)

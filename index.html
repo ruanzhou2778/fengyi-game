@@ -3339,59 +3339,6 @@ if(currentCharData.attrs[k]>max)currentCharData.attrs[k]=max;
 updateAttrDisplay();
 }
 
-const PROMOTION_STORIES={
-'秀女→答应':{title:'御前献艺',desc:'皇帝心情烦闷，皇后提议各宫妃嫔献艺解忧。你听闻此事，觉得是一个机会。但贸然出头可能招致非议。',
-opts:[{txt:'精心准备一支舞蹈，在御前展示才艺',eff:{宠爱:8,威望:5,才艺:5},correct:true,msg:'你的舞姿惊艳四座，皇帝龙颜大悦，当场晋封你为答应。'},{txt:'推说身体不适，不参加献艺',eff:{威望:-3,宠爱:-2},correct:false,msg:'你错失了在皇帝面前露脸的机会，皇后对你有些失望。'},{txt:'暗中向皇帝献上自己写的诗词',eff:{宠爱:3,才情:3},correct:false,msg:'诗词虽好，但未经允许擅自呈递，惹得皇帝不快。'}]},
-'答应→常在':{title:'后宫风波',desc:'宫中流传你与某位侍卫有染的谣言，虽是无稽之谈，但已惊动皇后。若不能自证清白，不仅晋升无望，甚至可能被贬。',
-opts:[{txt:'主动求见皇后，呈上证据自证清白',eff:{威望:8,心计:5},correct:true,msg:'皇后查明真相，还你清白，并赞赏你的胆识，晋封你为常在。'},{txt:'暗中调查谣言源头，以牙还牙',eff:{心计:8,威望:-3},correct:false,msg:'你报复心太重，反而被皇帝认为心胸狭窄。'},{txt:'隐忍不发，等风头过去',eff:{健康:-3,威望:-5},correct:false,msg:'你的沉默被误解为心虚，谣言越传越烈。'}]},
-'常在→贵人':{title:'太后寿宴',desc:'太后寿辰在即，各宫都在准备贺礼。你位份不高，财力有限，但这是博得太后青睐的好机会。',
-opts:[{txt:'亲手绣制百寿图，以孝心打动太后',eff:{威望:10,才艺:8,银两:-10},correct:true,msg:'太后对你亲手绣的百寿图赞不绝口，皇帝也对你刮目相看，晋封你为贵人。'},{txt:'借重金购买奇珍异宝献给太后',eff:{银两:-30,威望:3},correct:false,msg:'礼物虽贵重，但太后更看重心意，认为你太过功利。'},{txt:'当众献诗祝寿，展露才华',eff:{才情:5,宠爱:3},correct:false,msg:'诗作虽好，但在寿宴上抢了太后的风头，引起不悦。'}]},
-'贵人→嫔':{title:'选秀风波',desc:'三年一度的选秀开始，新入宫的秀女们个个年轻貌美。你感到威胁，必须巩固自己的地位。',
-opts:[{txt:'主动向皇后请缨，协助管理选秀事务',eff:{威望:8,心计:6},correct:true,msg:'你办事得力，皇后在皇帝面前夸奖你，皇帝晋封你为嫔。'},{txt:'拉拢几位秀女，培养自己的势力',eff:{心计:8,宠爱:-3},correct:false,msg:'你的小动作被皇帝察觉，认为你结党营私。'},{txt:'专注提升自身才艺，以实力说话',eff:{才情:6,才艺:6},correct:false,msg:'你只顾提升才艺，却忽略了后宫政治，错失良机。'}]},
-'嫔→妃':{title:'边疆捷报',desc:'边疆大捷，皇帝龙心大悦，决定大封后宫。各宫妃嫔都在争取这次机会，你该如何脱颖而出？',
-opts:[{txt:'向皇帝进献边疆地图，献上治国良策',eff:{威望:12,谋略:8},correct:true,msg:'你的见解令皇帝惊叹，认为你是难得的贤内助，晋封你为妃。'},{txt:'精心打扮，以美色邀宠',eff:{容貌:5,宠爱:5},correct:false,msg:'皇帝认为你以色侍人，不是长久之计。'},{txt:'联合几位妃嫔共同上书为皇帝庆贺',eff:{威望:3,宠爱:3},correct:false,msg:'你随波逐流，没有展现出独特价值，晋升机会被他人抢走。'}]},
-'妃→封妃':{title:'赐号之仪',desc:'你晋封妃位后圣宠渐隆，皇帝有意赐你封号，以彰恩宠。能否得号，关乎你在六宫中的体面。',
-opts:[{txt:'呈上亲手所绣吉字，以谦德请号',eff:{威望:8,才情:5},correct:true,msg:'皇帝嘉许你的谦德，亲赐封号，册为带号之妃。'},{txt:'暗示娘家出资修缮宫殿以邀封号',eff:{心计:6,威望:-8},correct:false,msg:'皇帝厌恶后宫与朝臣勾连，未赐封号。'},{txt:'当众哭诉位份低微，求皇帝垂怜',eff:{宠爱:3,威望:-6},correct:false,msg:'哭闹失仪，皇帝觉得你难当表率。'}]},
-'封妃→四妃':{title:'册立四妃',desc:'你已位尊带号之妃，四妃之位（淑德贤宸）有空缺。皇帝欲从妃位中择贤册立，你须证明自己堪列四妃。',
-opts:[{txt:'协理六宫琐事，以贤德服众',eff:{威望:12,宠爱:8},correct:true,msg:'你的贤德传遍六宫，皇帝下旨册你入四妃之列。'},{txt:'借子嗣之功在宴上争宠',eff:{宠爱:6,威望:-5},correct:false,msg:'你的张扬惹来非议，册立之事被搁置。'},{txt:'托人向外臣传扬你的美名',eff:{心计:8,威望:-10},correct:false,msg:'后宫干政之嫌惹怒皇帝。'}]},
-'四妃→贵妃':{title:'宫廷政变',desc:'皇帝病重，太子之位悬而未决。后宫暗流涌动，各方势力都在布局。你位列四妃，一举一动都可能影响大局。',
-opts:[{txt:'坚守中立，以皇帝病情为重，尽心侍疾',eff:{威望:15,宠爱:10,健康:-5},correct:true,msg:'你的忠诚和体贴感动了皇帝，病愈后晋封你为贵妃。'},{txt:'暗中支持某位皇子，提前布局',eff:{心计:10,威望:-8},correct:false,msg:'皇帝病愈后得知你结党营私，大怒。'},{txt:'联合皇后，共同把持后宫',eff:{威望:5,心计:5},correct:false,msg:'你的野心太过明显，皇帝对你不满。'}]},
-'贵妃→皇贵妃':{title:'皇后之争',desc:'皇后因病退位，后位悬空。你是贵妃，是继后的热门人选。但此事关乎国本，必须慎之又慎。',
-opts:[{txt:'向皇帝进言，以国家社稷为重，推荐合适人选',eff:{威望:20,谋略:10},correct:true,msg:'你的大公无私让皇帝感动，最终决定晋封你为皇贵妃，统摄六宫。'},{txt:'私下拉拢大臣，为自己造势',eff:{心计:10,威望:-15},correct:false,msg:'皇帝最忌讳后宫干政，你的行为触怒了皇帝。'},{txt:'以退为进，主动推辞后位，以示谦逊',eff:{威望:5,宠爱:5},correct:false,msg:'你的推辞被皇帝认为是虚伪，反而失去了机会。'}]},
-'皇贵妃→皇后':{title:'国母之仪',desc:'皇贵妃已悬空多年，皇帝终于决定立后。你是皇贵妃，也是众望所归。但立后大典非同小可，你的每一步都备受瞩目。',
-opts:[{txt:'以最隆重的礼仪准备立后大典，展现国母风范',eff:{威望:25,宠爱:15,银两:-50},correct:true,msg:'你的端庄大气让满朝文武折服，皇帝亲自为你戴上凤冠，晋封你为皇后！'},{txt:'低调行事，一切从简',eff:{威望:5,宠爱:5},correct:false,msg:'你太过谦逊，反而让皇帝觉得你不够重视后位。'},{txt:'借机打压政敌，清除异己',eff:{心计:15,威望:-20},correct:false,msg:'你的狠辣手段让皇帝寒心，立后之事被推迟。'}]}
-};
-
-function getPromotionStory(rank,nobletitle){
-const FOUR_TITLES=['淑','德','贤','宸'];
-if(rank.name==='妃'&&!nobletitle)return PROMOTION_STORIES['妃→封妃'];
-if(rank.name==='妃'&&nobletitle&&!FOUR_TITLES.includes(nobletitle))return PROMOTION_STORIES['封妃→四妃'];
-if(rank.name==='妃'&&FOUR_TITLES.includes(nobletitle))return PROMOTION_STORIES['四妃→贵妃'];
-const key=`${rank.name}→${RANK_ORDER[RANK_ORDER.indexOf(rank.name)+1]}`;
-return PROMOTION_STORIES[key]||null;
-}
-
-function showPromotionModal(event,pid){
-if(!event||!event.opts)return;
-const optsHtml=event.opts.map((opt,idx)=>`<button class="promotion-option-btn" onclick="handlePromotionChoice(${idx},'${pid||playerId}')">${opt.txt}</button>`).join('');
-const html=`<div style="display:flex;flex-direction:column;gap:4px;font-size:10px;color:var(--text-mid);"><div style="font-size:14px;font-weight:600;color:var(--text-dark);text-align:center;">📜 ${event.title}</div><div style="padding:4px 0;line-height:1.6;font-size:10px;color:var(--text-body);">${event.desc}</div><div style="border-top:1px solid var(--border-light);padding-top:4px;margin-top:2px;">${optsHtml}</div><div id="promotionResult" style="margin-top:4px;padding:4px 6px;border-radius:4px;font-size:9px;display:none;border:1px solid transparent;"></div></div>`;
-openModal('📜 晋升之机',html,'暂不考虑',null,true);
-window._currentPromotionEvent=event;
-window._promotionOptionsDisabled=false;
-}
-
-async function handlePromotionChoice(index,pid){
-if(window._promotionOptionsDisabled)return;window._promotionOptionsDisabled=true;document.querySelectorAll('.promotion-option-btn').forEach(b=>b.disabled=true);
-const event=window._currentPromotionEvent;if(!event){showToast('❌ 晋升事件已过期');return;}
-const selected=event.opts[index];
-try{
-const r=await myFetch(`${API_BASE}/api/promotion/choose`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:pid||playerId,choice_index:index})});
-const d=await r.json();
-const ra=document.getElementById('promotionResult');if(ra){ra.style.display='block';
-if(d.is_correct){ra.innerHTML=`✅ ${selected.msg||'晋升成功！'}`;ra.className='result-success';setTimeout(()=>{closeModal();if(d.promotion){showToast(d.promotion);addLogEntry(d.promotion,'promotion');}myFetch(`${API_BASE}/api/state/${pid||playerId}`).then(r=>r.json()).then(sd=>updateUI(sd));},1500);}
-else{ra.innerHTML=`❌ ${selected.msg||'选错了方向，下次努力。'}`;ra.className='result-fail';setTimeout(()=>{closeModal();myFetch(`${API_BASE}/api/state/${pid||playerId}`).then(r=>r.json()).then(sd=>updateUI(sd));},2000);}}
-}catch(e){console.error(e);showToast('❌ 操作失败');window._promotionOptionsDisabled=false;document.querySelectorAll('.promotion-option-btn').forEach(b=>b.disabled=false);}
-}
 
 function openInventory() {
     const d = window._lastGameData || {};
@@ -3607,7 +3554,7 @@ const servants=data.servants||[];const container=document.getElementById('servan
 if(typeof updateInnerPalacePanel==='function') updateInnerPalacePanel();
 
 if(servants.length===0){container.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无宫女太监</span>';countEl.textContent='0人';return;}
-container.innerHTML='';servants.forEach(s=>{const card=document.createElement('span');card.className='servant-card';card.innerHTML=`${s.type==='宫女'?'👩':'🧑'} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">${s.age||'-'}岁</span><span class="s-skill">技${s.skill}</span>`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});countEl.textContent=`${servants.length}人`;
+container.innerHTML='';servants.forEach(s=>{const isConf=s.name===((window._lastGameData&&window._lastGameData.confidant)||'');const card=document.createElement('span');card.className='servant-card';if(isConf)card.style.borderColor='var(--gold)';card.innerHTML=`${isConf?'🔒 ':''}${s.type==='宫女'?'👩':'🧑'} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">${s.age||'-'}岁</span><span class="s-skill">技${s.skill}</span>${isConf?'<span style="color:var(--gold);font-size:7px;">心腹</span>':''}`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});const _cn=(window._lastGameData&&window._lastGameData.confidant)||'';countEl.textContent=`${servants.length}人${_cn?` · 🔒心腹:${_cn}`:''}`;
 renderConflictAssist(servants);
 }
 
@@ -3619,6 +3566,8 @@ function estimateAssistBonus(servants, conflictType) {
         if (['陷害', '告发', '下毒'].includes(conflictType) && s.type === '太监') typeBonus += 2;
         if (['谣言', '争宠', '造谣'].includes(conflictType) && s.type === '宫女') typeBonus += 2;
         bonus += typeBonus + (s.skill || 0) * 0.12 + (s.loyalty || 0) * 0.08;
+        const _cf = window._lastGameData && window._lastGameData.confidant;
+        if (s.name === _cf) bonus += 10;
     });
     return Math.round(bonus * 10) / 10;
 }
@@ -4246,13 +4195,6 @@ async function confirmClearHeir() {
     } catch (e) { showToast('❌ 废储失败', 'error'); console.error(e); }
 }
 
-async function confirmGrantHonor() {
-    // 徽号功能已废弃（迁移中删除），保留空实现以防旧引用报错
-}
-
-async function confirmAssignPalace() {
-    // 分配宫殿功能已废弃（迁移中删除），保留空实现以防旧引用报错
-}
 
 function updateChildrenUI(data) {
     const grid = document.getElementById('childrenGrid');
@@ -4380,7 +4322,6 @@ document.querySelectorAll('.action-btn, .interact-btn, #sendBtn, [onclick*="hire
 userInput.disabled=disabled;userInput.placeholder=disabled?'行动点已用完，请转旬':'输入你想做的事...';
 nextPeriodBtn.disabled=false;
 if(rem===0)flipTriggeredThisRound=false;
-if(data.promotion_event)showPromotionModal(data.promotion_event,data.player_id);
 if(!data._skipPeriodEvents){
 if(data.other_promotions && data.other_promotions.length>0){data.other_promotions.forEach(msg=>{addLogEntry(formatEventMsg(msg,'📢'),'other-promotion');showToast(`✨ ${msg}`);});}
 if(data.new_concubine){let msg='';if(data.new_concubine.is_daxuan){msg=`三年大选，${data.new_concubine.names.join('、')} 入宫！`;}else{msg=`${data.new_concubine.names.join('、')} 入宫！`;}addLogEntry(formatEventMsg(msg,'🌺'),'new-concubine');showToast(`🌺 新人入宫！`);}
@@ -5426,13 +5367,26 @@ async function interactAction(name, action) {
 }
 
 function openServantDetail(servant){
-const html=`<div style="display:flex;flex-direction:column;gap:2px;font-size:9px;color:var(--text-mid);"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:12px;font-weight:600;color:var(--text-dark);">${servant.type==='宫女'?'👩':'🧑'} ${servant.name}</span><span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;color:var(--text-mid);">${servant.type}</span></div><div><span style="color:var(--text-light);">年龄：</span>${servant.age||'-'}岁</div><div><span style="color:var(--text-light);">忠诚度：</span>${servant.loyalty}</div><div><span style="color:var(--text-light);">技能：</span>${servant.skill}</div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><button onclick="trainServant('${servant.name}')" class="interact-btn">📚 训练 (15两)</button><button onclick="dismissServant('${servant.name}')" class="interact-btn" style="border-color:rgba(192,57,43,0.5);color:#e59a8a;">🚪 遣散</button></div><div id="servantResultArea" class="interact-result-area"></div></div>`;
+const gd=window._lastGameData||{};const isConf=(gd.confidant||'')===servant.name;
+const req=gd.confidant_loyalty_required||70;const cost=gd.confidant_promote_cost||100;
+const noPotential=servant.has_confidant_potential===false;
+let confBadge=isConf?'<span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;color:var(--gold-dark);">🔒 心腹</span>':'';
+let confBtns='';
+if(isConf){confBtns=`<button onclick="releaseConfidant('${servant.name}')" class="interact-btn" style="border-color:rgba(192,57,43,0.5);color:#e59a8a;">🔓 解除心腹</button>`;}
+else if(!noPotential){confBtns=`<button onclick="promoteConfidant('${servant.name}')" class="interact-btn" style="border-color:var(--gold);color:var(--gold-dark);">🔒 立为心腹（${cost}两 · 忠诚≥${req}）</button>`;}
+else{confBtns=`<span style="font-size:8px;color:var(--text-light);">（心思浅薄，不堪托付）</span>`;}
+const mems=gd.confidant_memory||[];
+let memBlock='';
+if(mems.length){memBlock=`<div style="margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><div style="font-size:8px;color:var(--gold-dark);">📜 心腹要事录</div>${mems.slice(-4).map(m=>`<div style="font-size:8px;color:var(--text-light);line-height:1.3;">${m}</div>`).join('')}</div>`;}
+const html=`<div style="display:flex;flex-direction:column;gap:2px;font-size:9px;color:var(--text-mid);"><div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap;"><span style="font-size:12px;font-weight:600;color:var(--text-dark);">${servant.type==='宫女'?'👩':'🧑'} ${servant.name}</span><span style="display:flex;gap:4px;align-items:center;"><span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;color:var(--text-mid);">${servant.type}</span>${confBadge}</span></div><div><span style="color:var(--text-light);">年龄：</span>${servant.age||'-'}岁</div><div><span style="color:var(--text-light);">忠诚度：</span>${servant.loyalty}</div><div><span style="color:var(--text-light);">技能：</span>${servant.skill}</div>${memBlock}<div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><button onclick="trainServant('${servant.name}')" class="interact-btn">📚 训练 (15两)</button>${confBtns}<button onclick="dismissServant('${servant.name}')" class="interact-btn" style="border-color:rgba(192,57,43,0.5);color:#e59a8a;">🚪 遣散</button></div><div id="servantResultArea" class="interact-result-area"></div></div>`;
 openModal(`👤 ${servant.name}`,html,'关闭',null,true);
 }
 
 async function trainServant(name){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/train`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const msg=d.message||'训练完成';showInteractFeedback(msg,name);setInteractResult('servantResultArea',msg);const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());}catch(e){showToast('❌ 操作失败');}}
 async function dismissServant(name){if(!playerId)return;if(!confirm(`确定要遣散 ${name} 吗？`))return;try{const r=await myFetch(`${API_BASE}/api/servant/dismiss`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());closeModal();showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
 async function hireServant(type){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/hire`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,type:type})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
+async function promoteConfidant(name){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/promote_confidant`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
+async function releaseConfidant(name){if(!playerId)return;if(!confirm(`确定要收回对 ${name} 的信任吗？`))return;try{const r=await myFetch(`${API_BASE}/api/servant/release_confidant`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
 
 function openRivalList(){
     const d=window._lastGameData;
