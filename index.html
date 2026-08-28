@@ -4500,7 +4500,7 @@ async function openRelationNet(){
         let rows = Object.keys(net).map(a => {
             const rels = Object.entries(net[a] || {})
                 .sort((x, y) => y[1].score - x[1].score)
-                .map(([b, e]) => `<span style="display:inline-block;background:var(--bg-card);border:1px solid ${e.color};border-radius:10px;padding:1px 7px;font-size:8px;margin:1px;cursor:pointer;" title="${(e.events||[]).map(v=>v.事件).join(' / ')}" onclick="closeModal();openInteract('npc','${b}')">${e.icon} ${b} · ${e.tier} ${e.score>0?'+':''}${e.score}</span>`).join('');
+                .map(([b, e]) => `<span style="display:inline-block;background:var(--bg-card);border:1px solid ${e.color};border-radius:10px;padding:1px 7px;font-size:9px;color:#e8e2d6;margin:1px 2px;cursor:pointer;" title="${(e.events||[]).map(v=>v.事件).join(' / ')}" onclick="closeModal();openInteract('npc','${b}')">${e.icon} ${b} · ${e.tier} ${e.score>0?'+':''}${e.score}</span>`).join('');
             return `<div style="padding:3px 0;border-bottom:1px dashed var(--border-light);"><span style="font-size:9px;color:var(--text-dark);font-weight:600;">${a}</span><div style="margin-top:2px;">${rels || '<span style="font-size:8px;color:var(--text-light);">（尚无往来）</span>'}</div></div>`;
         }).join('');
         const logHtml = (d.log || []).slice(0, 8).map(m => `<div style="font-size:8px;color:var(--text-light);padding:1px 0;">· ${m}</div>`).join('');
