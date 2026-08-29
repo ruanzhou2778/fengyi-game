@@ -3,7 +3,7 @@
 # + 宗人府（大宗正/削爵/除名/袭爵）+ 两翼联动 + 玩法接口
 import random
 
-from names import random_given, EMPEROR_GIVEN, random_surname
+from names import random_given, EMPEROR_GIVEN
 
 # ===== 常量（§2.1 / §3.1） =====
 PRINCE_COUNT = (3, 4)          # 亲王

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from unittest.mock import patch
 
 import app as A
+import cold_palace as C
 from app import app as flask_app
 from models import Rank
 import affair_system as F
@@ -120,7 +121,7 @@ ok("证据在手", sr2["npc"]["华妃"]["掌握证据"], sr2["npc"]["华妃"])
 wei0 = gs2.attributes["威望"]
 ok_, msg = F.dispose_npc_affair(gs2, "华妃", "expose")
 ok("揭发贬冷宫", ok_ and "华妃" not in gs2.npcs and gs2.attributes["威望"] > wei0, msg)
-ok("接冷宫系统", "华妃" in A.get_cold_palace(gs2)["inmates"])
+ok("接冷宫系统", "华妃" in C.get_cold_palace(gs2)["inmates"])
 sr2["npc"]["华妃"] = {"对象": "李侍卫", "对象身份": "禁军侍卫", "关系阶段": "私交",
                       "风险值": 45, "秘密": [], "情感值": 50, "掌握证据": ["抄本"]}
 silver0 = gs2.silver

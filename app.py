@@ -18,7 +18,7 @@ if hasattr(sys.stdout, 'reconfigure'):
         pass
 
 load_dotenv()
-from models import GameState, Rank, Storyline, Servant, RANK_ORDER, FOUR_CONSORT_TITLES, ORDINARY_NOBLETITLES, NOBLETITLES, normalize_rank_name, get_rank_power, is_titled_consort, is_four_consort_title, default_heir_status, COURT_FACTIONS, default_court_faction_favor, normalize_court_faction_favor, default_heir_race, normalize_heir_race, default_inner_palace, normalize_inner_palace, RANK_POWER
+from models import GameState, Rank, Storyline, Servant, RANK_ORDER, FOUR_CONSORT_TITLES, ORDINARY_NOBLETITLES, NOBLETITLES, normalize_rank_name, get_rank_power, is_four_consort_title, default_heir_status, COURT_FACTIONS, normalize_court_faction_favor, default_heir_race, normalize_heir_race, normalize_inner_palace, RANK_POWER
 from models import (
     default_heir_consorts, default_heir_consort_member,
     normalize_heir_consorts, normalize_heir_status,
@@ -43,9 +43,9 @@ from names import (
     generate_servant_name, extract_surname, NPC_SURNAMES,
     CHILD_GIVEN_NAME_CATEGORIES, CHILD_GIVEN_CHARS, is_valid_given_char,
 )
-from confidant_events import get_random_confidant_event, trigger_confidant_event, pick_confidant_target, CONFIDANT_EVENTS
+from confidant_events import get_random_confidant_event, trigger_confidant_event, pick_confidant_target
 from recommend_system import (
-    METHODS, RECOMMEND_PRIVATE_COST, RECOMMEND_RETRY_COST, NPC_INTERCEPT_COST,
+    METHODS,
     compute_rate, player_recommend, attach_npc_recommendations,
     resolve_npc_recommendations, interfere_npc_rec, remedy as recommend_remedy,
     tick_recommendations, sync_edition, recommend_payload, eligibility_blockers,
@@ -53,16 +53,14 @@ from recommend_system import (
 from royal_clan import (
     seed_royal_clan, get_royal_clan, process_royal_clan_period,
     royal_overview_payload, royal_male_action, royal_female_action,
-    respond_royal_pending, ACTIONS_MALE, ACTIONS_FEMALE,
+    respond_royal_pending,
 )
 from cold_palace import (
-    get_cold_palace, is_player_imprisoned, admit_npc as cold_admit_npc,
+    is_player_imprisoned,
     enter_cold_palace, player_self_action, player_release_attempt,
     interact_inmate, cold_manage, cold_period_tick, cold_overview_payload,
-    SELF_ACTIONS as COLD_SELF_ACTIONS, RELEASE_METHODS as COLD_RELEASE_METHODS,
 )
 from affair_system import (
-    TARGET_TYPES, DEVELOP_WAYS, MITIGATIONS, EXPOSE_OPS,
     get_affairs, develop_affair, use_affair_perk, mitigate_risk,
     probe_npc_affair, dispose_npc_affair, swap_eligibility,
     swap_start_plan, swap_execute, swap_aftercare, swap_case_respond,
@@ -72,23 +70,17 @@ from family_backgrounds import (
     generate_background_story,
     generate_concubine_identity,
     generate_official_background,
-    generate_official_background_for_name,
     get_family_score,
     _pick_official_title,
     GRADE_BASE_SCORE,
     generate_player_clan,
     generate_npc_clan,
-    initial_clan_relation,
-    clan_relation_label,
-    default_court_state,
-    build_clan,
-    CLAN_FACTIONS,
     process_clan_period,
     generate_family_events,
     apply_family_choice,
     ensure_clans,
 )
-from names import random_given, random_surname, EMPEROR_GIVEN, EMPEROR_SURNAMES
+from names import random_given, random_surname, EMPEROR_GIVEN
 from player_traits import apply_trait_bonuses, get_trait_catalog, suggest_traits
 from palace_extra import (
     start_duel, play_duel_skill, resolve_duel, chat_probe, pray_or_curse,
@@ -102,7 +94,6 @@ from endings import (
     check_player_poison_death, build_life_summary, trigger_ending,
     resolve_heir_succession_ending,
 )
-from openai import OpenAI
 import httpx
 from urllib.parse import urlparse
 from ai_service import generate_period_events, _strip_reasoning, get_openai_client
@@ -953,8 +944,6 @@ def get_rank_periods(game_state):
 def check_tenure_met(game_state):
     return get_rank_periods(game_state) >= get_active_min_tenure(game_state)
 
-def get_favor_threshold(rank_name):
-    return PROMOTION_THRESHOLDS.get(rank_name, {}).get("宠爱", 999)
 
 def get_active_favor_threshold(game_state):
     """当前晋升目标的宠爱门槛（妃位内按封号阶段）。"""
@@ -2335,9 +2324,6 @@ def newborn_trait(gender):
     return "🍼 襁褓" if gender == "皇子" else "🎀 襁褓"
 
 
-def child_mood_emoji(mood):
-    return CHILD_MOOD_EMOJI.get(mood, "😌")
-
 
 def add_child_event(child, text):
     events = child.setdefault("recent_events", [])
@@ -2431,12 +2417,6 @@ def should_use_emperor_approval(game_state, child, direction):
         return True, "皇帝念其前程，勉强首肯"
     return False, "皇帝不许皇子轻易归宗"
 
-
-def child_adoption_pressure(child, base=0):
-    age = int(child.get("age", 0) or 0)
-    health = int(child.get("health", 70) or 0)
-    affection = int(child.get("affection", 35) or 0)
-    return base + max(0, age - 2) * 2 + max(0, 55 - health) // 4 - max(0, affection - 35) // 8
 
 
 def ensure_child_fields(child):
@@ -2805,12 +2785,6 @@ def child_tag_growth_bonus(child, key):
             bonus *= 0.95
     return bonus
 
-
-def child_tag_affection_cap(child):
-    """孤僻标签亲密度上限（默认 100）。"""
-    if "孤僻" in (child.get("tags") or []):
-        return 60
-    return 100
 
 
 def apply_child_tag_stats(child, tag):
@@ -3816,15 +3790,6 @@ def iter_all_princesses(game_state):
                 yield (name, "npc", idx, c)
 
 
-def find_any_princess(game_state, child_uid):
-    """在全后宫（含 NPC 所出）按 uid 找到公主，返回 (owner, owner_type, index, child) 或 (None, None, -1, None)。"""
-    target = str(child_uid)
-    for owner, otype, idx, c in iter_all_princesses(game_state):
-        ensure_child_fields(c)
-        if str(c.get("uid")) == target:
-            return owner, otype, idx, c
-    return None, None, -1, None
-
 
 def princess_prestige_tier(game_state, child):
     """公主体面度：由生母位份 + 公主圣宠 + 记名嫡出综合，得出 low/mid/high。"""
@@ -4485,16 +4450,6 @@ def get_heir_mother_name(game_state):
         return ""
     return child.get("adoptive_mother") or child.get("birth_mother") or ""
 
-def find_child_by_uid(game_state, uid):
-    """在所有子嗣中按 uid 查找。"""
-    for c in game_state.children:
-        if c.get("uid") == uid:
-            return c, "player", len(game_state.children)
-    for name, npc in game_state.npcs.items():
-        for i, c in enumerate(npc.get("children", [])):
-            if c.get("uid") == uid:
-                return c, name, i
-    return None, None, None
 
 
 # ============================================================

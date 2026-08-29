@@ -617,7 +617,6 @@ class GameState:
         self.governance_handled_streak = 0
         # 前朝关联系统：玩家家族 + 前朝总览（NPC 家族挂在 npcs[name]["clan"]）
         self.player_clan = None
-        self.court = None
         self.family_event_queue = []    # 待处理的家族事件（弹窗）
         self.family_event_history = []  # 已处置的家族事件历史（最多20条）
         # NPC 妃嫔关系网：{A: {B: {好感, 印象, 关系类型, 历史事件, 最后互动旬}}}
@@ -854,7 +853,6 @@ class GameState:
             "confidant": getattr(self, "confidant", None),
             "confidant_memory": getattr(self, "confidant_memory", [])[-20:],
             "player_clan": getattr(self, "player_clan", None),
-            "court": getattr(self, "court", None),
             "attr_change_log": self.attr_change_log[-20:],
             "romance_mode": self.romance_mode,
             "custom_prompt": self.custom_prompt,
@@ -953,7 +951,6 @@ class GameState:
             game_state.confidant_memory = [str(x) for x in cm][-20:] if isinstance(cm, list) else []
             # 前朝关联系统：还原玩家家族与前朝总览（旧存档缺失时置空，由 app 层兜底生成）
             game_state.player_clan = data.get("player_clan") if isinstance(data.get("player_clan"), dict) else None
-            game_state.court = data.get("court") if isinstance(data.get("court"), dict) else None
             game_state.max_servants = 6 + game_state.rank.value // 2
             game_state.is_pregnant = data.get("is_pregnant", False)
             game_state.pregnancy_month = data.get("pregnancy_month", 0)

@@ -2,7 +2,7 @@
 # 私通六类对象五阶段 · 风险累积与阈值事件 · 消解五式 · NPC 私通发现与四处置 · 狸猫六阶段事件链
 import random
 
-from names import random_given, EMPEROR_GIVEN, random_surname
+from names import random_given, EMPEROR_GIVEN
 
 STAGES = ["偶遇", "熟识", "私交", "深交", "情缘"]
 STAGE_GATE = [0, 25, 50, 70]           # 情感值达到阈值升阶

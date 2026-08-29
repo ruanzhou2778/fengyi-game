@@ -482,18 +482,7 @@ def clan_relation_label(fav):
     return "世仇"
 
 
-def default_court_state():
-    return {
-        "派系好感": {"文官党": 50, "武官党": 50, "宗室党": 50},
-        "所有家族": {},
-        "当前热点": [],
-        "奏章队列": [],
-        "政治局势": "平稳",
-        "每旬动态": [],
-    }
 
-
-PLAYER_FAMILY_OPTIONS = []
 
 
 # ===== 前朝关联：家族事件引擎 =====
