@@ -4692,6 +4692,20 @@ async function openDowager(){
                 ${(p.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="dowagerAffair('${p.id}',${i})">${c.icon||'⚖️'} ${c.text}</button>`).join('')}
                 </div></div>`;
         });
+        // 后宫治理（新帝的后宫）
+        const hm = d.harem_mode || '共治';
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🏮 新帝后宫 · 治理之法：<span style="color:var(--gold-dark);">${hm}</span></div>`;
+        body += `<div style="font-size:8px;color:var(--text-mid);">新后：${d.new_queen||'（尚未立后）'}${d.new_queen?`　敬顺 ${d.queen_favor}`:''}${d.grandchild_chance?`　皇孙可期 ${d.grandchild_chance}%`:''}</div>`;
+        body += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">` + (d.harem_modes||[]).map(m =>
+            m.key===hm ? `<span style="font-size:8px;color:var(--gold-dark);padding:3px 7px;">◉ ${m.name}</span>`
+                       : `<button class="chonghua-btn" title="${m.desc}" onclick="dowagerHarem({mode:'${m.key}'})">${m.name}</button>`
+        ).join('') + `</div>`;
+        body += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">` + (d.harem_actions||[]).map(a =>
+            a.used ? `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;">✓ ${a.name}</span>`
+                   : (a.allowed ? `<button class="chonghua-btn" title="${a.desc}" onclick="dowagerHarem({action:'${a.key}'})">${a.name}</button>`
+                                : `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;" title="当前治理之法不许">🔒 ${a.name}</span>`)
+        ).join('') + `</div>`;
+        if((d.harem_log||[]).length){ body += `<div style="font-size:7px;color:var(--text-light);margin-top:2px;">${(d.harem_log||[]).slice(0,3).map(l=>'· '+l).join('<br>')}</div>`; }
         // 主动施为
         body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🕯️ 太后施为（每旬各一次）</div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">`;
         (d.actions||[]).forEach(a=>{
@@ -4710,6 +4724,7 @@ async function openDowager(){
         openModal(`🕯️ 垂帘听政 · 第${d.periods}旬`, body, '退朝', null, true);
     } catch(e){ showToast('❌ 操作失败'); }
 }
+function dowagerHarem(payload){ dowagerPost('/api/dowager/harem', payload, '🏮 后宫治理'); }
 function dowagerAffair(affairId, idx){ dowagerPost('/api/dowager/affair', {affair_id: affairId, choice_index: idx}, '⚖️ 帘后裁断'); }
 function dowagerAct(action){ dowagerPost('/api/dowager/action', {action: action}, '🕯️ 太后施为'); }
 function dowagerPower(mode){

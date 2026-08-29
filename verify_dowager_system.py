@@ -210,5 +210,81 @@ ok("垂帘状态恢复", rd["active"] is True and rd["emperor"]["name"] == sd["e
 ok("数值恢复", rd["authority"] == sd["authority"] and rd["treasury"] == sd["treasury"])
 ok("奏事队列恢复", len(rd["pending"]) == len(sd["pending"]))
 
+
+# 8. 后宫治理（太后管新帝的后宫）
+section("8. 新帝后宫治理")
+gs7 = fresh_state()
+D.enter_dowager_mode(gs7, heir(age=15))
+d7 = D.get_dowager(gs7)
+gs7.silver = 3000
+gs7.remaining_actions = 30
+ok("默认共治", d7["harem_mode"] == "共治", d7["harem_mode"])
+ok("共治可管内务府", A.inner_palace_can_manage(gs7) is True)
+ok_, msg = D.set_harem_mode(gs7, "共治")
+ok("重复设置被拒", ok_ is False, msg)
+auth0, aff0 = d7["authority"], d7["emperor"]["affection"]
+ok_, msg = D.set_harem_mode(gs7, "亲掌")
+ok("切亲掌", ok_ and d7["authority"] == auth0 + 3 and d7["emperor"]["affection"] == aff0 - 4, msg)
+ok("亲掌可管内务府", A.inner_palace_can_manage(gs7) is True)
+ok_, msg = D.set_harem_mode(gs7, "放权")
+ok("切放权", ok_ is True, msg)
+ok("放权后交出内务府", A.inner_palace_can_manage(gs7) is False)
+ok_, msg = D.harem_action(gs7, "instruct_queen")
+ok("放权后不得训诫新后", ok_ is False, msg)
+ok_, msg = D.harem_action(gs7, "bless_consort")
+ok("放权后仍可抚循妃嫔", ok_ is True, msg)
+D.set_harem_mode(gs7, "共治")
+ok_, msg = D.harem_action(gs7, "select_draft")
+ok("为帝选秀", ok_ and d7.get("grandchild_chance", 0) >= 15, msg)
+ok_, msg = D.harem_action(gs7, "select_draft")
+ok("每旬限一次", ok_ is False, msg)
+q = D.ensure_new_queen(gs7, d7)
+ok("立后", bool(q) and d7["new_queen"] == q, q)
+qf0 = d7["queen_favor"]
+ok_, msg = D.harem_action(gs7, "instruct_queen")
+ok("训诫新后（敬顺-）", ok_ and d7["queen_favor"] < qf0, (msg, d7["queen_favor"]))
+ok_, msg = D.harem_action(gs7, "arbitrate")
+ok("裁断宫争", ok_, msg)
+ok_, msg = D.harem_action(gs7, "urge_heir")
+ok("催促皇嗣", ok_ and d7["grandchild_chance"] >= 20, msg)
+d7["grandchild_chance"] = 100
+with patch("dowager_system.random.random", return_value=0.0):
+    msgs7 = D.dowager_period_tick(gs7)
+ok("皇孙诞生", any("皇长子" in m2 for m2 in msgs7), msgs7)
+ok("概率清零", d7["grandchild_chance"] == 0)
+d7["queen_favor"] = 10
+with patch("dowager_system.random.random", return_value=0.0):
+    msgs7b = D.dowager_period_tick(gs7)
+ok("新后抗命反弹", any("哭诉" in m2 for m2 in msgs7b), msgs7b)
+ok("payload 含后宫字段", all(k in D.dowager_payload(gs7) for k in
+   ("harem_mode", "harem_modes", "harem_actions", "new_queen", "queen_favor")))
+
+# 9. 太后期互动语义改写
+section("9. 太后期互动改写")
+c2 = flask_app.test_client()
+r = c2.post("/api/start", json={"name": "沈太后2", "api_base": "", "api_key": "", "api_model": ""})
+pid2 = r.get_json()["player_id"]
+g2 = A.sessions[pid2]
+g2.remaining_actions = 20
+D.enter_dowager_mode(g2, heir(age=15))
+r = c2.post("/api/emperor/interact", json={"player_id": pid2, "action": "serve_tea"})
+j = r.get_json() or {}
+ok("母子相见（非宠爱）", r.status_code == 200 and "母子" in (j.get("narration") or ""), j.get("narration"))
+ok("返回垂帘数据", isinstance(j.get("dowager"), dict))
+r = c2.post("/api/emperor/interact", json={"player_id": pid2, "action": "request_funding"})
+j = r.get_json() or {}
+ok("索内帑入私帑", r.status_code == 200 and (j.get("effects") or {}).get("私帑", 0) > 0, j.get("effects"))
+r = c2.post("/api/dowager/interact", json={"player_id": pid2, "action": "pay_respects"})
+j = r.get_json() or {}
+ok("受新后问安（角色反转）", r.status_code == 200 and "问安" in (j.get("narration") or ""), j.get("narration"))
+r = c2.post("/api/emperor/flip", json={"player_id": pid2})
+ok("太后不得翻牌", r.status_code == 409, r.status_code)
+r = c2.post("/api/dowager/harem", json={"player_id": pid2, "mode": "亲掌"})
+ok("api 切治理之法", r.status_code == 200 and r.get_json().get("success"), r.get_json())
+r = c2.post("/api/dowager/harem", json={"player_id": pid2, "action": "bless_consort"})
+ok("api 后宫施为", r.status_code == 200, r.get_json())
+r = c2.post("/api/dowager/harem", json={"player_id": pid2})
+ok("api 缺参数400", r.status_code == 400, r.status_code)
+
 print(f"\n太后垂帘系统验证: {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

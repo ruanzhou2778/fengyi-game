@@ -9,6 +9,17 @@ REGENCY_CRISIS_AUTH = 25        # 摄政权威跌破此值触发失势危机
 EMPRESS_REGNANT_AUTH = 90       # 临朝称制（女帝）所需权威
 EMPRESS_REGNANT_COURT = 85      # 临朝称制所需朝堂控制力
 
+# 后宫治理模式（太后如何对待新帝的后宫）
+HAREM_MODES = {
+    "亲掌": {"name": "太后亲掌", "desc": "六宫事无大小皆决于慈宁宫；权威+，帝心-，新后怨望",
+              "authority": 2, "emperor_affection": -2, "queen_favor": -3},
+    "共治": {"name": "与后共治", "desc": "大事由你，细务归新后；平稳持中",
+              "authority": 1, "emperor_affection": 0, "queen_favor": 1},
+    "放权": {"name": "全付新后", "desc": "撤手不问，颐养天年；帝心+，新后感念，权威-",
+              "authority": -2, "emperor_affection": 3, "queen_favor": 4},
+}
+HAREM_MODE_DEFAULT = "共治"
+
 # 上朝奏事模板：每条三选，效果键 权威/朝堂/国库/帝心/民心/派系_x
 COURT_AFFAIRS = [
     {
@@ -118,6 +129,11 @@ def default_dowager():
         "return_requested": 0,  # 亲政请求后已过旬数（0=未请求）
         "used_period": "",      # 本旬已施为记录
         "used_actions": [],
+        # ---- 新帝后宫（太后仍可插手的那一半） ----
+        "harem_mode": HAREM_MODE_DEFAULT,   # 亲掌 / 共治 / 放权
+        "new_queen": "",                    # 新后名（新帝的皇后）
+        "queen_favor": 50,                  # 新后对你的敬顺度 0-100
+        "harem_log": [],
     }
 
 
@@ -366,6 +382,151 @@ def return_power(game_state, mode):
     return None, "无效的抉择"
 
 
+# ===== 新帝后宫：太后仍可插手的那一半 =====
+HAREM_ACTIONS = {
+    "select_draft": {"name": "为帝选秀", "cost": {"actions": 1}, "min_mode": ("亲掌", "共治"),
+                     "desc": "为新帝钦定秀女入宫，充实子嗣（新后敬顺-）"},
+    "instruct_queen": {"name": "训诫新后", "cost": {"actions": 1}, "min_mode": ("亲掌", "共治"),
+                       "desc": "以太后之尊教诲新后宫务（权威+，敬顺-）"},
+    "bless_consort": {"name": "抚循妃嫔", "cost": {"silver": 100}, "min_mode": ("亲掌", "共治", "放权"),
+                      "desc": "赏赐新帝妃嫔，广植恩德（民心+，敬顺+）"},
+    "urge_heir": {"name": "催促皇嗣", "cost": {"actions": 1}, "min_mode": ("亲掌", "共治"),
+                  "desc": "催新帝早绵子嗣（帝心-，皇孙有望）"},
+    "arbitrate": {"name": "裁断宫争", "cost": {"actions": 1}, "min_mode": ("亲掌", "共治"),
+                  "desc": "亲裁新帝后宫的争端（权威+，或招怨）"},
+}
+
+
+def _harem_log(d, text):
+    d.setdefault("harem_log", []).insert(0, text)
+    del d["harem_log"][12:]
+
+
+def ensure_new_queen(game_state, d):
+    """新帝立后：从名册中挑一位（或凭空生成）作为新后。"""
+    if d.get("new_queen"):
+        return d["new_queen"]
+    if d["emperor"]["age"] < 14:
+        return ""
+    from names import generate_female_name
+    try:
+        name = generate_female_name()
+    except Exception:
+        name = "新后"
+    d["new_queen"] = name
+    d["queen_favor"] = random.randint(40, 60)
+    _harem_log(d, f"{d['emperor']['name']}册立{name}为后")
+    game_state.add_memory(f"👑 新帝册立{name}为后")
+    return name
+
+
+def set_harem_mode(game_state, mode):
+    """选择后宫治理模式：亲掌 / 共治 / 放权。"""
+    d = get_dowager(game_state)
+    if not d.get("active"):
+        return None, "你不在垂帘听政"
+    if mode not in HAREM_MODES:
+        return None, "无此治理之法"
+    if d.get("harem_mode") == mode:
+        return False, f"你已行「{HAREM_MODES[mode]['name']}」之法"
+    old = d.get("harem_mode", HAREM_MODE_DEFAULT)
+    d["harem_mode"] = mode
+    spec = HAREM_MODES[mode]
+    # 转换代价：亲掌需权威，放权则失权威但得帝心
+    if mode == "亲掌":
+        d["authority"] = _clamp(d["authority"] + 3)
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) - 8)
+        d["emperor"]["affection"] = _clamp(d["emperor"]["affection"] - 4)
+        narr = ("🏛️ 你传下话去：六宫事无大小，皆先报慈宁宫。"
+                "新后垂手立在阶下，一句话也没有说。（权威+3，帝心-4，新后敬顺-8）")
+    elif mode == "放权":
+        d["authority"] = _clamp(d["authority"] - 4)
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) + 10)
+        d["emperor"]["affection"] = _clamp(d["emperor"]["affection"] + 6)
+        narr = ("🌿 你把六宫的册子交回新后手里：「往后这些，你自己拿主意。」"
+                "她跪下谢恩时，眼里是真的松了口气。（权威-4，帝心+6，新后敬顺+10）")
+    else:
+        d["authority"] = _clamp(d["authority"] + 1)
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) + 3)
+        narr = ("⚖️ 你划下界线：大事你断，细务归她。"
+                "这样最省心，也最容易长久。（权威+1，新后敬顺+3）")
+    _harem_log(d, f"治理之法：{old}→{mode}")
+    game_state.add_memory(f"后宫治理改为「{spec['name']}」")
+    return True, narr
+
+
+def harem_action(game_state, action):
+    """太后对新帝后宫的施为（受治理模式限制）。"""
+    from app import guard_action
+    d = get_dowager(game_state)
+    if not d.get("active"):
+        return None, "你不在垂帘听政"
+    spec = HAREM_ACTIONS.get(action)
+    if not spec:
+        return None, "无此举措"
+    mode = d.get("harem_mode", HAREM_MODE_DEFAULT)
+    if mode not in spec["min_mode"]:
+        return False, f"你已行「{HAREM_MODES[mode]['name']}」，此事不宜再由慈宁宫过问"
+    period_key = f"{game_state.year}-{game_state.month}-{game_state.day}"
+    key = "harem_" + action
+    if d.get("used_period") != period_key:
+        d["used_period"] = period_key
+        d["used_actions"] = []
+    if key in d["used_actions"]:
+        return False, f"本旬已{spec['name']}"
+    if "silver" in spec["cost"]:
+        if game_state.silver < spec["cost"]["silver"]:
+            return False, f"私帑不足（需{spec['cost']['silver']}两）"
+        game_state.silver -= spec["cost"]["silver"]
+    if "actions" in spec["cost"]:
+        ok, err = guard_action(game_state)
+        if not ok:
+            return False, err
+    d["used_actions"].append(key)
+    queen = ensure_new_queen(game_state, d)
+
+    if action == "select_draft":
+        applied = _apply_effects(game_state, d, {"权威": 2, "帝心": -2})
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) - 5)
+        d.setdefault("grandchild_chance", 0)
+        d["grandchild_chance"] = min(60, int(d.get("grandchild_chance", 0)) + 15)
+        msg = (f"📜 你为{d['emperor']['name']}钦定了两名秀女入宫。"
+               f"{'新后' + queen + '闻讯，指尖掐进了掌心。' if queen else ''}"
+               f"（权威+2，帝心-2，新后敬顺-5，皇孙可期）")
+    elif action == "instruct_queen":
+        if not queen:
+            return False, "新帝尚未立后，无人可训"
+        applied = _apply_effects(game_state, d, {"权威": 3})
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) - 6)
+        msg = (f"📖 你召{queen}至慈宁宫，从晨昏定省讲到内帑出入，讲了一个时辰。"
+               f"她跪谢受教，膝下的砖被跪出了印子。（权威+3，新后敬顺-6）")
+    elif action == "bless_consort":
+        applied = _apply_effects(game_state, d, {"民心": 3, "朝堂": 2})
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) + 6)
+        msg = ("🎁 你以私帑赏赐新帝的妃嫔，人人有份，厚薄得宜。"
+               "宫里都说太后慈厚。（民心+3，朝堂+2，新后敬顺+6）")
+    elif action == "urge_heir":
+        applied = _apply_effects(game_state, d, {"帝心": -3, "权威": 1})
+        d["grandchild_chance"] = min(70, int(d.get("grandchild_chance", 0)) + 20)
+        msg = (f"🍼 你当着朝臣的面问{d['emperor']['name']}：「皇嗣之事，可有消息了？」"
+               f"他脸上一红，答不上话。（帝心-3，权威+1，皇孙可期）")
+    else:  # arbitrate
+        good = random.random() < 0.6
+        if good:
+            applied = _apply_effects(game_state, d, {"权威": 4, "朝堂": 2})
+            d["queen_favor"] = _clamp(d.get("queen_favor", 50) + 2)
+            msg = ("⚖️ 新帝后宫两位娘娘争一处宫室，闹到慈宁宫来。"
+                   "你三言两语断得公道，两边都谢了恩。（权威+4，朝堂+2）")
+        else:
+            applied = _apply_effects(game_state, d, {"权威": 1, "民心": -2})
+            d["queen_favor"] = _clamp(d.get("queen_favor", 50) - 5)
+            msg = ("⚖️ 你裁断了那桩争执，可落败的那位是新后的亲表妹。"
+                   "从此新后见你，礼数越发周全了。（权威+1，民心-2，新后敬顺-5）")
+    parts = [f"{k}{'+' if v > 0 else ''}{v}" for k, v in (applied or {}).items() if v]
+    _harem_log(d, spec["name"])
+    return True, msg
+
+
 def dowager_period_tick(game_state):
     """转旬：奏事生成、国库民心自然变动、新帝成长、亲政请求与失势危机。"""
     d = get_dowager(game_state)
@@ -383,6 +544,31 @@ def dowager_period_tick(game_state):
     if len(d["pending"]) >= 3:
         d["authority"] = _clamp(d["authority"] - 3)
         msgs.append("📜 奏本积压不批，朝臣私议太后倦政（摄政权威-3）")
+    # 后宫治理模式的每旬效应
+    mode = d.get("harem_mode", HAREM_MODE_DEFAULT)
+    spec = HAREM_MODES.get(mode) or {}
+    d["authority"] = _clamp(d["authority"] + int(spec.get("authority", 0)))
+    d["emperor"]["affection"] = _clamp(d["emperor"]["affection"] + int(spec.get("emperor_affection", 0)))
+    d["queen_favor"] = _clamp(d.get("queen_favor", 50) + int(spec.get("queen_favor", 0)))
+    # 新帝立后
+    if not d.get("new_queen") and d["emperor"]["age"] >= 14:
+        q = ensure_new_queen(game_state, d)
+        if q:
+            msgs.append(f"👑 {d['emperor']['name']}册立{q}为后，六宫有主")
+    # 新后敬顺过低 → 联手新帝抗命
+    if d.get("new_queen") and d.get("queen_favor", 50) <= 20 and random.random() < 0.3:
+        d["authority"] = _clamp(d["authority"] - 4)
+        d["emperor"]["affection"] = _clamp(d["emperor"]["affection"] - 3)
+        msgs.append(f"🕸️ {d['new_queen']}在御前哭诉太后严苛，新帝默然听了很久（权威-4，帝心-3）")
+    # 皇孙诞生
+    gc = int(d.get("grandchild_chance", 0) or 0)
+    if gc > 0 and random.random() < gc / 100.0:
+        d["grandchild_chance"] = 0
+        d["authority"] = _clamp(d["authority"] + 3)
+        d["people"] = _clamp(d["people"] + 4)
+        d["emperor"]["affection"] = _clamp(d["emperor"]["affection"] + 5)
+        msgs.append(f"👶 {d['emperor']['name']}得了皇长子，宗庙有继——你成了太皇太后的辈分（权威+3，民心+4，帝心+5）")
+        game_state.add_memory("👶 皇孙诞生，宗庙有继")
     # 新帝成长
     if d["periods"] % 3 == 0:
         d["emperor"]["age"] += 1
@@ -441,4 +627,14 @@ def dowager_payload(game_state):
         "actions": [{"key": k, "name": v["name"], "desc": v["desc"],
                      "used": k in (d.get("used_actions") or [])}
                     for k, v in DOWAGER_ACTIONS.items()],
+        "harem_mode": d.get("harem_mode", HAREM_MODE_DEFAULT),
+        "harem_modes": [{"key": k, "name": v["name"], "desc": v["desc"]} for k, v in HAREM_MODES.items()],
+        "new_queen": d.get("new_queen", ""),
+        "queen_favor": d.get("queen_favor", 50),
+        "grandchild_chance": int(d.get("grandchild_chance", 0) or 0),
+        "harem_actions": [{"key": k, "name": v["name"], "desc": v["desc"],
+                           "allowed": d.get("harem_mode", HAREM_MODE_DEFAULT) in v["min_mode"],
+                           "used": ("harem_" + k) in (d.get("used_actions") or [])}
+                          for k, v in HAREM_ACTIONS.items()],
+        "harem_log": list(d.get("harem_log") or [])[:5],
     }

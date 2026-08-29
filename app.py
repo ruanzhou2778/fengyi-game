@@ -64,6 +64,7 @@ from dowager_system import (
     is_dowager_active, enter_dowager_mode, generate_court_affairs,
     respond_court_affair, dowager_action, return_power,
     dowager_period_tick, dowager_payload, get_dowager,
+    set_harem_mode, harem_action, HAREM_MODES,
 )
 from affair_system import (
     get_affairs, develop_affair, use_affair_perk, mitigate_risk,
@@ -6101,7 +6102,13 @@ def game_over_response(game_state):
     }), 409
 
 def inner_palace_can_manage(game_state):
-    """内务府为六宫公器，仅皇后或受命协理六宫者可掌管。"""
+    """内务府为六宫公器，仅皇后或受命协理六宫者可掌管。
+
+    太后垂帘期：亲掌/共治之下太后仍可掌内务府，放权后交还新后（不可再管）。
+    """
+    if is_dowager_active(game_state):
+        d = get_dowager(game_state)
+        return d.get("harem_mode", "共治") in ("亲掌", "共治")
     if game_state.rank.name == "皇后":
         return True
     return _get_six_palace_assistant(game_state) == game_state.name
@@ -7466,6 +7473,49 @@ def interact_npc():
     game_state.add_attr_change(result.get("effects", {}), f"与{npc_name}交互：{action}")
     return jsonify({**result, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
+
+def dowager_meet_emperor(game_state, action):
+    """太后垂帘期与新帝相见：宠爱无意义，改记母子亲近/帝威/摄政权威。"""
+    d = get_dowager(game_state)
+    emp = d["emperor"]
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    table = {
+        "serve_tea": ("赐茶叙话", {"帝心": (3, 6)}, 0),
+        "discuss": ("垂问朝政", {"帝威": (1, 3), "权威": (1, 3)}, 0),
+        "recite_poem": ("课以诗书", {"帝威": (2, 4), "帝心": (1, 3)}, 0),
+        "ask_reward": ("索取尊养", {"权威": (2, 4), "帝心": (-4, -1)}, 0),
+        "request_funding": ("索内帑充慈宁", {"权威": (1, 3)}, 0),
+    }
+    if action not in table:
+        return jsonify({"error": "无效行为"}), 400
+    desc, effects, cost = table[action]
+    from dowager_system import _apply_effects
+    rolled = {k: random.randint(a, b) for k, (a, b) in effects.items()}
+    applied = _apply_effects(game_state, d, rolled)
+    if action == "request_funding":
+        grant = random.randint(200, 500)
+        d["treasury"] = max(0, d["treasury"] - grant // 4)
+        game_state.silver += grant
+        applied["私帑"] = grant
+    narr_map = {
+        "serve_tea": f"你赐{emp['name']}一盏茶，母子对坐半晌，说的都是些家常。",
+        "discuss": f"你垂问{emp['name']}近日的奏本，他答得有条有理——总算有几分帝王气象了。",
+        "recite_poem": f"你亲自考{emp['name']}的功课，他背得磕磕绊绊，你却听得认真。",
+        "ask_reward": f"你向{emp['name']}索要尊养之物，他一一应下，只是眼里那点犹豫，你看得分明。",
+        "request_funding": f"你开口向内帑取钱，{emp['name']}批了——太后要用，谁敢说不。",
+    }
+    parts = [f"{k}{'+' if v > 0 else ''}{v}" for k, v in applied.items() if v]
+    narration = narr_map[action] + ("（" + "、".join(parts) + "）" if parts else "")
+    game_state.add_memory(f"太后{desc}：{emp['name']}")
+    return jsonify({"success": True, "narration": narration, "effects": applied,
+                    "dowager": dowager_payload(game_state),
+                    "silver": game_state.silver,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
 @app.route('/api/emperor/interact', methods=['POST'])
 def emperor_interact():
     data = request.get_json()
@@ -7479,6 +7529,9 @@ def emperor_interact():
         return err
     if "皇帝" not in game_state.relationships:
         game_state.relationships["皇帝"] = {"好感": 10, "印象": "初识", "互动次数": 0}
+    # 太后垂帘期：与「皇帝」的互动改为母子相见（宠爱不再有意义，改记权威与帝心）
+    if is_dowager_active(game_state):
+        return dowager_meet_emperor(game_state, action)
     action_map = {'serve_tea': {'desc': '献茶', 'effects': {'宠爱': (1,5), '威望': (0,2)}, 'cost': 10}, 'discuss': {'desc': '奏对', 'effects': {'宠爱': (2,6), '威望': (2,5), '谋略': (1,4)}, 'cost': 0}, 'recite_poem': {'desc': '献诗', 'effects': {'宠爱': (3,8), '才情': (2,5)}, 'cost': 0}, 'ask_reward': {'desc': '求赏赐', 'effects': {'宠爱': (0,3), '威望': (0,2)}, 'cost': 0}, 'request_funding': {'desc': '请拨内帑', 'effects': {}, 'cost': 0}}
     if action not in action_map:
         return jsonify({"error": "无效行为"}), 400
@@ -8049,6 +8102,19 @@ def dowager_interact():
     ok, err = guard_action(game_state)
     if not ok:
         return err
+    # 太后垂帘期：你即太后，此路由改为受新后/妃嫔问安（角色反转）
+    if is_dowager_active(game_state):
+        d = get_dowager(game_state)
+        from dowager_system import _apply_effects, ensure_new_queen
+        q = ensure_new_queen(game_state, d) or "新后"
+        applied = _apply_effects(game_state, d, {"权威": random.randint(1, 3)})
+        d["queen_favor"] = max(0, min(100, int(d.get("queen_favor", 50)) + random.randint(1, 3)))
+        return jsonify({"success": True,
+                        "narration": f"🍵 {q}率新帝妃嫔至慈宁宫问安，你受了礼，赐了茶。"
+                                     f"（摄政权威+{applied.get('摄政权威', 0)}，新后敬顺+）",
+                        "effects": applied, "dowager": dowager_payload(game_state),
+                        "remaining_actions": game_state.remaining_actions,
+                        "max_actions": game_state.max_actions})
     if "太后" not in game_state.relationships:
         game_state.relationships["太后"] = {"好感": 20, "印象": "和善", "互动次数": 0}
     action_map = {'pay_respects': {'desc': '请安', 'effects': {'威望': (1,4), '宠爱': (1,3)}, 'cost': 0}, 'present_gift': {'desc': '献礼', 'effects': {'威望': (3,6), '宠爱': (2,5)}, 'cost': 25}, 'chat': {'desc': '陪聊', 'effects': {'威望': (2,5), '心计': (1,3), '魅力': (1,2)}, 'cost': 0}, 'ask_favor': {'desc': '求恩典', 'effects': {'威望': (5,10), '宠爱': (3,7)}, 'cost': 0}}
@@ -8092,6 +8158,13 @@ def dowager_interact():
     game_state.add_attr_change(changes, f"太后{act['desc']}")
     return jsonify({"success": True, "narration": narration, "effects": changes, "reward": reward_info, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
+def _guard_dowager_forbidden(game_state, what="此事"):
+    """太后垂帘期不再参与的后宫行为（争宠/侍寝/选秀入册等）。"""
+    if is_dowager_active(game_state):
+        return jsonify({"error": f"你已是太后，{what}已非你所与——六宫之事可于慈宁宫垂帘处置"}), 409
+    return None
+
+
 @app.route('/api/emperor/flip', methods=['POST'])
 def emperor_flip():
     data = request.get_json()
@@ -8099,7 +8172,10 @@ def emperor_flip():
     game_state, err = session_or_404(player_id)
     if err:
         return err
-    
+    blocked = _guard_dowager_forbidden(game_state, "翻牌侍寝")
+    if blocked:
+        return blocked
+
     candidates = get_flip_candidates(game_state)
     if not candidates:
         return jsonify({"error": "没有合适的妃嫔"}), 400
@@ -12990,6 +13066,32 @@ def dowager_action_api():
     if err:
         return err
     ok, msg = dowager_action(game_state, data.get('action'))
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg,
+                    "overview": dowager_payload(game_state),
+                    "silver": game_state.silver,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
+@app.route('/api/dowager/harem', methods=['POST'])
+def dowager_harem_api():
+    """太后掌新帝后宫：mode=<亲掌/共治/放权> 切换治理之法；action=<...> 施为。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    if data.get('mode'):
+        ok, msg = set_harem_mode(game_state, data.get('mode'))
+    elif data.get('action'):
+        ok, msg = harem_action(game_state, data.get('action'))
+    else:
+        return jsonify({"error": "须指定 mode 或 action"}), 400
     if ok is None:
         return jsonify({"error": msg}), 400
     if not ok:
