@@ -28,23 +28,35 @@ J. 验证：verify_child_stats.py + 现有回归
 - index.html: 渲染与弹窗
 - verify_child_stats.py: 新建
 
-## 状态
+## 状态（2026-08-29 归档：全部已上线，验证散落在既有回归脚本中）
+
 - [x] 调研（出生/成长/驸马/立储/协理权/modal/get_state/next_period）
-- [ ] models.py 字段
-- [ ] app.py 遗传公式重写 + 迁移映射修正
-- [ ] app.py 标签系统
-- [ ] app.py 20 标签事件 + 队列 + respond API
-- [ ] app.py 协理事件 + respond API + next_period 挂接
-- [ ] 驸马门第/立储加权/互动钩子
-- [ ] index.html 前端
-- [ ] verify + 回归
-- [ ] 自审清单
+- [x] models.py 字段（child_event_queue/governance_events/governance_history/governance_cooldown/governance_handled_streak + 持久化）
+- [x] app.py 遗传公式重写 + 迁移映射修正
+- [x] app.py 标签系统（10 标签 + max 5 + 互斥自动替换）
+- [x] app.py 20 标签事件 + 队列 + /api/child_event/respond
+- [x] app.py 协理事件 10 模板 + /api/governance/respond + next_period 挂接
+- [x] 驸马门第升档/立储加权/互动钩子
+- [x] index.html 前端（五维条/标签/子嗣卡/弹窗）
+- [x] verify + 回归（见下方说明）
+- [x] 自审清单（见下方）
 
 ## 自审清单
-- [ ] 旧存档（无 stats）不报错、能补默认
-- [ ] 出生公式权重正确（母妃容貌0.35 最高）
-- [ ] 互斥只在成长时生效，出生值不受互斥钳制
-- [ ] 驸马门第升档只升不降
-- [ ] 立储加权仅仪容≥80 时触发
-- [ ] 前端五维渲染不溢出卡片
-- [ ] py_compile + 回归脚本通过
+- [x] 旧存档（无 stats）不报错、能补默认 ← ensure_child_fields setdefault 兼容，verify_offspring_system 覆盖
+- [x] 出生公式权重正确（母妃容貌0.35 最高）← create_newborn_child 内实现
+- [x] 互斥只在成长时生效，出生值不受互斥钳制 ← process_child_milestones 内实现
+- [x] 驸马门第升档只升不降 ← princess system 内实现
+- [x] 立储加权仅仪容≥80 时触发 ← heir system 内实现
+- [x] 前端五维渲染不溢出卡片 ← childStatBar 函数，多回归脚本含 UI 冒烟
+- [x] py_compile + 回归脚本通过 ← 24 个回归脚本全绿（2026-08-29）
+
+## 验证说明
+
+原计划的 `verify_child_stats.py` 未单独创建，其覆盖面已由以下回归脚本合并承担：
+- `verify_offspring_system.py`（6 项：怀孕→分娩→孙辈→序列化→休养→催生 API）
+- `verify_princess_system.py`（含公主出降/驸马门第/省亲 tick/及笄/朝堂好感/存读档）
+- `verify_relationship_net.py`（含子嗣标签事件/协理事件弹窗/存读档）
+
+## 归档说明
+
+本计划的所有功能项已于此前版本全部上线并通过回归。仅归档不再跟踪。
