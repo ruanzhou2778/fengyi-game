@@ -662,6 +662,8 @@ class GameState:
         }
         self.last_court_event = ""
         self.dowager_ending_triggered = False
+        # 太后垂帘听政（见 dowager_system.py / DOWAGER_SYSTEM.md）
+        self.dowager_state = {"active": False}
 
     def get_attr_max(self, attr_name):
         return self.ATTR_MAX.get(attr_name, 100)
@@ -867,6 +869,7 @@ class GameState:
             "new_emperor": getattr(self, "new_emperor", None),
             "last_court_event": getattr(self, "last_court_event", ""),
             "dowager_ending_triggered": getattr(self, "dowager_ending_triggered", False),
+            "dowager_state": getattr(self, "dowager_state", {"active": False}),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -1046,6 +1049,8 @@ class GameState:
             }
             game_state.last_court_event = str(data.get("last_court_event", ""))
             game_state.dowager_ending_triggered = bool(data.get("dowager_ending_triggered", False))
+            ds = data.get("dowager_state")
+            game_state.dowager_state = ds if isinstance(ds, dict) else {"active": False}
             ending = data.get("ending")
             game_state.ending = ending if isinstance(ending, dict) else None
             game_state.ending_unlocked = data.get("ending_unlocked")

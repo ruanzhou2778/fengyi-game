@@ -1668,6 +1668,7 @@
                 <button class="tool-btn" onclick="openRoyalClan()" title="宗室势力">🏵️</button>
                 <button class="tool-btn" onclick="openColdPalace()" title="冷宫">🏚️</button>
                 <button class="tool-btn" onclick="openAffairs()" title="私通·狸猫">🌙</button>
+                <button class="tool-btn" onclick="openDowager()" title="垂帘听政">🕯️</button>
                 <button class="tool-btn" onclick="openLedger()" title="内务府账册">📒<span class="badge">亏</span></button>
                 <button class="tool-btn" onclick="saveGame()" title="存档">💾</button>
                 <button class="tool-btn" onclick="openSaveList()" title="读档">📂</button>
@@ -4656,6 +4657,76 @@ function royalStylePost(path, extra){
         if(d.game_over){ closeModal(); openModal('🕯️ 终局', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${(d.narration||'')}</div>`, '知道了', ()=>refreshState(), true); return; }
         showToast('✅ '+(d.narration||'完成').slice(0,40));
         openColdPalace();
+    }).catch(e=>showToast('❌ 操作失败'));
+}
+
+async function openDowager(){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/dowager/overview?player_id=${playerId}`);
+        const d = await r.json();
+        if(d.error){ showToast('❌ '+d.error); return; }
+        if(!d.active){
+            openModal('🕯️ 垂帘听政', '<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">你尚未垂帘听政。<br><br>唯有你的子嗣冲龄登基（未满16岁）为帝，你才会以太后之尊于帘后听政——那是另一场棋局的开始。</div>', '知道了', null, true);
+            return;
+        }
+        window._dowager = d;
+        const emp = d.emperor || {};
+        const bar = (label, v, color) => `<span style="display:inline-block;min-width:52px;">${label}</span><span style="display:inline-block;width:40px;height:5px;background:rgba(158,190,178,0.18);border-radius:3px;vertical-align:middle;overflow:hidden;"><span style="display:block;width:${Math.max(0,Math.min(100,v))}%;height:100%;background:${color};"></span></span> <b style="color:${color};">${v}</b>`;
+        let body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.9;">
+            <div>${bar('摄政权威', d.authority, d.authority<=25?'#c0392b':d.authority>=80?'#d4ac0d':'#7a9ac0')}　${bar('朝堂控制', d.court, '#9a7ac0')}</div>
+            <div>${bar('民心', d.people, '#4a8a5a')}　国库：<b style="color:var(--gold-dark);">${d.treasury}</b> 万　垂帘${d.periods}旬</div>
+            <div>⚖️ 派系：${Object.entries(d.factions||{}).map(([k,v])=>`${k} ${v}`).join(' · ')}</div>
+        </div>`;
+        body += `<div style="margin-top:5px;border:1px solid var(--border-light);border-radius:8px;padding:5px;background:var(--bg-card);font-size:9px;color:var(--text-mid);">
+            <div style="font-weight:600;color:var(--text-dark);">👑 幼帝 ${emp.name||''}（${emp.age||0}岁）</div>
+            <div>母子亲近 ${emp.affection} · 帝王威仪 ${emp.majesty}${emp.age>=(d.adult_age||16)?' · <span style="color:#c0392b;">已及冠，朝野请亲政</span>':''}</div></div>`;
+        // 待裁奏事
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">📜 待裁奏事（${(d.pending||[]).length}/3）</div>`;
+        if(!(d.pending||[]).length){ body += `<div style="font-size:8px;color:var(--text-light);">通政司暂无积压奏本。</div>`; }
+        (d.pending||[]).forEach(p=>{
+            body += `<div style="border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);background:rgba(192,57,43,.05);">
+                <div style="font-weight:600;">${p.icon||'📜'} ${p.type} · ${p.title}</div>
+                <div style="line-height:1.6;margin-top:2px;">${p.desc||''}</div>
+                <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
+                ${(p.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="dowagerAffair('${p.id}',${i})">${c.icon||'⚖️'} ${c.text}</button>`).join('')}
+                </div></div>`;
+        });
+        // 主动施为
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🕯️ 太后施为（每旬各一次）</div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">`;
+        (d.actions||[]).forEach(a=>{
+            body += a.used
+                ? `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;">✓ ${a.name}</span>`
+                : `<button class="chonghua-btn" title="${a.desc}" onclick="dowagerAct('${a.key}')">${a.name}</button>`;
+        });
+        body += `</div>`;
+        // 权柄抉择
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">👑 权柄抉择</div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+            <button class="chonghua-btn" onclick="dowagerPower('yield')">🌤️ 撤帘还政（需帝满${d.adult_age||16}岁）</button>
+            ${d.return_requested?`<button class="chonghua-btn" style="border-color:rgba(192,57,43,.5);color:#e59a8a;" onclick="dowagerPower('refuse')">🚫 拒还政（权威-6·帝心-10）</button>`:''}
+            <button class="chonghua-btn" style="border-color:var(--gold);color:var(--gold-dark);" onclick="dowagerPower('regnant')">👑 临朝称制（权威≥${(d.regnant_req||{}).authority}·朝堂≥${(d.regnant_req||{}).court}）</button>
+        </div>`;
+        if((d.log||[]).length){ body += `<div style="font-size:7px;color:var(--text-light);margin-top:5px;border-top:1px dashed var(--border-light);padding-top:3px;">${(d.log||[]).slice(0,4).map(l=>'· '+l).join('<br>')}</div>`; }
+        openModal(`🕯️ 垂帘听政 · 第${d.periods}旬`, body, '退朝', null, true);
+    } catch(e){ showToast('❌ 操作失败'); }
+}
+function dowagerAffair(affairId, idx){ dowagerPost('/api/dowager/affair', {affair_id: affairId, choice_index: idx}, '⚖️ 帘后裁断'); }
+function dowagerAct(action){ dowagerPost('/api/dowager/action', {action: action}, '🕯️ 太后施为'); }
+function dowagerPower(mode){
+    const label={yield:'撤帘还政',refuse:'拒绝还政',regnant:'临朝称制'}[mode]||mode;
+    if(!confirm(`确定「${label}」？此举关乎国本，难以挽回。`))return;
+    dowagerPost('/api/dowager/power', {mode: mode}, '👑 权柄抉择');
+}
+function nl2br(s){ return String(s||'').split(String.fromCharCode(10)).join('<br>'); }
+function dowagerPost(path, extra, title){
+    if(!playerId)return;
+    myFetch(`${API_BASE}${path}`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(Object.assign({player_id:playerId}, extra))}).then(r=>r.json()).then(d=>{
+        if(d.error){ showToast('❌ '+d.error, d.error.includes('行动点')?'error':undefined); return; }
+        window._dowager = d.overview;
+        if(d.game_over){ closeModal(); openModal('👑 终局', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${nl2br(d.narration)}</div>`, '知道了', ()=>refreshState(), true); return; }
+        closeModal();
+        openModal(title, `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${nl2br(d.narration)}</div>`, '知道了', ()=>{refreshState();openDowager();}, true);
     }).catch(e=>showToast('❌ 操作失败'));
 }
 

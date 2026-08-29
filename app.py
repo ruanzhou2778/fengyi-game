@@ -60,6 +60,11 @@ from cold_palace import (
     enter_cold_palace, player_self_action, player_release_attempt,
     interact_inmate, cold_manage, cold_period_tick, cold_overview_payload,
 )
+from dowager_system import (
+    is_dowager_active, enter_dowager_mode, generate_court_affairs,
+    respond_court_affair, dowager_action, return_power,
+    dowager_period_tick, dowager_payload, get_dowager,
+)
 from affair_system import (
     get_affairs, develop_affair, use_affair_perk, mitigate_risk,
     probe_npc_affair, dispose_npc_affair, swap_eligibility,
@@ -378,6 +383,8 @@ SPECIAL_FAVOR_ABSOLUTE_MIN = 95  # 低位份门槛过低时，专宠至少须达
 
 DEMOTION_SEVERE_CONFLICTS = {"陷害", "告发"}
 DEMOTION_MODERATE_CONFLICTS = {"谣言", "争辩", "争宠"}
+
+DOWAGER_REGENCY_MAX_AGE = 16   # 新帝年幼于此则由太后垂帘听政
 
 PROMOTION_EXTRA_REQUIREMENTS = {
     "妃": {"min_children": 1, "hint": "母凭子贵——须诞育过子嗣（无论存殁）方可封妃"},
@@ -8450,6 +8457,9 @@ def next_period():
     # ---- 出轨/私通 + 狸猫换子：风险累积/阈值事件/孕程/案发 ----
     for evt in process_affair_period(game_state):
         intelligence.append(evt)
+    # ---- 太后垂帘听政：朝会奏事/财政民心/新帝成长/亲政与失势 ----
+    for evt in dowager_period_tick(game_state):
+        intelligence.append(evt)
     # ---- NPC 妃嫔关系网：每旬自然变化 ----
     for rel_msg in process_npc_relationships(game_state):
         intelligence.append(rel_msg)
@@ -8715,6 +8725,11 @@ def next_period():
                         ending = trigger_ending(game_state, ending_key, reason)
                         if ending_key == "母仪天下":
                             intelligence.append("👑 新帝登基，尊你为太后，母仪天下！")
+                            # 太后线：幼帝冲龄践祚则转入垂帘听政续章（非终局）
+                            if int(float(heir_child.get("age", 20) or 20)) < DOWAGER_REGENCY_MAX_AGE:
+                                ok_d, msg_d = enter_dowager_mode(game_state, heir_child)
+                                if ok_d:
+                                    intelligence.append(msg_d)
                         else:
                             headline = (ENDINGS.get(ending_key) or {}).get("headline", ending_key)
                             intelligence.append(f"👑 新帝登基，尊你为太后——只是这位新君，{headline}。")
@@ -12938,6 +12953,73 @@ def prince_marry():
         "silver": game_state.silver,
         "prince": prince_serialize(game_state, child),
     })
+
+
+# ---- 太后垂帘听政（dowager_system.py / DOWAGER_SYSTEM.md） ----
+
+@app.route('/api/dowager/overview', methods=['GET'])
+def dowager_overview_api():
+    game_state, err = session_or_404(request.args.get('player_id'))
+    if err:
+        return err
+    return jsonify(dowager_payload(game_state))
+
+
+@app.route('/api/dowager/affair', methods=['POST'])
+def dowager_affair_api():
+    """裁决一件朝会奏事。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = respond_court_affair(game_state, data.get('affair_id'), data.get('choice_index'))
+    if ok is None:
+        return jsonify({"error": msg}), 404
+    if not ok:
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg,
+                    "overview": dowager_payload(game_state),
+                    "attributes": game_state.attributes})
+
+
+@app.route('/api/dowager/action', methods=['POST'])
+def dowager_action_api():
+    """太后主动施为：亲授帝学/赏赐朝臣/整肃朝纲/施粥赈灾/召见宗亲。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = dowager_action(game_state, data.get('action'))
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg,
+                    "overview": dowager_payload(game_state),
+                    "silver": game_state.silver,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
+@app.route('/api/dowager/power', methods=['POST'])
+def dowager_power_api():
+    """还政抉择：yield=归政 / refuse=继续垂帘 / regnant=临朝称制。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = return_power(game_state, data.get('mode'))
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        return jsonify({"error": str(msg)}), 400
+    resp = {"success": True, "narration": msg, "overview": dowager_payload(game_state)}
+    if is_game_over(game_state):
+        resp["game_over"] = True
+        resp["ending"] = ending_payload(game_state)
+    return jsonify(resp)
 
 
 @app.route('/')
