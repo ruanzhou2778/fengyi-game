@@ -71,7 +71,7 @@ async def main():
                     all_visible: boxRect.width>0 && boxRect.height>0 && boxRect.width<1280
                 };
             }""")
-            await page.screenshot(path='loading_overlay.png')
+            await page.screenshot(path='_loading_overlay_shot.png')
             print('RESULT:', __import__('json').dumps(res, ensure_ascii=False))
             ok = (res['overlay_display']=='flex' and res['box_width']>0 and res['box_height']>0
                   and res['box_flexdir']=='column' and res['box_align']=='center'
