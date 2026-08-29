@@ -3582,7 +3582,7 @@ function updateHaremPage(data){
         
         card.innerHTML = `
             <div style="display:flex;align-items:center;gap:2px;font-size:10px;">
-                <span style="font-size:${isQueen ? '16' : '12'}px;">${npc.icon || '🌸'}</span>
+                <span style="font-size:${isQueen ? '16' : '12'}px;">${charIcon('npc:'+name, npc.icon || '🌸', isQueen ? 32 : 26)}</span>
                 <span style="font-weight:600;color:var(--text-dark);${isQueen ? 'font-size:12px;' : ''}">${displayName}</span>
                 ${isQueen ? `<span class="queen-badge" style="margin-left:auto;">👑六宫之主</span>` :
                     `<span style="font-size:6px;color:var(--gold);background:var(--gold-light);padding:1px 4px;border-radius:6px;margin-left:auto;">${(npc.nobletitle && npc.rank==='妃') ? npc.nobletitle+'妃' : (npc.rank || '妃嫔')}</span>`}
@@ -3623,7 +3623,7 @@ function updateHaremPage(data){
             const orphans = (npc.children || []).filter(c => c.alive !== false && !c.adoptive_mother);
             const row = document.createElement('div');
             row.style.cssText = 'font-size:7px;color:#8a7a7a;padding:2px 0;opacity:0.85;';
-            row.innerHTML = `${npc.icon || '🌸'} ${displayRank}${name} — ${cause}`;
+            row.innerHTML = `${charIcon('npc:'+npc.name, npc.icon || '🌸', 28)} ${displayRank}${name} — ${cause}`;
             memorial.appendChild(row);
             if (orphans.length > 0) {
                 const orRows = document.createElement('div');
@@ -5374,7 +5374,7 @@ function openAdoptOutPicker(childIndex) {
     candidates.forEach(npc => {
         const rankName = npc.rank || '妃嫔';
         html += `<button onclick="confirmAdoptOut('${(npc.name || '').replace(/'/g, "\\'")}', ${childIndex})" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:5px 8px;margin:1px 0;border:1px solid var(--border-light);border-radius:6px;background:var(--bg-card);font-size:9px;cursor:pointer;font-family:inherit;color:var(--text-dark);">
-            <span>${npc.icon || '🌸'} ${npc.name || '未知'}</span><span style="color:var(--gold-dark);">${rankName}</span>
+            <span>${charIcon('npc:'+npc.name, npc.icon || '🌸', 28)} ${npc.name || '未知'}</span><span style="color:var(--gold-dark);">${rankName}</span>
         </button>`;
     });
     html += '</div>';

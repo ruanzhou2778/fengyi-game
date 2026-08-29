@@ -8918,6 +8918,7 @@ def next_period():
         "intelligence": "\n".join(intelligence),
         "intelligence_list": intelligence,
         "key_events": classify_key_events(intelligence),
+        "avatars": avatar_payload(game_state),
         "attributes": game_state.attributes,
         "attr_max": game_state.ATTR_MAX,
         "silver": game_state.silver,
