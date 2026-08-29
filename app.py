@@ -380,6 +380,7 @@ DEMOTION_SEVERE_CONFLICTS = {"陷害", "告发"}
 DEMOTION_MODERATE_CONFLICTS = {"谣言", "争辩", "争宠"}
 
 PROMOTION_EXTRA_REQUIREMENTS = {
+    "妃": {"min_children": 1, "hint": "母凭子贵——须诞育过子嗣（无论存殁）方可封妃"},
     "四妃封号": {"min_children": 1, "hint": "册立四妃（淑德贤宸）须至少诞下一名皇嗣（母凭子贵）"},
     "贵妃": {"min_children": 1, "hint": "晋封贵妃须至少诞下一名皇嗣"},
     "皇贵妃": {"min_children": 2, "hint": "晋封皇贵妃须至少诞下两名皇嗣"},
@@ -978,8 +979,8 @@ def get_promotion_block_reason(game_state):
         req = PROMOTION_EXTRA_REQUIREMENTS.get("四妃封号")
         if req:
             min_children = req.get("min_children", 0)
-            living = [c for c in game_state.children if c.get("alive", True)]
-            if min_children > 0 and len(living) < min_children:
+            children_had = [c for c in game_state.children if isinstance(c, dict)]
+            if min_children > 0 and len(children_had) < min_children:
                 return req.get("hint", "晋升条件未满足")
         return None
     target = step.get("target")
@@ -999,8 +1000,9 @@ def get_promotion_block_reason(game_state):
         return None
     min_children = req.get("min_children", 0)
     if min_children > 0:
-        living = [c for c in game_state.children if c.get("alive", True)]
-        if len(living) < min_children:
+        # 子嗣存殁皆计（死胎/夭折也算生育过）
+        children_had = [c for c in game_state.children if isinstance(c, dict)]
+        if len(children_had) < min_children:
             return req.get("hint", "晋升条件未满足")
     return None
 
