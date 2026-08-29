@@ -250,6 +250,7 @@ REGNANT_AGENDA = [
 
 NEW_HAREM_RANKS = ["答应", "常在", "贵人", "嫔", "妃", "贵妃", "皇后"]
 NEW_HAREM_MAX = 8
+COURT_SESSION_INTERVAL = 3       # 每 3 旬一次大朝会
 MEDDLE_QUEUE_MAX = 2
 MINISTER_SEIZE_POWER = 85        # 权臣势力达此值则挟制朝政
 
@@ -349,6 +350,10 @@ def default_dowager():
         "minister": "",                     # 当朝权臣名号
         "meddle": [],                       # 待决干政事件
         "meddle_log": [],
+        # ---- 大朝会与百官班次 ----
+        "ministers": [],                    # 三位党派领袖 [{name,faction,power,attitude}]
+        "sessions_held": 0,                 # 已历大朝会次数
+        "last_session": "",                 # 上次出席方式
         # ---- 新帝妃嫔名册 ----
         "consorts": [],                     # [{name, rank, favor(帝宠), respect(对你敬顺), pregnant, children}]
         "consort_log": [],
@@ -501,6 +506,15 @@ def respond_court_affair(game_state, affair_id, choice_index):
     if not (0 <= idx < len(choices)):
         return False, "无此选项"
     choice = choices[idx]
+    if ev.get("tpl") == "grand_session":
+        way = (choice.get("effects") or {}).get("way", "curtain")
+        applied, session_msgs = _resolve_court_session(game_state, d, way)
+        d["pending"] = [p for p in d["pending"] if p.get("id") != affair_id]
+        d["history"].insert(0, {"title": "大朝会", "choice": choice["text"], "period": ev.get("period")})
+        del d["history"][30:]
+        narr = f"👑 大朝会 · {choice['text']}。\n" + "\n".join(session_msgs)
+        game_state.add_memory(f"大朝会：{choice['text']}")
+        return True, narr
     applied = _apply_effects(game_state, d, choice.get("effects"))
     d["pending"] = [p for p in d["pending"] if p.get("id") != affair_id]
     d["history"].insert(0, {"title": ev["title"], "choice": choice["text"], "period": ev.get("period")})
@@ -1096,6 +1110,12 @@ def reign_period_tick(game_state):
         return []
     msgs = []
     d["reign_periods"] = int(d.get("reign_periods", 0) or 0) + 1
+    # 女帝每 3 旬御门听政，亲裁大计
+    if d["reign_periods"] % COURT_SESSION_INTERVAL == 0:
+        gain = random.randint(2, 5)
+        d["sovereignty"] = _clamp(d["sovereignty"] + gain)
+        d["legacy"] = _clamp(d["legacy"] + 1)
+        msgs.append(f"👑 你御门听政，亲裁大计三件（威权+{gain}，青史+1）")
     # 威权高则稳固缓升，民心低则稳固下滑
     drift = 1 if d["sovereignty"] >= 60 else -1
     if d["people"] < 40:
@@ -1130,6 +1150,112 @@ def reign_payload(d):
         "can_abdicate": int(d.get("reign_periods", 0) or 0) >= 4,
         "legacy_gate": REGNANT_YEARS_TO_LEGACY,
     }
+
+
+# ===== 大朝会与百官班次 =====
+def ensure_court_ministers(game_state, d):
+    """三位党派领袖入班（文官/武官/宗室各一），势力随派系好感。"""
+    ms = d.setdefault("ministers", [])
+    favor = {"文官党": 50, "武官党": 50, "宗室党": 50}
+    favor.update(getattr(game_state, "court_faction_favor", None) or {})
+    have = {m.get("faction") for m in ms}
+    for faction in ("文官党", "武官党", "宗室党"):
+        if faction in have:
+            continue
+        ms.append({
+            "name": f"{random.choice(MINISTER_TITLES)}{random.choice(MINISTER_NAMES)}{random_given(EMPEROR_GIVEN, 0.5)}",
+            "faction": faction,
+            "power": _clamp(int(favor.get(faction, 50)) + random.randint(-8, 8)),
+            "attitude": random.randint(25, 55),   # 对太后的顺从度
+            "alive": True,
+        })
+    return ms
+
+
+def _ministers_attitude_shift(d, delta_by_faction):
+    """按派系调整领袖态度。"""
+    for m in d.get("ministers") or []:
+        delta = delta_by_faction.get(m.get("faction"), 0)
+        if delta:
+            m["attitude"] = _clamp(int(m.get("attitude", 40) or 0) + delta)
+
+
+def open_court_session(game_state):
+    """大朝会开场：入待裁队列，须选择出席方式。"""
+    d = get_dowager(game_state)
+    if not d.get("active") or d.get("regnant"):
+        return []
+    if any(p.get("tpl") == "grand_session" for p in (d.get("pending") or [])):
+        return []
+    ministers = ensure_court_ministers(game_state, d)
+    roster = "、".join(f"{m['faction']}{m['name']}" for m in ministers)
+    emp = d["emperor"]
+    pname = emp.get("personality", "仁厚")
+    scene = {
+        "仁厚": f"{emp['name']}端坐御座，先向帘后望了一眼，才命百官奏事。",
+        "多疑": f"{emp['name']}坐得很直，每道奏本读完，都先看你一眼再看群臣。",
+        "暴戾": f"{emp['name']}今日面色不佳，方才已斥退一名奏事含糊的给事中。",
+        "庸懒": f"{emp['name']}来得比百官晚，落座没多久就开始揉眼睛。",
+    }.get(pname, "")
+    d["pending"].append({
+        "id": f"cs{random.randint(1000, 9999)}",
+        "tpl": "grand_session", "type": "大朝会", "icon": "👑",
+        "title": "大朝会 · 百官入朝",
+        "desc": (f"朔日大朝，百官入朝班列如仪——{roster}。{scene}\n"
+                 f"今日要议的奏本已有三匣，满殿都在看太后如何临朝。"),
+        "choices": [
+            {"text": "亲临主裁——撤帘御外朝，当殿裁断", "effects": {"way": "preside"}},
+            {"text": "垂帘静观——如例垂帘，静听后再断", "effects": {"way": "curtain"}},
+            {"text": "称疾不朝——命协理代听", "effects": {"way": "absent"}},
+        ],
+        "period": f"{game_state.year}年{game_state.month}月",
+    })
+    return ["👑 朔日大朝会，百官入朝班列——须定临朝之仪"]
+
+
+def _resolve_court_session(game_state, d, way):
+    """大朝会结算：出席方式 × 新帝性格 × 百官态度。"""
+    emp = d["emperor"]
+    pname = emp.get("personality", "仁厚")
+    pspec = emperor_personality_spec(d)
+    msgs = []
+    ministers = ensure_court_ministers(game_state, d)
+    if way == "preside":
+        applied = _apply_effects(game_state, d, {"权威": 8, "朝堂": -4, "民心": -2, "帝心": -3})
+        _ministers_attitude_shift(d, {"文官党": -4, "武官党": 2, "宗室党": -2})
+        flavor = {"仁厚": "他始终垂手立在你侧，诸事都以你断为准。",
+                  "多疑": "你每裁一事，他的目光就在你脸上停一瞬。",
+                  "暴戾": "有两议他当殿驳了你的口谕，殿上霎时死寂。",
+                  "庸懒": "他乐得躲在你身后，连「请太后圣裁」都说得顺口。"}.get(pname, "")
+        msgs.append(f"👑 你亲御外朝，当殿连裁三匣奏本。{flavor}（权威+8，朝堂-4）")
+    elif way == "curtain":
+        applied = _apply_effects(game_state, d, {"权威": 2, "朝堂": 5, "帝心": 2})
+        _ministers_attitude_shift(d, {"文官党": 3, "武官党": 1, "宗室党": 2})
+        flavor = {"仁厚": "散朝后他绕到帘后，把今日的争论讲给你听。",
+                  "多疑": "帘外争论正酣，帘后能听见他几次压着嗓子与近侍耳语。",
+                  "暴戾": "他今日难得耐性，照你的意思把该驳的驳了。",
+                  "庸懒": "他在御座上险些睡着，全靠你在帘后提词。"}.get(pname, "")
+        msgs.append(f"🎚️ 你如例垂帘，听百官争了半日才落朱批。{flavor}（权威+2，朝堂+5）")
+    else:
+        applied = _apply_effects(game_state, d, {"权威": -6, "朝堂": -3, "帝心": 4})
+        _ministers_attitude_shift(d, {"文官党": -5, "武官党": -4, "宗室党": -4})
+        if pname == "庸懒":
+            applied = _apply_effects(game_state, d, {"帝心": 3})
+            msgs.append("🛌 你称疾不朝。他倒高兴——终于能自己说了算了（帝心+3，权威-6）")
+        else:
+            msgs.append(f"🛌 你称疾不朝，朝会草草而散。散朝时百官交换眼色的样子，你虽不在，也想得到。（权威-6，朝堂-3）")
+    # 势力联动：领袖态度随派系好感、派系好感随出席方式微调
+    favor = {"文官党": 50, "武官党": 50, "宗室党": 50}
+    favor.update(getattr(game_state, "court_faction_favor", None) or {})
+    for m in ministers:
+        favor[m["faction"]] = _clamp(int(favor.get(m["faction"], 50)) +
+                                     (-2 if way == "preside" else 2 if way == "curtain" else -2))
+    game_state.court_faction_favor = favor
+    d["sessions_held"] = int(d.get("sessions_held", 0) or 0) + 1
+    d["last_session"] = {"preside": "亲临", "curtain": "垂帘", "absent": "称疾"}[way]
+    _log(d, f"大朝会：{d['last_session']}")
+    return applied, msgs
+
 
 
 def dowager_period_tick(game_state):
@@ -1267,6 +1393,23 @@ def dowager_period_tick(game_state):
         d["people"] = _clamp(d["people"] - 3)
         msgs.append("🏠 母家势盛，京中已有「一门两国舅」的讥议（民心-3）")
     msgs.extend(generate_meddle_events(game_state))
+    # 百官班次：领袖态度过低的会出班发难
+    ensure_court_ministers(game_state, d)
+    trouble = [m for m in (d.get("ministers") or []) if int(m.get("attitude", 40) or 0) <= 18]
+    if trouble:
+        m = random.choice(trouble)
+        d["minister_power"] = _clamp(int(d.get("minister_power", 45) or 0) + 4)
+        msgs.append(f"🕸️ {m['faction']}{m['name']}出班发难，语多讥刺帘政（其势+4）")
+    # 大朝会：到期开场（称制期在 reign_period_tick 内御门听政）
+    if d["periods"] % COURT_SESSION_INTERVAL == 0 and not d.get("regnant"):
+        msgs.extend(open_court_session(game_state))
+    # 领袖态度向派系好感回归
+    favor = {"文官党": 50, "武官党": 50, "宗室党": 50}
+    favor.update(getattr(game_state, "court_faction_favor", None) or {})
+    for m in d.get("ministers") or []:
+        target = _clamp(int(favor.get(m["faction"], 50) or 50))
+        cur = int(m.get("attitude", 40) or 0)
+        m["attitude"] = _clamp(cur + (1 if cur < target else -1 if cur > target else 0))
     # 生成新奏事
     msgs.extend(generate_court_affairs(game_state))
     return msgs
@@ -1311,6 +1454,11 @@ def dowager_payload(game_state):
         "minister_power": int(d.get("minister_power", 45) or 0),
         "minister": d.get("minister", ""),
         "meddle": list(d.get("meddle") or []),
+        "ministers": [{k: m.get(k) for k in ("name", "faction", "power", "attitude")}
+                      for m in (d.get("ministers") or [])],
+        "sessions_held": int(d.get("sessions_held", 0) or 0),
+        "last_session": d.get("last_session", ""),
+        "session_due": (not d.get("regnant")) and d.get("periods", 0) % COURT_SESSION_INTERVAL == COURT_SESSION_INTERVAL - 1,
         "meddle_log": list(d.get("meddle_log") or [])[:5],
         "consorts": dowager_harem_roster(d),
         "consort_log": list(d.get("consort_log") or [])[:5],

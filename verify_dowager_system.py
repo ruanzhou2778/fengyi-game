@@ -607,5 +607,94 @@ ok("三维恢复", (rd3["stability"], rd3["sovereignty"], rd3["legacy"]) ==
 ok("妃嫔名册恢复", len(rd3.get("consorts") or []) == len(sd3.get("consorts") or []))
 ok("势力恢复", rd3.get("minister") == sd3.get("minister"))
 
+
+# 16. 大朝会与百官班次
+section("16. 大朝会与百官班次")
+g30 = fresh_state()
+D.enter_dowager_mode(g30, heir(age=12))
+d30 = D.get_dowager(g30)
+g30.remaining_actions = 30
+ms30 = D.ensure_court_ministers(g30, d30)
+ok("三领袖入班", len(ms30) == 3, len(ms30))
+ok("三派各一", {m["faction"] for m in ms30} == {"文官党", "武官党", "宗室党"})
+ok("领袖字段", all(k in ms30[0] for k in ("name", "faction", "power", "attitude")), ms30[0])
+# 朝会到期：periods=2 时下一次 tick（periods→3）触发
+d30["periods"] = 2
+with patch("dowager_system.random.random", return_value=0.99):
+    msgs30 = D.dowager_period_tick(g30)
+ok("大朝会开场", any(p.get("tpl") == "grand_session" for p in d30["pending"]), msgs30)
+sess = next(p for p in d30["pending"] if p.get("tpl") == "grand_session")
+ok("三式出席", {c["effects"]["way"] for c in sess["choices"]} == {"preside", "curtain", "absent"}, sess["choices"])
+ok("描述含百官与新帝", "百官" in sess["desc"] and "帘" in sess["desc"], sess["desc"][:60])
+# 亲临主裁
+auth0, court0, aff0 = d30["authority"], d30["court"], d30["emperor"]["affection"]
+ok_, narr30 = D.respond_court_affair(g30, sess["id"], 0)
+ok("亲临裁决成功", ok_ and "亲临" in narr30, narr30)
+ok("亲临权威+8", d30["authority"] == auth0 + 8, (auth0, d30["authority"]))
+ok("亲临帝心-3", d30["emperor"]["affection"] == aff0 - 3, (aff0, d30["emperor"]["affection"]))
+ok("记录出席", d30["last_session"] == "亲临" and d30["sessions_held"] == 1, d30["last_session"])
+# 垂帘静观：朝堂+
+D.dowager_period_tick(g30)  # 推进，下个朝会期再开
+d30["periods"] = 5
+d30["pending"] = []
+with patch("dowager_system.random.random", return_value=0.99):
+    D.dowager_period_tick(g30)
+sess2 = next((p for p in d30["pending"] if p.get("tpl") == "grand_session"), None)
+ok("再次朝会如期", sess2 is not None)
+court_b = d30["court"]
+ok_, _ = D.respond_court_affair(g30, sess2["id"], 1)
+ok("垂帘朝堂+5", d30["court"] == court_b + 5, (court_b, d30["court"]))
+ok("记录垂帘", d30["last_session"] == "垂帘")
+# 称疾：权威-
+D.dowager_period_tick(g30)
+d30["periods"] = 8
+d30["pending"] = []
+with patch("dowager_system.random.random", return_value=0.99):
+    D.dowager_period_tick(g30)
+sess3 = next((p for p in d30["pending"] if p.get("tpl") == "grand_session"), None)
+auth_c = d30["authority"]
+ok_, _ = D.respond_court_affair(g30, sess3["id"], 2)
+ok("称疾权威-6", d30["authority"] == auth_c - 6, (auth_c, d30["authority"]))
+# 性格化描述（暴戾帝在朝上）
+g31 = fresh_state()
+D.enter_dowager_mode(g31, heir(age=12, tags=["尚武"]))
+d31 = D.get_dowager(g31)
+d31["periods"] = 2
+with patch("dowager_system.random.random", return_value=0.99):
+    D.dowager_period_tick(g31)
+sess31 = next((p for p in d31["pending"] if p.get("tpl") == "grand_session"), None)
+ok("暴戾帝朝上描述", "斥退" in (sess31 or {}).get("desc", ""), sess31["desc"][:60])
+ok("暴戾帝性格入档", d31["emperor"]["personality"] == "暴戾")
+# 领袖态度低 → 发难
+g32 = fresh_state()
+D.enter_dowager_mode(g32, heir(age=12))
+d32 = D.get_dowager(g32)
+D.ensure_court_ministers(g32, d32)
+for m in d32["ministers"]:
+    m["attitude"] = 15
+mp_b = d32["minister_power"]
+with patch("dowager_system.random.random", return_value=0.99):
+    msgs32 = D.dowager_period_tick(g32)
+ok("领袖发难其势+4", d32["minister_power"] >= mp_b + 4, (mp_b, d32["minister_power"]))
+ok("payload 含百官", all(k in D.dowager_payload(g32) for k in ("ministers", "sessions_held", "last_session", "session_due")))
+
+# 17. 称制期大朝会：亲临是天职，不出选择
+g33 = fresh_state()
+D.enter_dowager_mode(g33, heir(age=12))
+d33 = D.get_dowager(g33)
+d33["authority"], d33["court"] = 95, 90
+D.return_power(g33, "regnant")
+# 称制期第 3 旬御门听政
+so0 = d33["sovereignty"]
+lg0 = d33["legacy"]
+msgs33 = []
+for _ in range(3):
+    with patch("dowager_system.random.random", return_value=0.99):
+        msgs33 = D.dowager_period_tick(g33)
+ok("称制期御门听政", any("御门听政" in x for x in msgs33), msgs33)
+ok("称制期威权+", d33["sovereignty"] > so0, (so0, d33["sovereignty"]))
+ok("称制期青史+", d33["legacy"] > lg0, (lg0, d33["legacy"]))
+ok("称制期不出席待裁", not any(p.get("tpl") == "grand_session" for p in d33["pending"]))
+
 print(f"\n太后垂帘系统验证: {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
