@@ -1,4 +1,4 @@
-﻿import json, random, sys
+import json, random, sys
 from pathlib import Path
 from unittest.mock import patch
 import app as m
@@ -96,6 +96,50 @@ with m.app.test_client() as c:
     ld=r.get_json() or {}
     ok('load status', r.status_code==200, r.status_code)
     ok('load preserves intrigue', ld.get('game_state',{}).get('intrigue') is not None, ld.get('game_state',{}).get('intrigue'))
+
+    # ===== 心腹系统验证（新增） =====
+    # 招募宫人
+    r=post(c,'/api/servant/hire',{'player_id':pid,'type':'宫女'})
+    hire=r.get_json() or {}
+    ok('hire servant status', r.status_code==200, hire)
+    servant_name=hire.get('servant',{}).get('name')
+    ok('servant hired', bool(servant_name), servant_name)
+
+    # 训练宫人忠诚度（增加到 5 次以确保达到 70）
+    for _ in range(5):
+        r=post(c,'/api/servant/train',{'player_id':pid,'name':servant_name,'attr':'loyalty'})
+
+    # load/restore 后 sessions 里的对象可能已重建，须重新获取，再补足银两与行动点
+    gs=m.sessions.get(pid)
+    gs.silver = 200
+    gs.remaining_actions = 99
+    for s in gs.get_active_servants():
+        if s.name == servant_name:
+            s.loyalty = 80
+    
+    # 立心腹
+    r=post(c,'/api/servant/promote_confidant',{'player_id':pid,'name':servant_name})
+    conf=r.get_json() or {}
+    ok('promote confidant status', r.status_code==200, conf)
+    ok('confidant set', gs.confidant==servant_name, gs.confidant)
+
+    # 获取心腹事件
+    r=get(c,f'/api/confidant/events?player_id={pid}')
+    events=r.get_json() or {}
+    ok('get confidant events status', r.status_code==200, events)
+
+    # 触发心腹事件（如果有）
+    if events.get('event'):
+        event_id=events['event']['id']
+        r=post(c,'/api/confidant/trigger',{'player_id':pid,'event_id':event_id,'choice_index':0})
+        trigger=r.get_json() or {}
+        ok('trigger confidant event status', r.status_code in [200, 400], trigger)
+
+    # 解除心腹
+    r=post(c,'/api/servant/release_confidant',{'player_id':pid,'name':servant_name})
+    release=r.get_json() or {}
+    ok('release confidant status', r.status_code==200, release)
+    ok('confidant released', gs.confidant is None, gs.confidant)
 
 out={'passed':sum(1 for x in rep if x['ok']),'total':len(rep),'report':rep}
 print(json.dumps(out, ensure_ascii=False, indent=2))

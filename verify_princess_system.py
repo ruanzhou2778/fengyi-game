@@ -171,11 +171,12 @@ with m.app.test_client() as client:
     ck('及笄生成 preference', baby.get('preference') in m.PRINCESS_PREFERENCES, baby.get('preference'))
 
     # ---------- 13. 持久化：存读档 ----------
+    favor_expected = normalize_court_faction_favor(gs.court_faction_favor)  # 存档前重取（省亲 tick 会按驸马派系加声望）
     saved = gs.to_dict()
     ck('to_dict 含 court_faction_favor', 'court_faction_favor' in saved, 'court_faction_favor' in saved)
     gs2 = GameState.from_save_data({'game_state': saved})
-    ck('读档恢复朝堂好感', normalize_court_faction_favor(gs2.court_faction_favor) == favor_after,
-       (gs2.court_faction_favor, favor_after))
+    ck('读档恢复朝堂好感', normalize_court_faction_favor(gs2.court_faction_favor) == favor_expected,
+       (gs2.court_faction_favor, favor_expected))
     reloaded = next((c for c in gs2.children if c.get('uid') == puid), None)
     ck('读档恢复公主婚姻状态', reloaded and reloaded.get('marriage_status') == '已嫁',
        reloaded and reloaded.get('marriage_status'))

@@ -43,6 +43,31 @@ from names import (
     generate_servant_name, extract_surname, NPC_SURNAMES,
     CHILD_GIVEN_NAME_CATEGORIES, CHILD_GIVEN_CHARS, is_valid_given_char,
 )
+from confidant_events import get_random_confidant_event, trigger_confidant_event, pick_confidant_target, CONFIDANT_EVENTS
+from recommend_system import (
+    METHODS, RECOMMEND_PRIVATE_COST, RECOMMEND_RETRY_COST, NPC_INTERCEPT_COST,
+    compute_rate, player_recommend, attach_npc_recommendations,
+    resolve_npc_recommendations, interfere_npc_rec, remedy as recommend_remedy,
+    tick_recommendations, sync_edition, recommend_payload, eligibility_blockers,
+)
+from royal_clan import (
+    seed_royal_clan, get_royal_clan, process_royal_clan_period,
+    royal_overview_payload, royal_male_action, royal_female_action,
+    respond_royal_pending, ACTIONS_MALE, ACTIONS_FEMALE,
+)
+from cold_palace import (
+    get_cold_palace, is_player_imprisoned, admit_npc as cold_admit_npc,
+    enter_cold_palace, player_self_action, player_release_attempt,
+    interact_inmate, cold_manage, cold_period_tick, cold_overview_payload,
+    SELF_ACTIONS as COLD_SELF_ACTIONS, RELEASE_METHODS as COLD_RELEASE_METHODS,
+)
+from affair_system import (
+    TARGET_TYPES, DEVELOP_WAYS, MITIGATIONS, EXPOSE_OPS,
+    get_affairs, develop_affair, use_affair_perk, mitigate_risk,
+    probe_npc_affair, dispose_npc_affair, swap_eligibility,
+    swap_start_plan, swap_execute, swap_aftercare, swap_case_respond,
+    process_affair_period, affair_overview_payload,
+)
 from family_backgrounds import (
     generate_background_story,
     generate_concubine_identity,
@@ -58,6 +83,10 @@ from family_backgrounds import (
     default_court_state,
     build_clan,
     CLAN_FACTIONS,
+    process_clan_period,
+    generate_family_events,
+    apply_family_choice,
+    ensure_clans,
 )
 from names import random_given, random_surname, EMPEROR_GIVEN, EMPEROR_SURNAMES
 from player_traits import apply_trait_bonuses, get_trait_catalog, suggest_traits
@@ -76,7 +105,7 @@ from endings import (
 from openai import OpenAI
 import httpx
 from urllib.parse import urlparse
-from ai_service import generate_period_events, _strip_reasoning
+from ai_service import generate_period_events, _strip_reasoning, get_openai_client
 
 app = Flask(__name__)
 
@@ -1248,6 +1277,8 @@ def resolve_servant_assist(game_state, servant_names, conflict_type=None):
         bonus += type_bonus + s.skill * 0.12 + s.loyalty * 0.08
         if s.name == getattr(game_state, "confidant", None):
             bonus += CONFIDANT_ASSIST_EXTRA
+            if "知人善任" in getattr(game_state, "traits", []):
+                bonus += 5.0  # 知人善任：心腹协助加成+5
     return bonus, used
 
 def apply_servant_assist_aftermath(used_servants, player_won):
@@ -2117,6 +2148,7 @@ def generate_npc(is_queen=False):
         "pregnancy_bonus": {"宠爱": 0, "威望": 0, "健康": 0},
         "family_background": family,
         "family_meta": family_meta,
+        "clan": generate_npc_clan(name, rank, family_meta),
         "nobletitle": None,
         "压力": random.randint(8, 28) if not is_queen else random.randint(5, 18),
     }
@@ -2324,6 +2356,60 @@ def add_adoption_history(child, action, from_name=None, to_name=None, note=None,
     }
     history.insert(0, entry)
     child["adoption_history"] = history[:8]
+
+
+def validate_ownership_transfer(game_state, child, my_rank_idx, is_orphan=False):
+    """过继/重华宫亲养共用的资格校验（模块三统一归属管理）。
+
+    返回错误文案；None 表示全部通过。生母意愿、费用与关系反噬两条链路政策不同，留在各自流程内。
+    """
+    child_name = child.get("name", "未命名")
+    gender = child.get("gender", "皇子")
+    age = int(child.get("age", 0) or 0)
+    if age > ADOPT_MAX_AGE:
+        return f"子嗣已{age}岁，年长不宜再过继"
+    if count_living_children(game_state.children) >= ADOPT_MAX_CHILDREN:
+        return f"后宫子嗣已满（上限{ADOPT_MAX_CHILDREN}人），不宜再收养"
+    if child.get("adopted_count", 0) >= ADOPT_MAX_TRANSFERS:
+        return "此子已被过继多次，宗人府不许再行转继"
+    if my_rank_idx < RANK_LEVELS.get(ADOPT_MIN_RANK, 0):
+        return f"须{ADOPT_MIN_RANK}及以上位份方可收养子嗣"
+    if gender == "皇子":
+        if my_rank_idx < RANK_LEVELS.get(ADOPT_PRINCE_MIN_RANK, 0):
+            return f"皇嗣尊贵，须{ADOPT_PRINCE_MIN_RANK}及以上位份方可收养"
+        if game_state.attributes.get("宠爱", 0) < ADOPT_PRINCE_EMPEROR_FAVOR:
+            return f"圣宠不足（需宠爱≥{ADOPT_PRINCE_EMPEROR_FAVOR}），皇帝不忍皇嗣旁落，暂不允许收养"
+        approved, note = should_use_emperor_approval(game_state, child, "in")
+        if not approved:
+            return f"奏请过继皇嗣{child_name}，{note}，只得作罢"
+    return None
+
+
+def apply_child_ownership_transfer(game_state, child, *, source_npc=None, source_index=-1,
+                                   mode_label, cost=0, cost_note="", from_name="",
+                                   adjust_affection=True):
+    """过继/重华宫亲养共用的归属变更机械操作（模块三统一归属管理）。
+
+    扣费、从原生母名下移除、改写 adopted 标记与档案、入玩家子嗣列表、记入过继史。
+    """
+    if cost:
+        game_state.silver -= cost
+    if isinstance(source_npc, dict) and isinstance(source_index, int) and \
+            0 <= source_index < len(source_npc.get("children", []) or []):
+        source_npc["children"].pop(source_index)
+    age = int(child.get("age", 0) or 0)
+    child["adopted"] = True
+    child["adopted_count"] = int(child.get("adopted_count", 0) or 0) + 1
+    child["birth_mother"] = child.get("birth_mother") or from_name
+    child["adoptive_mother"] = game_state.name
+    child["adopted_age"] = age
+    child["adopted_at"] = f"建元{game_state.year}年{game_state.month}月"
+    if adjust_affection:
+        child["affection"] = max(10, child.get("affection", 30) - 15) if age >= 1 else random.randint(30, 50)
+    child["mood"] = "平静"
+    game_state.children.append(child)
+    game_state.has_children = True
+    add_adoption_history(child, mode_label, from_name, game_state.name, cost_note, game_state.day)
 
 
 def should_use_emperor_approval(game_state, child, direction):
@@ -3345,6 +3431,13 @@ def process_npc_relationships(game_state):
                     big.append(f"💛 {a}与{b}月下结拜，情同姐妹")
                 elif s <= -40 and random.random() < 0.10:
                     modify_npc_rel(game_state, a, b, -random.randint(5, 15), "旧怨再激，形同陌路", period, notify=False)
+        # 重大关系事件同步为情报流言，统一呈现在情报面板（display-only：目标"后宫"不触发属性损伤）
+        for rel_msg in big[:2]:
+            _append_intrigue_rumor(game_state, {
+                "target": "后宫", "type": "npc", "severity": 2,
+                "turns_left": random.randint(2, 4),
+                "text": rel_msg, "source": "relationship_net",
+            })
         msgs.extend(big[:2])
 
     # ⑤ 同步到玩家可见的 rivalries/alliances
@@ -4157,6 +4250,19 @@ def process_princess_marriage_events(game_state):
             income = int(mansion.get("income", 0) or 0)
             if income:
                 game_state.silver = getattr(game_state, "silver", 0) + income
+        # 驸马家族每旬为玩家贡献朝堂声望（幅度随家族势力），记忆按月节流防刷屏
+        consort = child.get("consort") or {}
+        faction = consort.get("faction")
+        if faction and faction in normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)):
+            base = max(1, int(int(consort.get("family_score", 50) or 50) / 30))
+            gain = random.randint(base, base + 2)
+            favor = normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None))
+            favor[faction] = min(100, int(favor.get(faction, 50) or 0) + gain)
+            game_state.court_faction_favor = favor
+            note_month = f"{game_state.year}-{game_state.month}"
+            if child.get("last_favor_note_month") != note_month:
+                child["last_favor_note_month"] = note_month
+                game_state.add_memory(f"📈 {faction}因驸马{consort.get('name', '')}之故，朝堂声望+{gain}")
         last = child.get("last_visit_period")
         if last != stamp and random.random() < 0.28 and child.get("marriage_status") == "已嫁":
             child["last_visit_period"] = stamp
@@ -4187,7 +4293,68 @@ def _princess_visit_event(game_state, child):
         msg = f"🌸 {name}偕驸马回宫省亲，举止雍容，母女团聚其乐融融（亲密+{gain}）"
     add_child_event(child, msg)
     child.setdefault("marriage_events", []).insert(0, msg)
+    # 省亲时小概率带回外孙/外孙女，归入玩家名下代为抚养（视为养孙）
+    if random.random() < 0.08:
+        grand_gender = random.choice(["皇子", "公主"])
+        grand_name = new_child_name(grand_gender, game_state)
+        grand_child = create_newborn_child(grand_gender, grand_name, game_state, mother_name=name)
+        grand_child["adopted"] = True
+        grand_child["adoptive_mother"] = game_state.name
+        grand_child["adopted_age"] = 0
+        grand_child["adopted_at"] = f"建元{game_state.year}年{game_state.month}月"
+        grand_child["mood"] = "开心"
+        grand_child["affection"] = 50
+        game_state.children.append(grand_child)
+        game_state.has_children = True
+        extra_msg = f" 👶 {name}省亲时带回外孙{grand_name}，由你代为抚养。"
+        msg += extra_msg
+        add_child_event(grand_child, "随母省亲，归入外祖母膝下")
+        game_state.add_memory(f"👶 {name}省亲带回{grand_gender}{grand_name}，归你膝下代养")
     return msg
+
+
+# ---- 王府/东宫后代折叠面板（设计稿 v1.0） ----
+def ensure_descendant_fields(game_state, gc, mansion_name=""):
+    """孙辈（皇嗣婚后所出）字段补全：uid / 五维 / 安置状态。五维首次展示时生成后保持稳定。"""
+    if not gc.get("uid"):
+        try:
+            seq = int(getattr(game_state, "child_uid_seq", 1) or 1)
+        except (TypeError, ValueError):
+            seq = 1
+        gc["uid"] = f"g{seq}"
+        game_state.child_uid_seq = seq + 1
+    for attr, lo, hi in (("文治", 20, 70), ("武略", 15, 65), ("体魄", 40, 85),
+                         ("心性", 20, 70), ("仪容", 30, 80)):
+        if attr not in gc:
+            gc[attr] = random.randint(lo, hi)
+    if "安置状态" not in gc:
+        gc["安置状态"] = "已入重华宫" if gc.get("in_chonghua") else "在府"
+    if not gc.get("安置地"):
+        gc["安置地"] = "重华宫" if gc.get("in_chonghua") else (mansion_name or "府邸")
+    return gc
+
+
+def get_descendants(game_state, child):
+    """皇嗣的后代 = 其婚配对象名下的 offspring（单一数据源，避免与 GameState.children 双轨）。"""
+    consort = child.get("consort") or {}
+    return [g for g in (consort.get("offspring") or [])
+            if isinstance(g, dict) and g.get("alive", True)]
+
+
+def mansion_descendants_payload(game_state, child):
+    mansion = child.get("mansion") or {}
+    out = []
+    for gc in get_descendants(game_state, child):
+        ensure_descendant_fields(game_state, gc, mansion.get("name", ""))
+        out.append({
+            "uid": gc.get("uid"), "name": gc.get("name", "未命名"),
+            "gender": gc.get("relation", "皇孙"),
+            "age": round(float(gc.get("age", 0) or 0)),
+            "stats": {k: gc.get(k) for k in ("文治", "武略", "体魄", "心性", "仪容")},
+            "安置状态": gc.get("安置状态", "在府"), "安置地": gc.get("安置地", ""),
+            "father": gc.get("father", ""), "spouse": gc.get("spouse", ""),
+        })
+    return out
 
 
 def _mansion_random_event(game_state, child):
@@ -5995,7 +6162,7 @@ def _guard_inner_palace_routes():
 
 
 def guard_action(game_state):
-    """行动前统一守卫：先查终局，再扣行动点。
+    """行动前统一守卫：先查终局与冷宫囚禁，再扣行动点。
 
     返回 (ok, error_response)。所有消耗行动点的路由都经过这里，
     避免结局判定散落在各个 route 里出现遗漏。
@@ -6003,6 +6170,8 @@ def guard_action(game_state):
     ensure_ending_fields(game_state)
     if is_game_over(game_state):
         return False, game_over_response(game_state)
+    if is_player_imprisoned(game_state):
+        return False, (jsonify({"error": "你身陷冷宫，宫里的门为你关上了（可从冷宫面板寻求出路）"}), 423)
     can_act, remaining = check_and_consume_action(game_state)
     if not can_act:
         return False, (jsonify({"error": f"行动点不足，剩余 {remaining} 点"}), 429)
@@ -6510,14 +6679,6 @@ def inner_palace_project_upgrade():
 # ============================================================
 #  AI服务
 # ============================================================
-def get_openai_client(api_key=None, api_base=None):
-    if api_key and api_base and api_key.strip() and api_base.strip():
-        http_client = httpx.Client(
-            timeout=httpx.Timeout(15.0, connect=5.0)
-        )
-        return OpenAI(api_key=api_key, base_url=api_base, http_client=http_client)
-    return None
-
 def mask_api_key(key):
     if not key:
         return "(empty)"
@@ -7048,6 +7209,8 @@ def promote_confidant():
     game_state.silver -= CONFIDANT_PROMOTE_COST
     game_state.confidant = name
     loyalty_gain = random.randint(3, 8)
+    if "忠心耿耿" in getattr(game_state, "traits", []):
+        loyalty_gain += 5  # 忠心耿耿：立心腹时忠诚额外+5
     target.loyalty = min(100, target.loyalty + loyalty_gain)
     game_state.add_memory(f"立{name}为心腹（忠诚{target.loyalty}）")
     remember_confidant_event(game_state, f"{name}被立为心腹，忠诚升至{target.loyalty}")
@@ -7069,6 +7232,62 @@ def release_confidant():
     remember_confidant_event(game_state, f"{name}被解除心腹之职")
     game_state.add_memory(f"解除{name}心腹之职")
     return jsonify({"success": True, "message": f"你收回了对{name}的信任，{name}不再是你的心腹。", "confidant": confidant_payload(game_state)})
+
+@app.route('/api/confidant/events', methods=['GET'])
+def get_confidant_events():
+    """获取当前可触发的心腹事件"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    
+    event = get_random_confidant_event(game_state)
+    if not event:
+        return jsonify({"event": None})
+    
+    # 填充事件描述中的变量
+    desc = event["desc"]
+    if game_state.confidant:
+        desc = desc.replace("{name}", game_state.confidant)
+    target = pick_confidant_target(game_state)
+    desc = desc.replace("{target}", target)
+    
+    return jsonify({
+        "event": {
+            "id": event["id"],
+            "name": event["name"],
+            "desc": desc,
+            "choices": [{"text": c["text"], "cost": c.get("cost", {})} for c in event["choices"]],
+            "target": target
+        }
+    })
+
+@app.route('/api/confidant/trigger', methods=['POST'])
+def trigger_confidant_event_api():
+    """触发心腹事件"""
+    data = request.get_json()
+    player_id = data.get('player_id')
+    event_id = data.get('event_id')
+    choice_index = data.get('choice_index', 0)
+    
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    
+    result = trigger_confidant_event(game_state, event_id, choice_index, target=data.get('target') or None)
+    
+    if "error" in result:
+        return jsonify(result), 400
+    
+    return jsonify({
+        "success": True,
+        "narration": result.get("narration", ""),
+        "effect": result.get("effect", {}),
+        "silver": game_state.silver,
+        "remaining_actions": game_state.remaining_actions,
+        "confidant": confidant_payload(game_state)
+    })
+
 
 @app.route('/api/scenarios', methods=['GET'])
 def get_scenarios():
@@ -7360,6 +7579,33 @@ def start_draft(game_state, scale="大选"):
         "player_influenced": None,
         "queen_endorse_pending": queen_endorse_pending,
     }
+    # 妃嫔举荐：届次重置 + NPC 举荐竞争（待处理，留一旬干扰窗口）
+    sync_edition(game_state)
+    attach_npc_recommendations(game_state, msgs)
+    # 宗室女入宫候选：玩家推荐的宗室女注入本届名册（§8 选秀联动）
+    rc = get_royal_clan(game_state)
+    for fname in list(rc.get("draft_inject", [])):
+        f = rc["females"].get(fname)
+        if not f or f.get("injected"):
+            continue
+        f["injected"] = True
+        f["标记"] = list(set((f.get("标记") or []) + ["已入候选"]))
+        cand = generate_npc(is_queen=False)
+        while any(c["name"] == cand["name"] for c in candidates) or cand["name"] in game_state.npcs:
+            cand = generate_npc(is_queen=False)
+        cand["name"] = fname
+        cand["icon"] = "🏵️"
+        cand["rank"] = "秀女"
+        cand["royal_father"] = f.get("父系", "")
+        cand["family_background"] = f.get("身份") or "宗室之女"
+        if isinstance(cand.get("family_meta"), dict):
+            cand["family_meta"]["surname"] = fname[:1]
+        cand["clan"] = generate_npc_clan(fname, "秀女", cand.get("family_meta"))
+        cand["endorsed_by"] = []
+        cand["influenced"] = False
+        candidates.append(cand)
+        msgs.append(f"🏵️ 宗人府呈报：{fname}奉旨入册候选")
+    rc["draft_inject"] = [n for n in rc.get("draft_inject", []) if not rc["females"].get(n, {}).get("injected")]
     names_desc = "、".join(f"{c['icon']}{c['name']}（{c['rank']}，{c.get('family_background', '出身不详')}）" for c in candidates)
     msgs.append(f"📜 {scale}启程：礼部呈上采选名册——{names_desc}。")
     endorsed_t = [c for c in candidates if "太后" in c["endorsed_by"]]
@@ -7387,6 +7633,9 @@ def draft_panel_payload(game_state):
             "attributes": {k: c.get("attributes", {}).get(k, 0) for k in ("容貌", "才情", "心计", "健康")},
             "endorsed_by": c.get("endorsed_by", []),
             "influenced": bool(c.get("influenced")),
+            "npc_rec": c.get("npc_rec_pending"),
+            "rec_state": ("failed" if c.get("rec_failed") else ("ok" if c.get("guaranteed_admit") else None)),
+            "impression_bonus": int(c.get("impression_bonus", 0) or 0),
         })
     can_influence = (d.get("player_influenced") is None
                      and RANK_LEVELS.get(game_state.rank.name, 0) >= RANK_LEVELS.get("贵人", 6))
@@ -7398,6 +7647,7 @@ def draft_panel_payload(game_state):
         "can_influence": can_influence,
         "can_influence_cost": DRAFT_INFLUENCE_COST,
         "is_player_queen": player_is_queen,
+        "recommend": recommend_payload(game_state),
     }
 
 
@@ -7431,45 +7681,75 @@ def process_draft(game_state):
         # 中宫虚悬：皇帝份额扩大
         return 0.60 * s_emp + 0.40 * s_dow + bonus
 
-    ranked = sorted(candidates, key=total_score, reverse=True)
+    # 妃嫔举荐：先结算 NPC 举荐竞争（成功者保送入宫）
+    rec_msgs = resolve_npc_recommendations(game_state)
+
+    eligible = [c for c in candidates if not c.get("rec_failed")]
+    ranked = sorted(eligible, key=total_score, reverse=True)
     admit_n = min(random.randint(admits_lo, admits_hi), len(ranked))
-    admitted = ranked[:admit_n]
+    # 举荐保送者必入选（§4.1/§6.2），其余按合议分数取足名额
+    admitted = [c for c in ranked if c.get("guaranteed_admit")]
+    for c in ranked:
+        if len(admitted) >= admit_n:
+            break
+        if c not in admitted:
+            admitted.append(c)
 
     new_names = []
     for npc in admitted:
         npc.pop("endorsed_by", None)
         npc.pop("influenced", None)
-        # 皇帝拟定大致位份区间，皇后最终定夺具体位份
-        emp_score = _draft_score_emperor(game_state, npc)
-        if has_queen:
-            # 皇后在位：皇帝只给区间（答应~贵人 / 常在~嫔），皇后拍板
-            if emp_score >= 70:
-                pool = ["贵人", "常在", "答应"]
-            elif emp_score >= 55:
-                pool = ["常在", "答应", "官女子"]
-            else:
-                pool = ["答应", "官女子", "更衣"]
+        npc.pop("npc_rec_pending", None)
+        # 举荐保送：由举荐档位决定位份池；否则皇帝拟定区间，皇后最终定夺
+        pool = npc.pop("guaranteed_pool", None)
+        if pool:
             npc["rank"] = random.choice(pool)
-            npc["_rank_pending_queen"] = True
         else:
-            # 中宫虚悬：皇帝直接定具体位份
-            if emp_score >= 75:
-                npc["rank"] = random.choice(["贵人", "嫔"])
-            elif emp_score >= 60:
-                npc["rank"] = random.choice(["常在", "贵人"])
-            elif emp_score >= 45:
-                npc["rank"] = random.choice(["答应", "常在"])
+            emp_score = _draft_score_emperor(game_state, npc)
+            if has_queen:
+                # 皇后在位：皇帝只给区间（答应~贵人 / 常在~嫔），皇后拍板
+                if emp_score >= 70:
+                    pool = ["贵人", "常在", "答应"]
+                elif emp_score >= 55:
+                    pool = ["常在", "答应", "官女子"]
+                else:
+                    pool = ["答应", "官女子", "更衣"]
+                npc["rank"] = random.choice(pool)
+                npc["_rank_pending_queen"] = True
             else:
-                npc["rank"] = random.choice(["官女子", "答应"])
+                # 中宫虚悬：皇帝直接定具体位份
+                if emp_score >= 75:
+                    npc["rank"] = random.choice(["贵人", "嫔"])
+                elif emp_score >= 60:
+                    npc["rank"] = random.choice(["常在", "贵人"])
+                elif emp_score >= 45:
+                    npc["rank"] = random.choice(["答应", "常在"])
+                else:
+                    npc["rank"] = random.choice(["官女子", "答应"])
         game_state.npcs[npc["name"]] = npc
-        game_state.relationships[npc["name"]] = {"好感": random.randint(-10, 30), "印象": "陌生", "互动次数": 0}
+        # 举荐的「知遇之恩」：入宫时折入初始好感（§5.3）
+        favor_offset = int(npc.pop("favor_offset", 0) or 0)
+        if npc.pop("virtue_tag", None) and isinstance(npc.get("clan"), dict):
+            npc["clan"].setdefault("标记", []).append("贤名")
+        game_state.relationships[npc["name"]] = {
+            "好感": max(-100, min(100, random.randint(-10, 30) + favor_offset)),
+            "印象": "知遇" if favor_offset > 0 else "陌生", "互动次数": 0}
         new_names.append(f"{npc['icon']}{npc['name']}（{npc['rank']}）")
+    # 宗室女中选入宫：登记回宗室名册（两翼联动 §6）
+    rc = get_royal_clan(game_state)
+    for npc in admitted:
+        if npc.get("royal_father") or npc["name"] in rc["females"]:
+            f = rc["females"].get(npc["name"])
+            if f:
+                f["标记"] = list(set((f.get("标记") or []) + ["已入宫"]))
+                f["婚配状态"] = "已嫁"
     new_concubine = {"names": new_names, "is_daxuan": d.get("scale") == "大选"} if new_names else None
 
     joiner = "、皇后" if has_queen else ""
+    msgs = list(rec_msgs)
     if new_names:
-        msgs = [f"🎊 {d.get('scale', '大选')}放榜：皇帝、太后{joiner}三宫合议，{'、'.join(new_names)} 入宫！"]
-        rejected = [c["name"] for c in ranked[admit_n:]]
+        msgs.append(f"🎊 {d.get('scale', '大选')}放榜：皇帝、太后{joiner}三宫合议，{'、'.join(new_names)} 入宫！")
+        rejected = [c["name"] for c in ranked if c not in admitted]
         if rejected:
             msgs.append(f"🍂 落选归家：{'、'.join(rejected)}。")
     else:
@@ -7531,7 +7811,111 @@ def draft_action():
     return jsonify({"error": "无效行为"}), 400
 
 
+# ---- 妃嫔举荐秀女（RECOMMEND_SYSTEM.md） ----
 
+_RECOMMEND_NARRATION = {
+    ("成功", "圣心大悦"): "皇帝听闻你的举荐，龙颜大悦：「爱妃眼光果真不俗，朕明日便召她殿选！」",
+    ("成功", "欣然应允"): "皇帝沉吟片刻，笑道：「既是爱妃举荐，朕便见一见吧。」",
+    ("成功", "勉强同意"): "皇帝略一颔首：「姑且留牌子吧，成不成，看她自己的造化。」",
+    ("失败", "沉吟不语"): "皇帝听完，久久沉吟不语，只淡淡「嗯」了一声。看来此事悬了。",
+    ("失败", "龙颜不悦"): "皇帝眉头紧锁：「此事朕自有分寸，不必爱妃多言。」你屏退而出，心下惴惴。",
+}
+
+
+@app.route('/api/draft/recommend', methods=['GET'])
+def draft_recommend_preview():
+    """举荐预览：资格校验 + 三种方式的成功率（§5.2）。"""
+    player_id = request.args.get('player_id')
+    candidate = request.args.get('candidate')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    d = getattr(game_state, "draft", None)
+    cand = next((c for c in (d.get("candidates", []) if isinstance(d, dict) else [])
+                 if c.get("name") == candidate), None) if candidate else None
+    blockers = eligibility_blockers(game_state, cand)
+    methods = []
+    if not blockers:
+        from recommend_system import _rank_index
+        for key, m in METHODS.items():
+            rank_ok = _rank_index(game_state.rank.name) >= _rank_index(m["min_rank"])
+            methods.append({
+                "key": key, "name": m["name"], "icon": m["icon"], "desc": m["desc"],
+                "cost": f'行动点{m["actions"]}' + (f'·银两{m["silver"]}' if m["silver"] else ''),
+                "rate": compute_rate(game_state, cand, key) if rank_ok else None,
+                "locked": None if rank_ok else f"需位份≥{m['min_rank']}",
+            })
+    return jsonify({"eligible": not blockers, "blockers": blockers, "methods": methods,
+                    "competition": bool(cand and cand.get("npc_rec_pending")),
+                    "impression_bonus": int(cand.get("impression_bonus", 0) or 0) if cand else 0})
+
+
+@app.route('/api/draft/recommend', methods=['POST'])
+def draft_recommend_action():
+    """执行举荐（§四/§4.1）：掷骰定成败，档位定效果。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    result = player_recommend(game_state, data.get('candidate'), data.get('method'),
+                              retry=bool(data.get('retry')))
+    if "error" in result:
+        return jsonify(result), 400
+    tier = result["tier"]
+    narration = _RECOMMEND_NARRATION.get(("成功" if result["success"] else "失败", tier), "")
+    parts = [f"{k}{'+' if v > 0 else ''}{v}" for k, v in result["effects"].items() if v]
+    if parts:
+        narration += "（" + "、".join(parts) + "）"
+    if result["success"]:
+        narration += f"✅ {result['candidate']}已蒙圣意属意，放榜时自会留用册封。"
+    game_state.add_memory(f"举荐结果：{tier}")
+    return jsonify({"success": True, **result, "narration": narration,
+                    "draft_panel": draft_panel_payload(game_state),
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
+@app.route('/api/draft/interfere', methods=['POST'])
+def draft_interfere():
+    """干扰 NPC 举荐（§6.3）：进谗言 / 截留举荐信 / 私下警告。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not ok:
+        return err
+    result = interfere_npc_rec(game_state, data.get('npc'), data.get('way'))
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify({"success": True, **result,
+                    "draft_panel": draft_panel_payload(game_state),
+                    "silver": game_state.silver,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
+@app.route('/api/draft/remedy', methods=['POST'])
+def draft_remedy():
+    """举荐补救（§8.3）：retry=再次举荐 / meet=安排偶遇 / dowager=请太后说情。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    kind = data.get('kind')
+    result = recommend_remedy(game_state, kind, data.get('candidate'))
+    if "error" in result:
+        return jsonify(result), 400
+    resp = {"success": True, **result}
+    if kind == "retry":
+        resp.update({"draft_panel": draft_panel_payload(game_state),
+                     "silver": game_state.silver,
+                     "attributes": game_state.attributes,
+                     "remaining_actions": game_state.remaining_actions,
+                     "max_actions": game_state.max_actions})
+    return jsonify(resp)
 
 
 @app.route('/api/emperor/advise_draft', methods=['POST'])
@@ -7838,7 +8222,10 @@ def next_period():
     cf = confidant_servant(game_state)
     if cf:
         cf.loyalty = min(100, cf.loyalty + random.randint(1, 3))
-        if cf.loyalty < CONFIDANT_BETRAY_LOYALTY and random.random() < 0.25:
+        betray_chance = 0.25
+        if "恩威并施" in getattr(game_state, "traits", []):
+            betray_chance *= 0.8  # 恩威并施：心腹背叛风险-20%
+        if cf.loyalty < CONFIDANT_BETRAY_LOYALTY and random.random() < betray_chance:
             betrayal_gain = random.randint(5, 10)
             game_state.attributes["威望"] = max(0, game_state.attributes["威望"] - betrayal_gain)
             intelligence.append(f"⚠️ 你的心腹{cf.name}忠诚度低迷（{cf.loyalty}），似乎有人暗中收买他，威望-{betrayal_gain}")
@@ -7990,6 +8377,19 @@ def next_period():
     generate_child_tag_events(game_state)
     # ---- 协理六宫事件（每旬 1~2 件，弹窗裁决） ----
     generate_governance_events(game_state)
+    # ---- 前朝关联：家族补全/升降位/风险结算 + 家族事件（弹窗处置） ----
+    for evt in process_clan_period(game_state):
+        intelligence.append(evt)
+    generate_family_events(game_state)
+    # ---- 宗室系统：立场演化/世系繁衍/谋逆链/宗室事件 ----
+    for evt in process_royal_clan_period(game_state):
+        intelligence.append(evt)
+    # ---- 冷宫系统：在押者衰减/事件/玩家冷宫循环 ----
+    for evt in cold_period_tick(game_state):
+        intelligence.append(evt)
+    # ---- 出轨/私通 + 狸猫换子：风险累积/阈值事件/孕程/案发 ----
+    for evt in process_affair_period(game_state):
+        intelligence.append(evt)
     # ---- NPC 妃嫔关系网：每旬自然变化 ----
     for rel_msg in process_npc_relationships(game_state):
         intelligence.append(rel_msg)
@@ -8179,6 +8579,7 @@ def next_period():
     _draft_msgs, _draft_new = process_draft(game_state)
     draft_events.extend(_draft_msgs)
     new_concubine = _draft_new
+    tick_recommendations(game_state)  # 妃嫔举荐冷却递减
 
 
     # ===== 皇帝健康衰退与驾崩/继承判定 =====
@@ -8235,7 +8636,18 @@ def next_period():
                 heir_child = get_heir_child(game_state)
                 if heir_child:
                     heir_mother = heir_child.get("adoptive_mother") or heir_child.get("birth_mother") or ""
-                    if heir_mother == game_state.name:
+                    swap_rec = (getattr(game_state, "secret_relationships", {}) or {}).get("swap") or {}
+                    if str(swap_rec.get("child_uid") or "") == str(heir_child.get("uid") or "") \
+                            and swap_rec.get("phase") == "executed" and not swap_rec.get("案发"):
+                        # 狸猫继位（§3.4 阶段六）：换来的孩子登基
+                        if swap_rec.get("揭穿"):
+                            ending = trigger_ending(game_state, "狸猫之祸",
+                                "新帝登基当日，你当众道破了狸猫真相")
+                        else:
+                            ending = trigger_ending(game_state, "狸猫天子",
+                                "新帝登基，龙椅上坐着的，是你换来的孩子")
+                        game_state.add_memory("👑 新帝登基——只有你知道龙袍之下藏着什么")
+                    elif heir_mother == game_state.name:
                         # 你的子嗣继位 → 太后结局；太子若已长歪，改判不正经结局
                         ending_key, absurd_reason = resolve_heir_succession_ending(game_state)
                         reason = absurd_reason or (
@@ -8667,7 +9079,7 @@ def start_game():
                     max_attr = game_state.get_attr_max(attr)
                     game_state.attributes[attr] = max(0, min(max_attr, game_state.attributes[attr] + bonus * 5))
         game_state.history.append(f"出身：{background_data.get('label', '未知')}（{background_data.get('desc', '')}）")
-    
+
     for sl in Storyline:
         if sl.value == storyline:
             game_state.storyline = sl
@@ -8703,6 +9115,11 @@ def start_game():
     if "太后" not in game_state.npcs:
         game_state.npcs["太后"] = {"name": "太后", "rank": "太后", "age": random.randint(45, 65), "personality": "威严慈祥", "personality_desc": "历经三朝，深谙宫闱之道", "icon": "👑", "attributes": {"威望":90,"心计":80,"健康":60,"宠爱":0,"容貌":70}, "relationship": {"好感":25,"印象":"和善","互动次数":0}, "is_active": True, "alive": True}
         game_state.relationships["太后"] = {"好感": 25, "印象": "和善", "互动次数": 0}
+
+    # 前朝关联：按开局家世生成玩家家族，并补全 NPC 母族及与玩家家族的初始关系
+    # （须在 npcs 生成之后；旧档由 process_clan_period 兜底补全）
+    game_state.player_clan = generate_player_clan(extract_surname(player_name) or "沈", game_state.family_meta or {})
+    ensure_clans(game_state)
     
     for name, npc in game_state.npcs.items():
         if name not in game_state.relationships:
@@ -8828,7 +9245,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state), "child_event_queue": getattr(game_state, "child_event_queue", []), "governance_events": getattr(game_state, "governance_events", []), "governance_history": getattr(game_state, "governance_history", [])[-10:], "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5], **confidant_payload(game_state)})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state), "child_event_queue": getattr(game_state, "child_event_queue", []), "governance_events": getattr(game_state, "governance_events", []), "governance_history": getattr(game_state, "governance_history", [])[-10:], "family_event_queue": getattr(game_state, "family_event_queue", []), "family_event_history": (getattr(game_state, "family_event_history", []) or [])[-10:], "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5], **confidant_payload(game_state)})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -9414,6 +9831,317 @@ def governance_respond():
                     "remaining_actions": game_state.remaining_actions})
 
 
+@app.route('/api/family/respond', methods=['POST'])
+def family_respond():
+    """处理家族事件：提交选项索引，结算并移除该事件（家事不耗行动点）。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    queue = getattr(game_state, 'family_event_queue', None)
+    if not isinstance(queue, list):
+        queue = []
+        game_state.family_event_queue = queue
+    ev_id = data.get('event_id')
+    ev = next((e for e in queue if e.get('id') == ev_id), None)
+    if ev is None:
+        return jsonify({"error": "事件不存在或已了结"}), 404
+    idx = int(data.get('choice_index', 0) or 0)
+    choices = ev.get('choices') or []
+    if idx < 0 or idx >= len(choices):
+        return jsonify({"error": "选项无效"}), 400
+    result = apply_family_choice(game_state, ev, choices[idx])
+    game_state.family_event_queue = [e for e in queue if e.get('id') != ev_id]
+    return jsonify({"success": True, **result,
+                    "family_event_queue": game_state.family_event_queue,
+                    "family_event_history": game_state.family_event_history[-10:],
+                    "player_clan": game_state.player_clan,
+                    "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)),
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes})
+
+
+@app.route('/api/court/overview', methods=['GET'])
+def court_overview():
+    """前朝总览：玩家家族 + 朝堂派系好感 + 各妃嫔母族（缺失的家族结构就地补全）。"""
+    player_id = request.args.get('player_id')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    clan = ensure_clans(game_state)
+    npc_clans = []
+    for name, npc in (game_state.npcs or {}).items():
+        if not isinstance(npc, dict) or name == "太后" or not npc.get("alive", True):
+            continue
+        c = npc.get("clan")
+        if not isinstance(c, dict):
+            continue
+        rel = c.get("与玩家家族关系") or {}
+        father = c.get("father") or {}
+        npc_clans.append({
+            "name": name, "rank": npc.get("rank", "答应"),
+            "faction": c.get("政治倾向", ""),
+            "prestige": int(c.get("家族威望", 40) or 0),
+            "father": f'{father.get("官职", "")}{father.get("name", "")}',
+            "relation": rel.get("关系", "中立"), "favor": int(rel.get("好感", 0) or 0),
+        })
+    npc_clans.sort(key=lambda x: -x["favor"])
+    return jsonify({
+        "player_clan": clan,
+        "factions": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)),
+        "npc_clans": npc_clans,
+        "period": game_state.get_calendar_str(),
+    })
+
+
+# ---- 宗室系统（royal_clan.py / ROYAL_CLAN.md） ----
+
+@app.route('/api/royal/overview', methods=['GET'])
+def royal_overview_api():
+    """宗室势力总览：男性两翼分列 + 待办 + 动态。"""
+    game_state, err = session_or_404(request.args.get('player_id'))
+    if err:
+        return err
+    return jsonify(royal_overview_payload(game_state))
+
+
+@app.route('/api/royal/action', methods=['POST'])
+def royal_action_api():
+    """宗室成员玩法接口（男：结盟/献计/求援/举报/联姻；女：结交/拉拢/情报/推荐/联姻/手帕交）。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    rc = seed_royal_clan(game_state)
+    name = data.get('name')
+    kind = data.get('kind')
+    action = data.get('action')
+    if kind == "male":
+        member = rc["males"].get(name)
+        if not member or not member.get("alive"):
+            return jsonify({"error": "宗室名册查无此人"}), 404
+        ok, msg = royal_male_action(game_state, rc, member, action)
+    elif kind == "female":
+        member = rc["females"].get(name)
+        if not member or not member.get("alive"):
+            return jsonify({"error": "宗室名册查无此人"}), 404
+        ok, msg = royal_female_action(game_state, rc, member, action)
+    else:
+        return jsonify({"error": "无效的成员类型"}), 400
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg, "overview": royal_overview_payload(game_state),
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
+@app.route('/api/royal/pending', methods=['POST'])
+def royal_pending_api():
+    """宗室待办事件响应（郡主入宫/长辈争执/郡王议亲）。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    rc = seed_royal_clan(game_state)
+    ok, msg = respond_royal_pending(game_state, rc, data.get('event_id'), data.get('choice_index'))
+    if ok is None:
+        return jsonify({"error": msg}), 404
+    return jsonify({"success": True, "narration": msg, "overview": royal_overview_payload(game_state),
+                    "attributes": game_state.attributes,
+                    "relationships": game_state.relationships})
+
+
+# ---- 冷宫系统（cold_palace.py / COLD_PALACE.md） ----
+
+@app.route('/api/coldpalace/overview', methods=['GET'])
+def coldpalace_overview_api():
+    game_state, err = session_or_404(request.args.get('player_id'))
+    if err:
+        return err
+    return jsonify(cold_overview_payload(game_state))
+
+
+@app.route('/api/coldpalace/interact', methods=['POST'])
+def coldpalace_interact_api():
+    """与冷宫妃嫔互动：探视/递送/求情/利用秘密/太医/买通看守。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = interact_inmate(game_state, data.get('name'), data.get('action'))
+    if ok is None:
+        return jsonify({"error": msg}), 404
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg,
+                    "overview": cold_overview_payload(game_state),
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes,
+                    "intrigue": summarize_intrigue(game_state),
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
+@app.route('/api/coldpalace/manage', methods=['POST'])
+def coldpalace_manage_api():
+    """冷宫管理（需协理权限）：改善条件/特赦/搜查/裁决入冷宫。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = cold_manage(game_state, data.get('action'), data.get('name'))
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg,
+                    "overview": cold_overview_payload(game_state),
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes,
+                    "npcs": {n: {"rank": c.get("rank", "答应"), "alive": c.get("alive", True)}
+                             for n, c in (game_state.npcs or {}).items()}})
+
+
+@app.route('/api/coldpalace/self', methods=['POST'])
+def coldpalace_self_api():
+    """玩家冷宫生存动作与翻身尝试。action ∈ SELF_ACTIONS 或 release:<方式>。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    action = data.get('action') or ''
+    if action.startswith('release:'):
+        ok, msg = player_release_attempt(game_state, action.split(':', 1)[1])
+    else:
+        ok, msg = player_self_action(game_state, action)
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    resp = {"success": True, "narration": msg,
+            "overview": cold_overview_payload(game_state),
+            "attributes": game_state.attributes,
+            "remaining_actions": game_state.remaining_actions,
+            "max_actions": game_state.max_actions}
+    if is_game_over(game_state):
+        resp["game_over"] = True
+        resp["ending"] = ending_payload(game_state)
+    return jsonify(resp)
+
+
+@app.route('/api/coldpalace/enter', methods=['POST'])
+def coldpalace_enter_api():
+    """玩家主动避居冷宫（§二：主动途径）。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = enter_cold_palace(game_state, (data.get('reason') or '主动避居，静思己过'))
+    if not ok:
+        return jsonify({"error": msg}), 400
+    return jsonify({"success": True, "narration": msg,
+                    "overview": cold_overview_payload(game_state),
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes})
+
+
+# ---- 出轨/私通 + 狸猫换子（affair_system.py / AFFAIR_SYSTEM.md） ----
+
+@app.route('/api/affair/overview', methods=['GET'])
+def affair_overview_api():
+    game_state, err = session_or_404(request.args.get('player_id'))
+    if err:
+        return err
+    return jsonify(affair_overview_payload(game_state))
+
+
+@app.route('/api/affair/action', methods=['POST'])
+def affair_action_api():
+    """私通/处置统一动作分发。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    action = data.get('action')
+    if action == 'develop':
+        ok, msg = develop_affair(game_state, data.get('target_type'), data.get('way'), data.get('name'))
+    elif action == 'use':
+        ok, msg = use_affair_perk(game_state, data.get('name'))
+    elif action == 'mitigate':
+        ok, msg = mitigate_risk(game_state, data.get('name'), data.get('way'))
+    elif action == 'probe':
+        ok, msg = probe_npc_affair(game_state)
+    elif action == 'dispose':
+        ok, msg = dispose_npc_affair(game_state, data.get('name'), data.get('op'))
+    else:
+        return jsonify({"error": "无效的动作"}), 400
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg,
+                    "overview": affair_overview_payload(game_state),
+                    "silver": game_state.silver,
+                    "attributes": game_state.attributes,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions,
+                    "game_over": is_game_over(game_state)})
+
+
+@app.route('/api/swap/action', methods=['POST'])
+def swap_action_api():
+    """狸猫换子：密谋/执行/善后/案发应对。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    action = data.get('action')
+    if action == 'eligibility':
+        return jsonify(swap_eligibility(game_state))
+    if action == 'plan':
+        ok, msg = swap_start_plan(game_state, data.get('insider'))
+    elif action == 'execute':
+        ok, msg = swap_execute(game_state)
+    elif action.startswith('aftercare:'):
+        ok, msg = swap_aftercare(game_state, action.split(':', 1)[1])
+    elif action.startswith('case:'):
+        ok, msg = swap_case_respond(game_state, action.split(':', 1)[1])
+    elif action == 'reveal_at_crown':
+        sr = get_affairs(game_state)
+        if sr["swap"].get("phase") != "executed":
+            return jsonify({"error": "尚无狸猫之局"}), 400
+        sr["swap"]["揭穿"] = True
+        return jsonify({"success": True, "narration": "你把那个秘密封存心底——或随时揭开。（已设：登基之日自揭真相）"})
+    else:
+        return jsonify({"error": "无效的动作"}), 400
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        return jsonify({"error": str(msg)}), 400
+    resp = {"success": True, "narration": msg,
+            "overview": affair_overview_payload(game_state),
+            "silver": game_state.silver,
+            "attributes": game_state.attributes,
+            "remaining_actions": game_state.remaining_actions,
+            "max_actions": game_state.max_actions}
+    if is_game_over(game_state):
+        resp["game_over"] = True
+        resp["ending"] = ending_payload(game_state)
+    return jsonify(resp)
+
+
 @app.route('/api/relationships', methods=['GET'])
 def relationship_net():
     """后宫关系网数据（含类型/图标/颜色）+ 最近变化日志。"""
@@ -9820,15 +10548,10 @@ def child_adopt():
         gender = child.get("gender", "皇子")
         age = int(child.get("age", 0) or 0)
         is_orphan = not npc.get("alive", True)
-        # 校验
-        if age > ADOPT_MAX_AGE:
-            return jsonify({"error": f"子嗣已{age}岁，年长不宜再过继", "success": False}), 400
-        if my_rank_idx < RANK_LEVELS.get(ADOPT_MIN_RANK, 0):
-            return jsonify({"error": f"须{ADOPT_MIN_RANK}及以上位份方可收养子嗣", "success": False}), 400
-        if count_living_children(game_state.children) >= ADOPT_MAX_CHILDREN:
-            return jsonify({"error": f"后宫子嗣已满（上限{ADOPT_MAX_CHILDREN}人），不宜再收养", "success": False}), 400
-        if child.get("adopted_count", 0) >= ADOPT_MAX_TRANSFERS:
-            return jsonify({"error": "此子已被过继多次，宗人府不许再行转继", "success": False}), 400
+        # 共用资格校验（模块三统一归属管理）：年龄/名额/转继次数/位份/皇嗣特权
+        verr = validate_ownership_transfer(game_state, child, my_rank_idx, is_orphan=is_orphan)
+        if verr:
+            return jsonify({"error": verr, "success": False}), 400
         already_adopted_to_living = False
         if child.get("adoptive_mother") and child["adoptive_mother"] in game_state.npcs:
             if game_state.npcs[child["adoptive_mother"]].get("alive", True) and child["adoptive_mother"] != game_state.name:
@@ -9841,42 +10564,16 @@ def child_adopt():
             rel = game_state.relationships.get(mother_name, {"好感": 0})
             if rel.get("好感", 0) < 40 and my_rank_idx <= RANK_LEVELS.get(npc.get("rank", "答应"), 0):
                 return jsonify({"error": f"{mother_name}割舍不下亲子{child_name}，过继未成", "success": False}), 400
-        # 皇子（皇嗣）专属：需更高位份 + 皇帝圣宠门槛 + 皇帝恩准
-        if gender == "皇子":
-            required_rank = ADOPT_PRINCE_MIN_RANK
-            if my_rank_idx < RANK_LEVELS.get(required_rank, 0):
-                return jsonify({"error": f"皇嗣尊贵，须{required_rank}及以上位份方可收养", "success": False}), 400
-            favor = game_state.attributes.get("宠爱", 0)
-            if favor < ADOPT_PRINCE_EMPEROR_FAVOR:
-                return jsonify({"error": f"圣宠不足（需宠爱≥{ADOPT_PRINCE_EMPEROR_FAVOR}），皇帝不忍皇嗣旁落，暂不允许收养", "success": False}), 400
-            approved, emperor_note = should_use_emperor_approval(game_state, child, "in")
-            if not approved:
-                return jsonify({"error": f"奏请过继皇嗣{child_name}，{emperor_note}，只得作罢", "success": False}), 400
-        else:
-            approved, emperor_note = should_use_emperor_approval(game_state, child, "in")
-            if not approved:
-                return jsonify({"error": f"奏请过继{child_name}，{emperor_note}，只得作罢", "success": False}), 400
         # 费用（遗孤减半）
         base_cost = ADOPT_IN_COST_PRINCE if gender == "皇子" else ADOPT_IN_COST
         cost = max(10, base_cost // 2) if is_orphan else base_cost
         if game_state.silver < cost:
             return jsonify({"error": f"银两不足，过继仪式需{cost}两", "success": False}), 400
 
-        # 执行过继
-        game_state.silver -= cost
-        if pos >= 0:
-            npc.get("children", []).pop(pos)
-        game_state.children.append(child)
-        game_state.has_children = True
-        child["adopted"] = True
-        child["adopted_count"] = child.get("adopted_count", 0) + 1
-        child["birth_mother"] = child.get("birth_mother") or mother_name
-        child["adoptive_mother"] = game_state.name
-        child["adopted_age"] = age
-        child["adopted_at"] = period_label
-        child["affection"] = max(10, child.get("affection", 30) - 15) if age >= 1 else random.randint(30, 50)
-        child["mood"] = "平静"
-        add_adoption_history(child, "收养", mother_name if not is_orphan else f"遗孤·{mother_name}", game_state.name, f"过继仪式{cost}两", game_state.day)
+        # 执行过继（共用归属变更机制，模块三）
+        apply_child_ownership_transfer(game_state, child, source_npc=npc, source_index=pos,
+                                       mode_label="收养", cost=cost, cost_note=f"过继仪式{cost}两",
+                                       from_name=mother_name if not is_orphan else f"遗孤·{mother_name}")
 
         if is_orphan:
             wei_gain = 10 + (8 if gender == "皇子" else 4)
@@ -11576,25 +12273,12 @@ def chonghua_action():
     cost = 0
     if not is_own:
         # 亲养他人皇嗣，等同过继：沿用宗人府那套规矩，仅仪银减半（宫中共育，礼从简）
-        if count_living_children(game_state.children) >= ADOPT_MAX_CHILDREN:
-            return jsonify({'success': False, 'error': f'膝下子嗣已满（上限{ADOPT_MAX_CHILDREN}人）'}), 400
-        if child_age > ADOPT_MAX_AGE:
-            return jsonify({'success': False, 'error': f'{child_name}已{int(child_age)}岁，年长不宜再过继'}), 400
-        if my_rank_idx < RANK_LEVELS.get(ADOPT_MIN_RANK, 0):
-            return jsonify({'success': False, 'error': f'须{ADOPT_MIN_RANK}及以上位份方可亲养他人皇嗣'}), 400
-        if int(child.get('adopted_count', 0) or 0) >= ADOPT_MAX_TRANSFERS:
-            return jsonify({'success': False, 'error': '此子已被过继多次，宗人府不许再行转继'}), 400
         birth_mother_npc = (getattr(game_state, 'npcs', {}) or {}).get(owner)
         is_orphan = isinstance(birth_mother_npc, dict) and not birth_mother_npc.get('alive', True)
-        if child.get('gender') == '皇子':
-            if my_rank_idx < RANK_LEVELS.get(ADOPT_PRINCE_MIN_RANK, 0):
-                return jsonify({'success': False, 'error': f'皇嗣尊贵，须{ADOPT_PRINCE_MIN_RANK}及以上位份方可亲养'}), 400
-            favor = game_state.attributes.get('宠爱', 0)
-            if favor < ADOPT_PRINCE_EMPEROR_FAVOR:
-                return jsonify({'success': False, 'error': f'圣宠不足（需宠爱≥{ADOPT_PRINCE_EMPEROR_FAVOR}），皇帝不忍皇子旁落'}), 400
-            approved, note = should_use_emperor_approval(game_state, child, 'in')
-            if not approved:
-                return jsonify({'success': False, 'error': f'奏请亲养皇子{child_name}，{note}，只得作罢'}), 400
+        # 共用资格校验（模块三统一归属管理）：年龄/名额/转继次数/位份/皇嗣特权
+        verr = validate_ownership_transfer(game_state, child, my_rank_idx, is_orphan=is_orphan)
+        if verr:
+            return jsonify({'success': False, 'error': verr}), 400
         # 生母在世且情分浅薄时，未必愿意割舍
         if isinstance(birth_mother_npc, dict) and birth_mother_npc.get('alive', True):
             willingness = adoption_willingness(game_state, birth_mother_npc, child)
@@ -11606,18 +12290,10 @@ def chonghua_action():
             cost = max(10, cost // 2)
         if game_state.silver < cost:
             return jsonify({'success': False, 'error': f'银两不足，亲养仪需{cost}两'}), 400
-        game_state.silver -= cost
-        npc = birth_mother_npc
-        if isinstance(npc, dict) and 0 <= idx < len(npc.get('children', []) or []):
-            npc['children'].pop(idx)
-        child['adopted'] = True
-        child['adopted_count'] = int(child.get('adopted_count', 0) or 0) + 1
-        child['birth_mother'] = child.get('birth_mother') or owner
-        child['adoptive_mother'] = game_state.name
-        child['adopted_at'] = f'建元{getattr(game_state, "year", 1)}年{getattr(game_state, "month", 1)}月'
-        add_adoption_history(child, '重华宫亲养', owner, game_state.name, '重华宫共育', getattr(game_state, 'day', 0))
-        game_state.children.append(child)
-        game_state.has_children = True
+        # 共用归属变更机制（模块三；重华宫亲养不调整亲密——共育情分另计）
+        apply_child_ownership_transfer(game_state, child, source_npc=birth_mother_npc, source_index=idx,
+                                       mode_label='重华宫亲养', cost=cost, cost_note='重华宫共育',
+                                       from_name=owner, adjust_affection=False)
         if owner in game_state.relationships:
             game_state.relationships[owner]['好感'] = max(-100, game_state.relationships[owner].get('好感', 0) - random.randint(3, 10))
     chonghua_remove_child(game_state, ch, child)
@@ -11917,6 +12593,65 @@ def princess_marry():
         "silver": game_state.silver,
         "princess": princess_serialize(game_state, child),
     })
+
+
+@app.route('/api/mansion/descendants', methods=['GET'])
+def mansion_descendants_api():
+    """王府/公主府后代列表（折叠面板数据源）。后代存于皇嗣婚配对象的 offspring，就地派生。"""
+    player_id = request.args.get('player_id')
+    child_uid = request.args.get('child_uid')
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    child = next((c for c in (getattr(game_state, "children", []) or [])
+                  if str(c.get("uid")) == str(child_uid)), None)
+    if child is None:
+        return jsonify({"error": "未找到该皇嗣"}), 404
+    return jsonify({
+        "descendants": mansion_descendants_payload(game_state, child),
+        "can_manage": chonghua_permission(game_state) == "full",
+    })
+
+
+@app.route('/api/mansion/descendant/admit', methods=['POST'])
+def mansion_descendant_admit():
+    """把在府孙辈接入重华宫（安置标记；需协理权限，年龄≤12，容量与银两校验）。"""
+    data = request.get_json() or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    child = next((c for c in (getattr(game_state, "children", []) or [])
+                  if str(c.get("uid")) == str(data.get('child_uid'))), None)
+    if child is None:
+        return jsonify({"error": "未找到该皇嗣"}), 404
+    if chonghua_permission(game_state) != "full":
+        return jsonify({"error": "接入重华宫需皇后亲裁或协理六宫权限"}), 403
+    gc = next((g for g in get_descendants(game_state, child)
+               if str(g.get("uid")) == str(data.get('descendant_uid'))), None)
+    if gc is None:
+        return jsonify({"error": "未找到该后代"}), 404
+    ensure_descendant_fields(game_state, gc, (child.get("mansion") or {}).get("name", ""))
+    if gc.get("安置状态") == "已入重华宫":
+        return jsonify({"error": "该后代已在重华宫"}), 400
+    age = float(gc.get("age", 0) or 0)
+    if age > CHONGHUA_GRADUATE_AGE:
+        return jsonify({"error": f"已{int(age)}岁，不宜再入重华宫教养"}), 400
+    ch = chonghua_state(game_state)
+    if chonghua_count_inside(game_state) >= chonghua_capacity(ch):
+        return jsonify({"error": "重华宫已满，先迁出一些皇嗣再接入"}), 400
+    if game_state.silver < CHONGHUA_UPKEEP_PER_CHILD:
+        return jsonify({"error": f"银两不足，接入用度需{CHONGHUA_UPKEEP_PER_CHILD}两"}), 400
+    game_state.silver -= CHONGHUA_UPKEEP_PER_CHILD
+    gc["in_chonghua"] = True
+    gc["palace"] = CHONGHUA_PALACE_NAME
+    gc["安置状态"] = "已入重华宫"
+    gc["安置地"] = "重华宫"
+    chonghua_add_log(game_state, ch, f'孙辈{gc.get("name", "")}自府邸接入')
+    msg = f"🏛️ {child.get('name', '')}之子{gc.get('name', '')}接入重华宫，由你亲自教养（-{CHONGHUA_UPKEEP_PER_CHILD}两）"
+    game_state.add_memory(msg)
+    return jsonify({"success": True, "narration": msg,
+                    "descendants": mansion_descendants_payload(game_state, child),
+                    "silver": game_state.silver})
 
 
 @app.route('/api/princess/mansion', methods=['POST'])

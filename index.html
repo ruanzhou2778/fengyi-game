@@ -1664,6 +1664,10 @@
             <div class="right">
                 <button class="tool-btn" onclick="toggleMap()" title="宫廷舆图">🗺️</button>
                 <button class="tool-btn" onclick="openRelationNet()" title="后宫关系网">🕸️</button>
+                <button class="tool-btn" onclick="openCourtOverview()" title="前朝家族">🏛️</button>
+                <button class="tool-btn" onclick="openRoyalClan()" title="宗室势力">🏵️</button>
+                <button class="tool-btn" onclick="openColdPalace()" title="冷宫">🏚️</button>
+                <button class="tool-btn" onclick="openAffairs()" title="私通·狸猫">🌙</button>
                 <button class="tool-btn" onclick="openLedger()" title="内务府账册">📒<span class="badge">亏</span></button>
                 <button class="tool-btn" onclick="saveGame()" title="存档">💾</button>
                 <button class="tool-btn" onclick="openSaveList()" title="读档">📂</button>
@@ -1904,6 +1908,10 @@
                     <div id="regencyPanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;padding:3px 0;"></div>
 <div id="governancePanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;padding:2px 0;"></div>
                 </div>
+                <div class="stat-block" id="familyCourtBlock" style="display:none;">
+                    <div class="block-title">🏛️ 前 朝 家 族</div>
+                    <div id="familyPanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;padding:2px 0;"></div>
+                </div>
                 <div class="stat-block" id="heirRaceBlock" style="display:none;">
                     <div class="block-title">👑 夺 嫡 风 云</div>
                     <div id="heirRacePanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;padding:3px 0;"></div>
@@ -1958,48 +1966,85 @@
                 </div>
 
                 <div class="stat-block">
-                    <div class="block-title">🎯 主 动 宫 斗</div>
-                    <div style="display:flex;flex-direction:column;gap:3px;padding:4px 0;">
-                        <div style="display:flex;gap:3px;flex-wrap:wrap;">
-                            <select id="conflictTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择目标...</option></select>
-                            <select id="conflictType" onchange="updateConflictAssistHint()" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);">
-                                <option value="下毒">☠️ 下毒暗害</option>
-                                <option value="打胎">🩸 下药打胎</option>
-                                <option value="陷害">🎭 栽赃陷害</option>
-                                <option value="造谣">🗣️ 散布谣言</option>
-                                <option value="争宠">💃 截胡争宠</option>
-                                <option value="拉拢">🤝 威逼利诱</option>
-                                <option value="掌嘴">👋 当众责罚</option>
-                            </select>
+                    <div class="block-title">⚔️ 谋 略</div>
+                    <div style="display:flex;gap:3px;margin:3px 0;">
+                        <button id="stab_attack" onclick="switchStrategyTab('attack')" class="interact-btn" style="flex:1;padding:3px;font-size:9px;">⚔️ 攻</button>
+                        <button id="stab_defend" onclick="switchStrategyTab('defend')" class="interact-btn" style="flex:1;padding:3px;font-size:9px;">🛡️ 守</button>
+                        <button id="stab_fight" onclick="switchStrategyTab('fight')" class="interact-btn" style="flex:1;padding:3px;font-size:9px;">🗡️ 争</button>
+                    </div>
+                    <div id="strategyAttack">
+                        <div class="stat-block">
+                            <div class="block-title">🎯 主 动 宫 斗</div>
+                            <div style="display:flex;flex-direction:column;gap:3px;padding:4px 0;">
+                                <div style="display:flex;gap:3px;flex-wrap:wrap;">
+                                    <select id="conflictTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择目标...</option></select>
+                                    <select id="conflictType" onchange="updateConflictAssistHint()" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);">
+                                        <option value="下毒">☠️ 下毒暗害</option>
+                                        <option value="打胎">🩸 下药打胎</option>
+                                        <option value="陷害">🎭 栽赃陷害</option>
+                                        <option value="造谣">🗣️ 散布谣言</option>
+                                        <option value="争宠">💃 截胡争宠</option>
+                                        <option value="拉拢">🤝 威逼利诱</option>
+                                        <option value="掌嘴">👋 当众责罚</option>
+                                    </select>
+                                </div>
+                                <div id="conflictAssistBox" style="padding:3px 0;border-top:1px dashed rgba(158,190,178,0.12);">
+                                    <div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">👥 宫人协助（最多3人，提升胜率）</div>
+                                    <div id="conflictAssistList" style="display:flex;flex-wrap:wrap;gap:2px 6px;"></div>
+                                    <div id="conflictAssistHint" style="font-size:7px;color:var(--gold-dark);margin-top:2px;"></div>
+                                </div>
+                                <button onclick="initiateConflict()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;">⚔️ 发起宫斗</button>
+                            </div>
                         </div>
-                        <div id="conflictAssistBox" style="padding:3px 0;border-top:1px dashed rgba(158,190,178,0.12);">
-                            <div style="font-size:7px;color:var(--text-light);margin-bottom:2px;">👥 宫人协助（最多3人，提升胜率）</div>
-                            <div id="conflictAssistList" style="display:flex;flex-wrap:wrap;gap:2px 6px;"></div>
-                            <div id="conflictAssistHint" style="font-size:7px;color:var(--gold-dark);margin-top:2px;"></div>
+
+                        <div class="stat-block">
+                            <div class="block-title">🕵️ 情 报 系 统</div>
+                            <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">刺探、流言、勒索、洗白会消耗行动点；热度越高，越容易翻车。</div>
+                            <div id="intrigueSummary" style="font-size:7px;color:var(--text-mid);line-height:1.5;padding:3px 0;border-top:1px dashed rgba(158,190,178,0.12);border-bottom:1px dashed rgba(158,190,178,0.12);">情报网尚未铺开。</div>
+                            <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:3px;">
+                                <select id="intrigueTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择目标...</option></select>
+                                <select id="intrigueAction" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);" onchange="toggleIntrigueTargetRequirement()">
+                                    <option value="spy">🕵️ 刺探 (12两)</option>
+                                    <option value="rumor">🗣️ 放流言 (18两)</option>
+                                    <option value="blackmail">💰 勒索 (需2点把柄)</option>
+                                    <option value="cleanse">🪶 洗白 (15两)</option>
+                                </select>
+                            </div>
+                            <button onclick="performIntrigueAction()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;margin-top:3px;">🕸️ 发动情报行动</button>
+                            <div id="intrigueLog" style="font-size:7px;color:var(--text-mid);line-height:1.5;max-height:92px;overflow-y:auto;margin-top:4px;"></div>
                         </div>
-                        <button onclick="initiateConflict()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;">⚔️ 发起宫斗</button>
                     </div>
-                </div>
-
-                <div class="stat-block">
-                    <div class="block-title">🗡️ 妃 子 争 锋</div>
-                    <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">一旬可主动一次。比宠爱、家世、体质、心计等，胜后可降其心智 / 辱其自尊 / 摧其斗志。</div>
-                    <div style="display:flex;gap:3px;flex-wrap:wrap;">
-                        <select id="duelTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择对手...</option></select>
-                        <button onclick="startDuelFromPage()" class="interact-btn" style="padding:3px 8px;font-size:9px;">🗡️ 邀约争锋</button>
+                    <div id="strategyDefend" style="display:none;">
+                        <div class="stat-block">
+                            <div class="block-title">🕯️ 奉 天 楼</div>
+                            <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">祈福增福运与倾向；掌祀可增对方压力（需心计）。</div>
+                            <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;">
+                                <button onclick="doPray('bless')" class="interact-btn" style="padding:3px 8px;">🙏 祈福 (15两)</button>
+                                <select id="curseTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">克谁...</option></select>
+                                <button onclick="doPray('curse')" class="interact-btn" style="padding:3px 8px;">🕯️ 掌祀 (40两)</button>
+                            </div>
+                            <div style="display:flex;gap:3px;align-items:center;margin-top:3px;">
+                                <button onclick="strategyCleanse()" class="interact-btn" style="padding:3px 8px;">🪶 洗白 (15两)</button>
+                                <span style="font-size:7px;color:var(--text-light);">自证清白，压低宫斗热度</span>
+                            </div>
+                            <div id="blessContainer" style="margin-top:4px;"><div id="blessContent"></div></div>
+                        </div>
                     </div>
-                    <div id="duelPanel" style="display:none;margin-top:4px;padding:4px;border:1px solid var(--gold-light);border-radius:6px;background:var(--bg-card);"></div>
-                </div>
-
-                <div class="stat-block">
-                    <div class="block-title">🕯️ 奉 天 楼</div>
-                    <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">祈福增福运与倾向；掌祀可增对方压力（需心计）。</div>
-                    <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;">
-                        <button onclick="doPray('bless')" class="interact-btn" style="padding:3px 8px;">🙏 祈福 (15两)</button>
-                        <select id="curseTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">克谁...</option></select>
-                        <button onclick="doPray('curse')" class="interact-btn" style="padding:3px 8px;">🕯️ 掌祀 (40两)</button>
+                    <div id="strategyFight" style="display:none;">
+                        <div class="stat-block">
+                            <div class="block-title">🗡️ 妃 子 争 锋</div>
+                            <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">一旬可主动一次。比宠爱、家世、体质、心计等，胜后可降其心智 / 辱其自尊 / 摧其斗志。</div>
+                            <div style="display:flex;gap:3px;flex-wrap:wrap;">
+                                <select id="duelTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择对手...</option></select>
+                                <button onclick="startDuelFromPage()" class="interact-btn" style="padding:3px 8px;font-size:9px;">🗡️ 邀约争锋</button>
+                            </div>
+                            <div id="duelPanel" style="display:none;margin-top:4px;padding:4px;border:1px solid var(--gold-light);border-radius:6px;background:var(--bg-card);"></div>
+                        </div>
+                        <div class="stat-block">
+                            <div class="block-title">🎲 随 机 宫 斗</div>
+                            <button onclick="triggerRandomConflict()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;">🎲 触发随机事件</button>
+                        </div>
                     </div>
-                    <div id="blessContainer" style="margin-top:4px;"><div id="blessContent"></div></div>
                 </div>
 
                 <div class="stat-block">
@@ -2016,28 +2061,6 @@
                     </div>
                     <button onclick="queenAuthorityAction('协理六宫')" class="interact-btn" style="width:100%;padding:3px;margin-top:3px;">🪷 亲理六宫事务</button>
                     <div style="font-size:6px;color:var(--text-light);margin-top:2px;">皇后可向皇帝请示协理人选；皇帝亦可直接任命。仅皇后或协理可直接晋降位。</div>
-                </div>
-
-                <div class="stat-block">
-                    <div class="block-title">🕵️ 情 报 系 统</div>
-                    <div style="font-size:7px;color:var(--text-light);margin-bottom:3px;">刺探、流言、勒索、洗白会消耗行动点；热度越高，越容易翻车。</div>
-                    <div id="intrigueSummary" style="font-size:7px;color:var(--text-mid);line-height:1.5;padding:3px 0;border-top:1px dashed rgba(158,190,178,0.12);border-bottom:1px dashed rgba(158,190,178,0.12);">情报网尚未铺开。</div>
-                    <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;margin-top:3px;">
-                        <select id="intrigueTarget" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);"><option value="">选择目标...</option></select>
-                        <select id="intrigueAction" style="flex:1;padding:2px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:8px;background:var(--bg-card);color:var(--text-dark);" onchange="toggleIntrigueTargetRequirement()">
-                            <option value="spy">🕵️ 刺探 (12两)</option>
-                            <option value="rumor">🗣️ 放流言 (18两)</option>
-                            <option value="blackmail">💰 勒索 (需2点把柄)</option>
-                            <option value="cleanse">🪶 洗白 (15两)</option>
-                        </select>
-                    </div>
-                    <button onclick="performIntrigueAction()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;margin-top:3px;">🕸️ 发动情报行动</button>
-                    <div id="intrigueLog" style="font-size:7px;color:var(--text-mid);line-height:1.5;max-height:92px;overflow-y:auto;margin-top:4px;"></div>
-                </div>
-
-                <div class="stat-block">
-                    <div class="block-title">🎲 随 机 宫 斗</div>
-                    <button onclick="triggerRandomConflict()" class="interact-btn" style="width:100%;padding:3px;font-size:9px;">🎲 触发随机事件</button>
                 </div>
 
                 <div class="stat-block" style="flex:1;min-height:0;">
@@ -4314,7 +4337,7 @@ if(data.death_message){
 }
 
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
-updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);renderHeirRaceUI(data);renderRegencyPanel(data);renderConsortPanel(data);renderGovernancePanel(data);loadQueenAuthority();
+updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);renderHeirRaceUI(data);renderRegencyPanel(data);renderConsortPanel(data);renderGovernancePanel(data);renderFamilyPanel(data);loadQueenAuthority();
 checkChildEventQueue(data);
 if((data.relationship_log||[]).length>0){addLogEntry(data.relationship_log[0],'intel');}
 const disabled=rem<=0;
@@ -4432,6 +4455,353 @@ async function governanceRespond(evId, idx){
         openModal('🏛️ 裁断结果', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', () => refreshState(), true);
     } catch(e){ showToast('❌ ' + e.message, 'error'); }
 }
+function renderFamilyPanel(data){
+    const block = document.getElementById('familyCourtBlock');
+    const panel = document.getElementById('familyPanel');
+    if(!block || !panel) return;
+    const q = (data && Array.isArray(data.family_event_queue)) ? data.family_event_queue : [];
+    if(q.length === 0){ block.style.display = 'none'; return; }
+    block.style.display = 'block';
+    panel.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px;padding:2px 0;">` + q.map(ev =>
+        `<button onclick="openFamilyModal('${ev.id}')" style="padding:4px 10px;background:rgba(192,57,43,.12);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;">${ev.icon||'🏛️'} ${ev.type||''} · ${ev.title||'家事'} ▸</button>`
+    ).join('') + `</div>`;
+}
+function openFamilyModal(evId){
+    const data = window._lastGameData || {};
+    const ev = ((data.family_event_queue) || []).find(e => e.id === evId);
+    if(!ev) return;
+    let body = `<div style="font-size:10px;color:var(--text-mid);line-height:1.7;">${ev.desc||''}</div>`;
+    body += `<div style="margin-top:4px;font-size:9px;color:var(--text-light);">🏛️ 前朝家族 · ${ev.type||''} · ${ev.period||''}</div>`;
+    body += `<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;">`;
+    (ev.choices||[]).forEach((c, i) => {
+        body += `<button onclick="familyRespond('${evId}',${i})" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;text-align:left;">${c.icon||'🏛️'} ${c.text}</button>`;
+    });
+    body += `</div>`;
+    openModal(`🏛️ 家族来讯 · ${ev.title||'家事'}`, body, '暂且搁置', null, true);
+}
+async function familyRespond(evId, idx){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/family/respond`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, event_id: evId, choice_index: idx})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '处置失败');
+        closeModal();
+        openModal('🏛️ 处置结果', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', () => refreshState(), true);
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
+}
+async function openRoyalClan(){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/royal/overview?player_id=${playerId}`);
+        const d = await r.json();
+        if(d.error){ showToast('❌ '+d.error); return; }
+        window._royalClan = d;
+        const mRow = m => {
+            const risk = (m.立场==='反皇' && m.野心>=70) ? '<span style="color:#c0392b;">🔴高危</span>'
+                       : (m.立场==='反皇') ? '<span style="color:#8a6a3a;">⚠️ 可疑</span>' : '';
+            const ally = (d.allies||[]).includes(m.name)?'<span style="color:var(--gold-dark);">🤝盟</span>':'';
+            return `<div style="display:flex;justify-content:space-between;gap:4px;font-size:9px;padding:2px 0;border-bottom:1px dashed var(--border-light);color:var(--text-mid);align-items:center;">
+                <span onclick="openRoyalMember('male','${m.name}')" style="cursor:pointer;">${m.爵位}·${m.name}${m.封地?`（封地${m.封地}）`:''} ${ally}</span>
+                <span style="white-space:nowrap;">帝眷${m.帝眷}·野心${m.野心}·<span style="color:${m.立场==='拥皇'?'#4a8a5a':m.立场==='反皇'?'#c0392b':'var(--text-mid)'};">${m.立场}</span> ${risk}</span>
+            </div>`;
+        };
+        const fRow = f => {
+            const bond = (d.handkerchief||[]).includes(f.name)?'<span style="color:var(--gold-dark);">🌸帕交</span>':'';
+            const act = (f.标记||[]).includes('已入宫')?'<span style="color:#7a9ac0;">已入宫</span>':'';
+            return `<div style="display:flex;justify-content:space-between;gap:4px;font-size:9px;padding:2px 0;border-bottom:1px dashed var(--border-light);color:var(--text-mid);align-items:center;flex-wrap:wrap;">
+                <span onclick="openRoyalMember('female','${f.name}')" style="cursor:pointer;">${f.称号}·${f.name}${f.父系?`（${f.父系}之女）`:''} ${bond}${act}</span>
+                <span style="white-space:nowrap;">影响力${f.影响力}·${f.婚配状态}${f.联姻潜力?`·联姻潜力${f.联姻潜力}`:''}</span>
+            </div>`;
+        };
+        const princes = (d.males||[]).filter(m=>m.爵位==='亲王');
+        const junwangs = (d.males||[]).filter(m=>m.爵位==='郡王');
+        const others = (d.males||[]).filter(m=>!['亲王','郡王'].includes(m.爵位));
+        let body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.6;">总人数：${(d.males||[]).length+(d.females||[]).length}人（男${(d.males||[]).length}·女${(d.females||[]).length}）　大宗正：<b>${d.dazongzheng||'—'}</b></div>`;
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:4px;">👑 亲王（${princes.length}人）</div>${princes.map(mRow).join('')}`;
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:4px;">🎖️ 郡王（${junwangs.length}人）</div>${junwangs.map(mRow).join('')}`;
+        if(others.length) body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:4px;">🏛️ 国公/宗室长辈（${others.length}人）</div>${others.map(mRow).join('')}`;
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:4px;">👸 宗室女性（${(d.females||[]).length}人）</div>${(d.females||[]).map(fRow).join('')}`;
+        if((d.pending||[]).length){
+            body += `<div style="font-size:9px;color:var(--gold-dark);font-weight:600;margin-top:5px;">📨 宗室待办</div>`;
+            d.pending.forEach(p=>{
+                body += `<div style="background:rgba(192,57,43,.08);border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);"><b>${p.title}</b><br>${p.desc}<div style="margin-top:3px;display:flex;gap:4px;">
+                    <button class="chonghua-btn" onclick="royalPending('${p.id}',0)">前者</button>
+                    <button class="chonghua-btn" onclick="royalPending('${p.id}',1)">后者</button></div></div>`;
+            });
+        }
+        body += `<div style="font-size:8px;color:var(--text-light);margin-top:5px;border-top:1px dashed var(--border-light);padding-top:3px;">📜 宗室动态<br>${(d.log||[]).slice(0,4).map(l=>'· '+l).join('<br>')}</div>`;
+        openModal('🏵️ 宗室势力', body, '知道了', null, true);
+    } catch(e){ showToast('❌ 操作失败'); }
+}
+
+function openRoyalMember(kind, name){
+    const d = window._royalClan || {};
+    const list = kind==='male' ? (d.males||[]) : (d.females||[]);
+    const m = list.find(x=>x.name===name);
+    if(!m) return;
+    let body = '';
+    if(kind==='male'){
+        body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.7;">
+            <div>爵位：<b>${m.爵位}</b>　封地：${m.封地||'—'}　年齿：${m.年龄}</div>
+            <div>📊 帝眷 ${m.帝眷}/100 · 野心 ${m.野心}/100 · 实力 ${m.实力}/100</div>
+            <div>立场：<span style="color:${m.立场==='拥皇'?'#4a8a5a':m.立场==='反皇'?'#c0392b':'var(--text-mid)'};">${m.立场}</span>　与你关系：${m.关系}</div></div>
+            <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">${['ally','advise','aid','report','marry_off'].map(a=>{
+                const conf={ally:'🤝 结盟（关系≥30）',advise:'📜 献计（关系≥20·1行动点）',aid:'💰 求援（关系≥50·每旬一次）',report:'⚠️ 举报谋逆迹象',marry_off:'💒 联姻（嫁己出公主）'}[a];
+                return `<button class="interact-btn" onclick="royalAct('male','${m.name}','${a}')">${conf}</button>`;}).join('')}</div>`;
+    } else {
+        body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.7;">
+            <div>称号：<b>${m.称号}</b>　${m.身份||''}　${m.年龄}岁</div>
+            <div>影响力 ${m.影响力}　婚配：${m.婚配状态}${m.联姻潜力?`　联姻潜力 ${m.联姻潜力}`:''}</div>
+            <div>与你关系：${m.与玩家关系}　标记：${(m.标记||[]).join('、')||'—'}</div></div>
+            <div style="display:flex;flex-direction:column;gap:4px;margin-top:8px;">${['befriend','pull','intel','recommend','match','bond'].map(a=>{
+                const conf={befriend:'🎁 结交（20两）',pull:'🤲 拉拢其父系（50两·郡主县主）',intel:'🕵️ 获取情报（1行动点）',recommend:'📜 推荐入宫（关系≥30·宗室女）',match:'💒 促成联姻（100两·待字闺中）',bond:'🌸 结为手帕交（关系≥30）'}[a];
+                return `<button class="interact-btn" onclick="royalAct('female','${m.name}','${a}')">${conf}</button>`;}).join('')}</div>`;
+    }
+    openModal(`🏵️ ${m.name} 详情`, body, '关闭', null, true);
+}
+
+async function royalAct(kind, name, action){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/royal/action`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, kind: kind, name: name, action: action})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '处置失败');
+        window._royalClan = d.overview;
+        closeModal();
+        openModal('🏵️ 宗室回音', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', () => refreshState(), true);
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
+}
+
+async function royalPending(eventId, choiceIndex){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/royal/pending`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, event_id: eventId, choice_index: choiceIndex})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '处置失败');
+        window._royalClan = d.overview;
+        closeModal();
+        openModal('📨 宗室待办结果', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', () => refreshState(), true);
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
+}
+
+async function openColdPalace(){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/coldpalace/overview?player_id=${playerId}`);
+        const d = await r.json();
+        if(d.error){ showToast('❌ '+d.error); return; }
+        window._coldPalace = d;
+        const env = d.environment || {};
+        let body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.6;">在押：${(d.inmates||[]).length}人　条件：${env['条件']||'恶劣'}　看守：${env['看守类型']||'严厉'}</div>`;
+        const p = d.player;
+        if(p && p.imprisoned){
+            body += `<div style="margin-top:5px;border:1px solid rgba(192,57,43,.4);border-radius:8px;padding:6px;background:rgba(192,57,43,.06);">
+                <div style="font-size:10px;color:#e59a8a;font-weight:600;">⛓️ 你身陷冷宫（${p.原因||''} · 第${p.旬数}旬 · 原位份${p.原位份||''}）</div>
+                <div style="font-size:8px;color:var(--text-mid);margin-top:2px;">健康${p.健康} · 精神${p.精神状态} · 私房银${p.银两}两 · 线索${(p.线索||[]).length}条 · 翻身概率${p.翻身概率}%</div>
+                <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">${['sort_items','befriend','send_letter','blood_book','hunger_strike','copy_sutra','bribe'].map(a=>{
+                    const conf={sort_items:'📦 整理旧物',befriend:'🤝 结交中人',send_letter:'✉️ 传密信(30两)',blood_book:'🩸 血书自辩(-3健康)',hunger_strike:'🥢 绝食明志(-8健康)',copy_sutra:'📿 抄写经书',bribe:'🪙 贿赂看守(20两)'}[a];
+                    return `<button class="chonghua-btn" onclick="coldSelf('${a}')">${conf}</button>`;}).join('')}</div>
+                <div style="margin-top:4px;font-size:8px;color:var(--text-light);">翻身六式（精神≥60，成败自负）：</div>
+                <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:2px;">${['blood','dowager','secret','escape','child','family'].map(m=>{
+                    const conf={blood:'🩸 血书鸣冤',dowager:'👵 托太后',secret:'🗝️ 秘密换命',escape:'🌑 趁乱越宫',child:'👶 子嗣求情',family:'🏠 家族营救'}[m];
+                    return `<button class="chonghua-btn" style="border-color:rgba(192,57,43,.5);color:#e59a8a;" onclick="coldSelf('release:${m}')">${conf}</button>`;}).join('')}</div>
+            </div>`;
+        }
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">📋 在押妃嫔（${(d.inmates||[]).length}人）</div>`;
+        if(!(d.inmates||[]).length){ body += `<div style="font-size:8px;color:var(--text-light);">冷宫门户清净，无人居住。</div>`; }
+        (d.inmates||[]).forEach(i=>{
+            body += `<div style="border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);">
+                <div style="display:flex;justify-content:space-between;"><span><b>${i.name}</b>（原${i.原身份}·${i.入住旬}入住）</span><span>秘密${i.secrets}条 · 关系${i.关系}</span></div>
+                <div>健康${i.健康状况} · 精神${i.精神状态}</div>
+                <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+                    <button class="chonghua-btn" onclick="coldInteract('${i.name}','visit')">🚪 探视</button>
+                    <button class="chonghua-btn" onclick="coldInteract('${i.name}','give')">🎁 递送(20两)</button>
+                    <button class="chonghua-btn" onclick="coldInteract('${i.name}','use_secret')">🗡️ 利用秘密</button>
+                    <button class="chonghua-btn" onclick="coldInteract('${i.name}','plead')">📜 求情(2行动)</button>
+                    <button class="chonghua-btn" onclick="coldInteract('${i.name}','taiyi')">💊 太医(30两)</button>
+                    <button class="chonghua-btn" onclick="coldInteract('${i.name}','bribe_guard')">🪙 买通看守(50两)</button>
+                </div></div>`;
+        });
+        body += `<div style="margin-top:5px;font-size:8px;color:var(--text-light);border-top:1px dashed var(--border-light);padding-top:3px;">🗝️ 冷宫管理（需协理权限）：
+            <button class="chonghua-btn" onclick="coldManage('improve')">💰 改善条件(100两)</button>
+            ${(d.inmates||[]).map(i=>`<button class="chonghua-btn" onclick="coldManage('pardon','${i.name}')">📜 特赦${i.name}</button><button class="chonghua-btn" onclick="coldManage('search','${i.name}')">🔍 搜查${i.name}</button>`).join('')}
+            <button class="chonghua-btn" onclick="coldManage('admit',prompt('裁决何人迁入冷宫？(输入名字)',''))">⚖️ 裁决入冷宫</button>
+            <button class="chonghua-btn" onclick="coldEnterSelf()">🏚️ 主动避居</button></div>`;
+        body += `<div style="font-size:8px;color:var(--text-light);margin-top:4px;">📜 冷宫日志<br>${(d.log||[]).slice(0,4).map(l=>'· '+l).join('<br>')}</div>`;
+        openModal('🏚️ 冷宫', body, '知道了', null, true);
+    } catch(e){ showToast('❌ 操作失败'); }
+}
+function coldInteract(name, action){ royalStylePost('/api/coldpalace/interact', {name:name, action:action}); }
+function coldManage(action, name){ royalStylePost('/api/coldpalace/manage', {action:action, name:name||''}); }
+function coldSelf(action){ royalStylePost('/api/coldpalace/self', {action:action}); }
+function coldEnterSelf(){ if(!confirm('确定主动避居冷宫？这将改变你的处境。'))return; royalStylePost('/api/coldpalace/enter', {reason:'主动避居，静思己过'}); }
+function royalStylePost(path, extra){
+    if(!playerId) return;
+    myFetch(`${API_BASE}${path}`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(Object.assign({player_id:playerId}, extra))}).then(r=>r.json()).then(d=>{
+        if(d.error){ showToast('❌ '+d.error, d.error.includes('行动点')?'error':undefined); return; }
+        window._coldPalace = d.overview;
+        if(d.attributes && window._lastGameData) window._lastGameData.attributes = d.attributes;
+        if(d.silver!==undefined && window._lastGameData) window._lastGameData.silver = d.silver;
+        if(d.npcs && window._lastGameData) Object.keys(d.npcs).forEach(n=>{ if(window._lastGameData.npcs&&window._lastGameData.npcs[n]) Object.assign(window._lastGameData.npcs[n], d.npcs[n]); });
+        if(d.game_over){ closeModal(); openModal('🕯️ 终局', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${(d.narration||'')}</div>`, '知道了', ()=>refreshState(), true); return; }
+        showToast('✅ '+(d.narration||'完成').slice(0,40));
+        openColdPalace();
+    }).catch(e=>showToast('❌ 操作失败'));
+}
+
+async function openAffairs(){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/affair/overview?player_id=${playerId}`);
+        const d = await r.json();
+        if(d.error){ showToast('❌ '+d.error); return; }
+        window._affairs = d;
+        let body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.6;">🌑 见不得光的关系，是护身符，也是催命符。</div>`;
+        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:4px;">🌒 我的私通（${(d.player||[]).length}）</div>`;
+        if(!(d.player||[]).length){ body += `<div style="font-size:8px;color:var(--text-light);">尚无。深宫寂寞，但每段关系都是把柄。</div>`; }
+        (d.player||[]).forEach(rel=>{
+            const riskColor = rel.风险值>=70?'#c0392b':rel.风险值>=50?'#8a6a3a':'var(--text-mid)';
+            body += `<div style="border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);">
+                <div style="display:flex;justify-content:space-between;"><span><b>${rel.对象}</b>（${rel.对象身份}）</span><span style="color:${riskColor};">风险${rel.风险值}${rel.风险值>=70?' ☠️':rel.风险值>=50?'⚠️':''}</span></div>
+                <div>关系：${rel.关系阶段} · 情感${rel.情感值} · 忠诚${rel.忠诚度} · 可${rel.特殊能力}</div>
+                <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+                    <button class="chonghua-btn" onclick="affairAct('develop','${rel.对象_type||''}','gift','${rel.对象}')">🌗 再见一面</button>
+                    <button class="chonghua-btn" onclick="affairAct('use',null,'','${rel.对象}')">💠 用其所长</button>
+                    <button class="chonghua-btn" onclick="affairAct('mitigate',null,'cut','${rel.对象}')">✂️ 断绝</button>
+                    <button class="chonghua-btn" onclick="affairAct('mitigate',null,'bribe_knower','${rel.对象}')">🪙 收买知情者</button>
+                    <button class="chonghua-btn" onclick="affairAct('mitigate',null,'divert','${rel.对象}')">🎭 制造假象</button>
+                    <button class="chonghua-btn" onclick="affairAct('mitigate',null,'confess_dowager','${rel.对象}')">👵 坦白太后</button>
+                    ${rel.风险值>=70?`<button class="chonghua-btn" style="border-color:rgba(192,57,43,.5);color:#e59a8a;" onclick="affairAct('mitigate',null,'silence','${rel.对象}')">🌑 灭口(心计70)</button>`:''}
+                </div></div>`;
+        });
+        body += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:4px;">${['侍卫','太医','外臣','宗室','宫人','妃嫔'].map(t=>
+            `<button class="chonghua-btn" onclick="affairDevelopWay('${t}')">＋ 结识${t}</button>`).join('')}
+            <button class="chonghua-btn" onclick="affairAct('probe')">🕸️ 刺探宫闱(1行动·20两)</button></div>`;
+        if((d.npc||[]).length){
+            body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🗡️ 我掌握的他人私情</div>`;
+            (d.npc||[]).forEach(n=>{
+                body += `<div style="border:1px solid rgba(192,57,43,.3);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);">
+                    <b>${n.妃嫔}</b> 与 ${n.对象}（${n.对象身份}）· ${n.关系阶段} · 证据${(n.掌握证据||[]).length}条
+                    <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
+                        <button class="chonghua-btn" onclick="affairAct('dispose',null,'expose','${n.妃嫔}')">⚖️ 揭发</button>
+                        <button class="chonghua-btn" onclick="affairAct('dispose',null,'blackmail','${n.妃嫔}')">💰 勒索</button>
+                        <button class="chonghua-btn" onclick="affairAct('dispose',null,'control','${n.妃嫔}')">🤝 控制</button>
+                        <button class="chonghua-btn" onclick="affairAct('dispose',null,'keep','${n.妃嫔}')">📜 保存</button>
+                    </div></div>`;
+            });
+        }
+        const sw = d.swap || {};
+        body += `<div style="margin-top:5px;border-top:1px dashed var(--border-light);padding-top:4px;font-size:9px;color:var(--text-dark);font-weight:600;">🕯️ 狸猫换子 ${sw.phase?({plan:'·密谋中（孕'+sw.孕旬+'/6旬）',ready:'·生产之日已到！',executed:sw.案发?'·⚖️ 已案发！':'·已执行（风险'+sw.风险值+'）'}[sw.phase]||''):''}</div>`;
+        if(!sw.phase){
+            body += `<div style="font-size:8px;color:var(--text-light);">终极赌局：需嫔位+、心计60+、银200、可靠内应（太医/侍卫/宫人且私交以上）。</div>
+                <button class="chonghua-btn" onclick="swapAct('eligibility')">🕯️ 起这个念头…</button>`;
+        } else if(sw.phase==='plan'){
+            body += `<div style="font-size:8px;color:var(--text-light);">假装有孕已 ${sw.孕旬}/6 旬。孕程满后，「生产之日」自来。</div>`;
+        } else if(sw.phase==='ready'){
+            body += `<button class="chonghua-btn" style="border-color:rgba(192,57,43,.5);color:#e59a8a;" onclick="swapAct('execute')">🕯️ 生产之日 · 按计划进行</button>`;
+        } else if(sw.phase==='executed'){
+            if(sw.案发){
+                body += `<div style="font-size:8px;color:#c0392b;">⚖️ 案发！皇帝在等你一个交代——</div>
+                    <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">
+                    <button class="chonghua-btn" style="border-color:rgba(192,57,43,.5);color:#e59a8a;" onclick="swapAct('case:deny')">🗡️ 抵死不认(20%+心计)</button>
+                    <button class="chonghua-btn" onclick="swapAct('case:confess')">📜 全盘托出(废为庶人)</button>
+                    <button class="chonghua-btn" onclick="swapAct('case:frame')">🎭 嫁祸内应(需情深)</button></div>`;
+            } else {
+                body += `<div style="font-size:8px;color:var(--text-mid);">知情者：${(sw.知情者||[]).join('、')||'—'} · 风险${sw.风险值}</div>
+                    <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">
+                    <button class="chonghua-btn" onclick="swapAct('aftercare:silence_witness')">🌑 打发接生婆(100两)</button>
+                    <button class="chonghua-btn" onclick="swapAct('aftercare:retire_medic')">📜 内应告老(50两)</button>
+                    <button class="chonghua-btn" onclick="swapAct('aftercare:bribe_maids')">🪙 收买宫人(80两)</button>
+                    <button class="chonghua-btn" onclick="swapAct('aftercare:nothing')">🌫️ 什么都不做(+20/次)</button></div>
+                    ${(d.player||[]).some(x=>x.对象===sw.内应)?`<button class="chonghua-btn" onclick="swapAct('reveal_at_crown')">🗝️ 若他登基：留遗言揭穿</button>`:''}
+                    <div style="font-size:7px;color:var(--text-light);">风险≥80 必案发；孩子立储后登基，即「狸猫天子」。</div>`;
+            }
+        }
+        if((d.risk_log||[]).length){ body += `<div style="font-size:7px;color:var(--text-light);margin-top:4px;border-top:1px dashed var(--border-light);padding-top:3px;">${(d.risk_log||[]).slice(0,3).map(l=>'· '+l).join('<br>')}</div>`; }
+        openModal('🌙 深宫私隐', body, '知道了', null, true);
+    } catch(e){ showToast('❌ 操作失败'); }
+}
+function affairDevelopWay(targetType){
+    const ways=[['summon','借故召见(1行动)'],['encounter','制造偶遇(1行动)'],['message','托人传话(50两)'],['gift','赠礼(30两)']];
+    const w=prompt('选择方式序号：\n'+ways.map((x,i)=>(i+1)+'. '+x[1]).join('\n'),'1');
+    const idx=parseInt(w,10)-1;
+    if(!(idx>=0&&idx<ways.length))return;
+    affairAct('develop',targetType,ways[idx][0],'');
+}
+function affairAct(action, targetType, way, name){
+    if(!playerId)return;
+    myFetch(`${API_BASE}/api/affair/action`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({player_id:playerId, action:action, target_type:targetType||'', way:way||'', name:name||'', op:way||''})})
+        .then(r=>r.json()).then(d=>{
+            if(d.error){ showToast('❌ '+d.error, d.error.includes('行动点')?'error':undefined); return; }
+            if(d.game_over){ closeModal(); openModal('🕯️ 终局', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', ()=>refreshState(), true); return; }
+            showToast((d.narration||'完成').slice(0,60));
+            openAffairs();
+        }).catch(e=>showToast('❌ 操作失败'));
+}
+function swapAct(action){
+    if(!playerId)return;
+    if(action==='eligibility'){
+        myFetch(`${API_BASE}/api/swap/action`, {method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({player_id:playerId, action:'eligibility'})}).then(r=>r.json()).then(d=>{
+            if(d.ok){
+                const ins=(d.insiders||[]).map((x,i)=>(i+1)+'. '+x.对象+'（'+x.对象身份+'·'+x.关系阶段+'）').join('\n');
+                const pick=prompt('内应人选（序号）：\n'+ins,'1');
+                const ii=parseInt(pick,10)-1;
+                if(!(d.insiders&&d.insiders[ii]))return;
+                if(!confirm('一旦开始，再无回头路。确定密谋狸猫换子？'))return;
+                swapActDo({action:'plan', insider:d.insiders[ii].对象});
+            } else { showToast('🕯️ 起不了这个念头：'+(d.blockers||[]).join('；')); }
+        }).catch(e=>showToast('❌ 操作失败'));
+        return;
+    }
+    swapActDo({action:action});
+}
+function swapActDo(payload){
+    myFetch(`${API_BASE}/api/swap/action`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(Object.assign({player_id:playerId}, payload))}).then(r=>r.json()).then(d=>{
+        if(d.error){ showToast('❌ '+d.error); return; }
+        if(d.game_over){ closeModal(); openModal('⚖️ 终局', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${(d.narration||'').split('\n').join('<br>')}</div>`, '知道了', ()=>refreshState(), true); return; }
+        closeModal();
+        openModal('🕯️ 狸猫局', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${(d.narration||'').split('\n').join('<br>')}</div>`, '知道了', ()=>{refreshState();openAffairs();}, true);
+    }).catch(e=>showToast('❌ 操作失败'));
+}
+
+async function openCourtOverview(){
+    if(!playerId) return;    try {
+        const r = await myFetch(`${API_BASE}/api/court/overview?player_id=${playerId}`);
+        const d = await r.json();
+        if(d.error){ showToast('❌ '+d.error); return; }
+        const pc = d.player_clan || {};
+        const father = pc.father || {};
+        const bros = (pc.brothers || []).map(b => `${b.name}（${b.官职||''}，${b.alive===false?'已故':b.age+'岁'}）`).join('、') || '（无兄弟）';
+        let body = `<div style="font-size:10px;color:var(--text-dark);font-weight:600;">🏠 ${pc.surname||''}氏家族</div>`;
+        body += `<div style="font-size:9px;color:var(--text-mid);line-height:1.7;margin-top:3px;">`;
+        body += `<div>父亲：${father.官职||''} ${father.name||''}（${father.alive===false?'已故':(father.age||'-')+'岁'} · 派系${father.派系||'-'} · 政绩${father.政绩||'-'}）</div>`;
+        body += `<div>兄弟：${bros}</div>`;
+        body += `<div>家族威望：<span style="color:var(--gold-dark);">${pc.家族威望||'-'}</span> · 家族银两：${pc.家族银两||'-'} · 风险值：${pc.风险值||0} · 恩荫：${pc.恩荫次数||0}次</div>`;
+        body += `<div style="color:var(--text-light);">标记：${(pc.标记||[]).join(' / ')||'—'}</div></div>`;
+        const fav = d.factions || {};
+        body += `<div style="margin-top:6px;font-size:9px;color:var(--text-dark);font-weight:600;">⚖️ 朝堂派系</div><div style="font-size:9px;color:var(--text-mid);line-height:1.7;">`;
+        body += Object.keys(fav).map(k => `${k} ${fav[k]}`).join(' · ') || '—';
+        body += `</div>`;
+        const rows = (d.npc_clans || []).map(c =>
+            `<div style="display:flex;justify-content:space-between;gap:4px;font-size:9px;padding:2px 0;border-bottom:1px dashed var(--border-light);color:var(--text-mid);"><span>${c.name}（${c.rank}）· ${c.father||''}</span><span style="white-space:nowrap;">${c.faction||''} · <span style="color:${c.favor>=15?'#4a8a5a':c.favor<=-15?'#c0392b':'var(--text-mid)'};">${c.relation}${c.favor>0?'+':''}${c.favor}</span></span></div>`
+        ).join('');
+        body += `<div style="margin-top:6px;font-size:9px;color:var(--text-dark);font-weight:600;">🌸 妃嫔母族（与玩家家族）</div><div style="margin-top:2px;">${rows||'<div style="font-size:8px;color:var(--text-light);">（尚无往来）</div>'}</div>`;
+        openModal(`🏛️ 前朝家族 · ${d.period||''}`, body, '知道了', null, true);
+    } catch(e){ showToast('❌ 操作失败'); }
+}
 async function openRelationNet(){
     if(!playerId) return;
     try {
@@ -4533,7 +4903,7 @@ async function openInteract(type, name) {
                     <button onclick="interactAction('${d.name}','ally')" class="interact-btn">🤝 结盟</button>
                     <button onclick="interactAction('${d.name}','rival')" class="interact-btn">⚔️ 陷害</button>
                     <button onclick="closeModal();startDuelFromPage('${d.name}')" class="interact-btn">🗡️ 争锋</button>
-                    <button onclick="openChildTransferMenu('${d.name}')" class="interact-btn">📜 子嗣过继</button>
+                    <button onclick="openChildTransferMenu('${d.name}')" class="interact-btn">📜 变更归属</button>
                     <button onclick="petitionRankAction('向皇后请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn" style="${isPlayerQueen ? 'display:none;' : ''}">🌸 向皇后请晋</button>
                     <button onclick="petitionRankAction('向皇上请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn">👑 向皇上请晋</button>
                     <button onclick="petitionRankAction('向太后请晋','${d.name.replace(/'/g, "\\'")}')" class="interact-btn">👵 向太后请晋</button>
@@ -4584,8 +4954,23 @@ async function openChildTransferMenu(npcName) {
             </div>`;
         });
     }
+    const recalled = (herChildren || []).filter(c => (c.adoptive_mother || '') === myName);
+    html += `<div style="border-top:1px dashed var(--border-light);padding-top:6px;font-size:8px;color:var(--text-light);">由 ${d.name} 代养的你的亲生骨肉——可接回自己名下</div>`;
+    if (recalled.length === 0) {
+        html += '<div style="font-size:8px;color:var(--text-light);text-align:center;padding:6px;background:var(--bg-card);border-radius:6px;">👶 她膝下并无你的亲子</div>';
+    } else {
+        recalled.forEach(c => {
+            const idx = herChildren.indexOf(c);
+            const age = Math.floor(c.age || 0);
+            html += `<div style="display:flex;align-items:center;gap:4px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;padding:4px 6px;">
+                <span>${c.gender === '皇子' ? '👑' : '🌸'} ${c.name || '未命名'}</span>
+                <span style="font-size:7px;color:var(--text-light);">${age}岁</span>
+                <button onclick="confirmAdoptRecall('${npcName.replace(/'/g, "\\'")}', ${idx})" style="margin-left:auto;padding:2px 8px;border:1px solid var(--gold);border-radius:6px;background:var(--gold-light);font-size:8px;cursor:pointer;font-family:inherit;color:var(--text-mid);">🏠 接回</button>
+            </div>`;
+        });
+    }
     html += '</div>';
-    openModal(`📜 子嗣过继 · ${npcName}`, html, '关闭', null, true);
+    openModal(`📜 变更归属 · ${npcName}`, html, '关闭', null, true);
 }
 
 async function confirmAdoptIn(motherName, childIndex) {
@@ -5241,8 +5626,13 @@ function openDraftPanel() {
     if (!dp) { showToast('📜 当前没有进行中的选秀'); return; }
     const endorseTag = e => e==='太后' ? '<span style="background:var(--gold-light);color:var(--text-mid);padding:0 5px;border-radius:6px;">👵太后属意</span>'
                         : e==='皇后' ? '<span style="background:rgba(192,57,43,0.2);color:#e59a8a;padding:0 5px;border-radius:6px;">👑皇后属意</span>' : '';
+    const rec = dp.recommend || {};
     const rows = dp.candidates.map(c=>{
-        const tags = c.endorsed_by.map(endorseTag).join(' ') + (c.influenced?' <span style="background:rgba(63,114,175,0.2);color:#9cc0e8;padding:0 5px;border-radius:6px;">🤝已打点</span>':'');
+        const tags = c.endorsed_by.map(endorseTag).join(' ') + (c.influenced?' <span style="background:rgba(63,114,175,0.2);color:#9cc0e8;padding:0 5px;border-radius:6px;">🤝已打点</span>':'')
+            + (c.npc_rec?` <span style="background:rgba(142,68,173,0.2);color:#c39bd3;padding:0 5px;border-radius:6px;">🏷️ ${c.npc_rec}已举荐</span>`:'')
+            + (c.rec_state==='ok'?' <span style="background:rgba(39,134,67,0.2);color:#7dcea0;padding:0 5px;border-radius:6px;">✅圣意属意</span>':'')
+            + (c.rec_state==='failed'?' <span style="background:rgba(120,120,120,0.2);color:#aaa;padding:0 5px;border-radius:6px;">❌举荐未成</span>':'')
+            + (c.impression_bonus?` <span style="background:rgba(212,172,13,0.15);color:var(--gold-dark);padding:0 5px;border-radius:6px;">👀偶遇+${c.impression_bonus}</span>`:'');
         let ops = '';
         if (dp.can_influence && !c.influenced) {
             ops += `<button onclick="draftAct('influence','${c.name}')" class="interact-btn" style="padding:2px 6px;">🤝 打点(${dp.can_influence_cost}两)</button>`;
@@ -5250,7 +5640,14 @@ function openDraftPanel() {
         if (dp.queen_endorse_pending) {
             ops += ` <button onclick="draftAct('endorse','${c.name.replace(/'/g,"\\'")}')" class="interact-btn" style="padding:2px 6px;">👑 举荐</button>`;
         }
-        return `<div style="border:1px solid var(--border-light);border-radius:8px;padding:5px;margin-bottom:4px;background:var(--bg-card);">
+        if (rec.used !== undefined && !c.rec_state) {
+            const quotaLeft = Math.max(0, (rec.max||0) - (rec.used||0));
+            const btn = quotaLeft>0
+                ? `<button onclick="openRecommendModal('${c.name}')" class="interact-btn" style="padding:2px 6px;border-color:var(--gold);color:var(--gold-dark);">📜 举荐</button>`
+                : `<span style="font-size:8px;color:var(--text-light);padding:2px 6px;">🔒 次数已尽</span>`;
+            ops += ` ${btn}`;
+        }
+        return `<div style="border:1px solid var(--border-light);border-radius:8px;padding:5px;margin-bottom:4px;${c.npc_rec?'border-color:rgba(142,68,173,0.5);':''}background:var(--bg-card);">
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">${c.icon} ${c.name} <span style="color:var(--text-light);">(${c.rank})</span></span>
                 <span>${tags}</span>
@@ -5259,14 +5656,102 @@ function openDraftPanel() {
             ${ops?`<div style="margin-top:3px;display:flex;gap:4px;">${ops}</div>`:''}
         </div>`;
     }).join('');
+    let recFooter = '';
+    if (rec.used !== undefined) {
+        const quotaLeft = Math.max(0,(rec.max||0)-(rec.used||0));
+        recFooter += `<div style="margin-top:4px;font-size:8px;color:var(--text-light);border-top:1px dashed var(--border-light);padding-top:3px;">📜 举荐剩余次数：${quotaLeft}/${rec.max||0}${(rec.cooldown_left||0)>0?` · 冷却${rec.cooldown_left}旬`:''}${rec.dowager_plea_available?` · <button onclick="remedyDo('dowager',null)" class="interact-btn" style="padding:1px 5px;">🙇 请太后说情</button>`:''}</div>`;
+        (rec.global_blockers||[]).forEach(b=>{ recFooter += `<div style="font-size:8px;color:#c0392b;">🔒 ${b}</div>`; });
+        (rec.npc_pending||[]).forEach(p=>{
+            recFooter += `<div style="margin-top:3px;font-size:8px;color:var(--text-mid);background:rgba(142,68,173,0.08);border:1px solid rgba(142,68,173,0.3);border-radius:6px;padding:3px;">🏷️ ${p.npc}欲举荐「${p.candidate}」：<button onclick="interfereDo('${p.npc}','whisper')" class="interact-btn" style="padding:1px 5px;">🗣️ 进谗言</button> <button onclick="interfereDo('${p.npc}','intercept')" class="interact-btn" style="padding:1px 5px;">✉️ 截留(${50}两)</button> <button onclick="interfereDo('${p.npc}','warn')" class="interact-btn" style="padding:1px 5px;">⚠️ 警告秀女</button></div>`;
+        });
+    }
     const hint = dp.is_player_queen
         ? (dp.queen_endorse_pending?'👑 你执掌凤印：请举荐一名属意秀女（每届一次）':'👑 你已完成本届皇后举荐')
         : '💡 三宫合议，下一转旬放榜；贵人及以上可打点内务府暗抬一人';
     openModal(`📋 ${dp.scale}采选名册`, `
         <div style="font-size:9px;color:var(--text-mid);">
             ${rows}
+            ${recFooter}
             <div style="font-size:7px;color:var(--text-light);text-align:center;margin-top:4px;">${hint}</div>
         </div>`, '关闭', null, true);
+}
+
+async function openRecommendModal(candidate){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/draft/recommend?player_id=${playerId}&candidate=${encodeURIComponent(candidate)}`);
+        const d = await r.json();
+        if(d.error){ showToast('❌ '+d.error); return; }
+        if(!d.eligible){
+            openModal('📜 举荐秀女', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">暂不可举荐：<br>${(d.blockers||[]).map(b=>'🔒 '+b).join('<br>')}</div>`, '知道了', null, true);
+            return;
+        }
+        let body = `<div style="font-size:10px;color:var(--text-mid);">被举荐者：<b>${candidate}</b>${d.competition?'<div style="margin-top:3px;color:#c39bd3;">⚠️ 此女已被他妃举荐。若你再举荐，将形成「竞争举荐」，圣心更难测（成功率-15%）。</div>':''}${d.impression_bonus?`<div style="color:var(--gold-dark);">👀 已安排偶遇（成功率+${d.impression_bonus}%）</div>`:''}</div>`;
+        body += `<div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;">`;
+        (d.methods||[]).forEach(m=>{
+            body += `<div style="border:1px solid var(--border-light);border-radius:8px;padding:6px;background:var(--bg-card);">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="font-size:10px;font-weight:600;color:var(--text-dark);">${m.icon} ${m.name}</span>
+                    <span style="font-size:9px;color:var(--gold-dark);">${m.locked?('🔒 '+m.locked):('成功率 '+m.rate+'%')}</span>
+                </div>
+                <div style="font-size:8px;color:var(--text-light);margin-top:2px;">${m.desc} · 消耗${m.cost}</div>
+                ${m.locked?'':`<button onclick="recommendDo('${candidate}','${m.key}')" class="interact-btn" style="margin-top:4px;padding:3px 8px;border-color:var(--gold);color:var(--gold-dark);">📜 就这么办</button>`}
+            </div>`;
+        });
+        body += `</div><div style="font-size:8px;color:var(--text-light);margin-top:5px;">💡 举荐成功：秀女保送入宫并对你怀「知遇之恩」；失败：威望与圣心俱损。</div>`;
+        openModal('📜 向皇帝举荐秀女', body, '暂不举荐', null, true);
+    } catch(e){ showToast('❌ 操作失败'); }
+}
+
+async function recommendDo(candidate, method, retry){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/draft/recommend`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, candidate: candidate, method: method, retry: !!retry})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '举荐失败');
+        closeModal();
+        if (d.draft_panel && window._lastGameData) window._lastGameData.draft_panel = d.draft_panel;
+        let body = `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${(d.narration||'').split('\n').join('<br>')}</div>`;
+        body += `<div style="margin-top:6px;font-size:8px;color:var(--text-light);">📜 ${d.method} · 成功率 ${d.rate}% · 掷骰 ${d.roll} · ${d.tier}</div>`;
+        if(!d.success && !d.retry){
+            body += `<div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
+                <button onclick="recommendDo('${candidate}','private',true)" class="interact-btn" style="padding:3px 8px;">🔁 再次举荐（1行动点·50两·成功率-10%）</button>
+                <button onclick="remedyDo('meet','${candidate}')" class="interact-btn" style="padding:3px 8px;">🌿 安排偶遇（需协理·+10%）</button>
+            </div>`;
+        }
+        openModal(`📜 举荐结果 · ${d.tier}`, body, '知道了', () => refreshState(), true);
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
+}
+
+async function interfereDo(npc, way){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/draft/interfere`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, npc: npc, way: way})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '处置失败');
+        if (d.draft_panel && window._lastGameData) window._lastGameData.draft_panel = d.draft_panel;
+        openModal('🏛️ 从中作梗', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', () => refreshState(), true);
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
+}
+
+async function remedyDo(kind, candidate){
+    if(!playerId) return;
+    try {
+        const r = await myFetch(`${API_BASE}/api/draft/remedy`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({player_id: playerId, kind: kind, candidate: candidate})
+        });
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error || '处置失败');
+        if (d.draft_panel && window._lastGameData) window._lastGameData.draft_panel = d.draft_panel;
+        openModal('🙏 补救安排', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', () => refreshState(), true);
+    } catch(e){ showToast('❌ ' + e.message, 'error'); }
 }
 
 async function draftAct(action, candidate) {
@@ -5372,7 +5857,7 @@ const req=gd.confidant_loyalty_required||70;const cost=gd.confidant_promote_cost
 const noPotential=servant.has_confidant_potential===false;
 let confBadge=isConf?'<span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;color:var(--gold-dark);">🔒 心腹</span>':'';
 let confBtns='';
-if(isConf){confBtns=`<button onclick="releaseConfidant('${servant.name}')" class="interact-btn" style="border-color:rgba(192,57,43,0.5);color:#e59a8a;">🔓 解除心腹</button>`;}
+if(isConf){confBtns=`<button onclick="openConfidantEvent()" class="interact-btn" style="border-color:var(--gold);color:var(--gold-dark);">📜 密谈</button><button onclick="releaseConfidant('${servant.name}')" class="interact-btn" style="border-color:rgba(192,57,43,0.5);color:#e59a8a;">🔓 解除心腹</button>`;}
 else if(!noPotential){confBtns=`<button onclick="promoteConfidant('${servant.name}')" class="interact-btn" style="border-color:var(--gold);color:var(--gold-dark);">🔒 立为心腹（${cost}两 · 忠诚≥${req}）</button>`;}
 else{confBtns=`<span style="font-size:8px;color:var(--text-light);">（心思浅薄，不堪托付）</span>`;}
 const mems=gd.confidant_memory||[];
@@ -5387,6 +5872,8 @@ async function dismissServant(name){if(!playerId)return;if(!confirm(`确定要�
 async function hireServant(type){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/hire`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,type:type})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
 async function promoteConfidant(name){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/promote_confidant`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
 async function releaseConfidant(name){if(!playerId)return;if(!confirm(`确定要收回对 ${name} 的信任吗？`))return;try{const r=await myFetch(`${API_BASE}/api/servant/release_confidant`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());showToast('✅ '+d.message);}catch(e){showToast('❌ 操作失败');}}
+async function openConfidantEvent(){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/confidant/events?player_id=${playerId}`);const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const ev=d.event;if(!ev){showToast('💭 心腹暂无事禀报');return;}let body=`<div style="font-size:10px;color:var(--text-mid);line-height:1.7;">${ev.desc||''}</div>`;body+=`<div style="margin-top:4px;font-size:9px;color:var(--text-light);">🔒 心腹 · ${ev.name||''}</div>`;body+=`<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;">`;(ev.choices||[]).forEach((c,i)=>{const cost=c.cost||{};const costStr=[cost.actions?`行动点${cost.actions}`:'',cost.silver?`银两${cost.silver}`:''].filter(Boolean).join(' · ');body+=`<button onclick="confidantRespond('${ev.id}',${i},'${encodeURIComponent(ev.target||'')}')" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;text-align:left;">${c.text}${costStr?`<span style="color:var(--text-light);">（${costStr}）</span>`:''}</button>`;});body+=`</div>`;openModal(`📜 ${ev.name||'心腹密谈'}`,body,'暂且搁置',null,true);}catch(e){showToast('❌ 操作失败');}}
+async function confidantRespond(evId,idx,targetEnc){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/confidant/trigger`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,event_id:evId,choice_index:idx,target:targetEnc?decodeURIComponent(targetEnc):''})});const d=await r.json();if(!r.ok||d.error)throw new Error(d.error||'处理失败');closeModal();openModal('📜 密谈结果',`<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`,'知道了',()=>refreshState(),true);}catch(e){showToast('❌ '+(e.message||'操作失败'),'error');}}
 
 function openRivalList(){
     const d=window._lastGameData;
@@ -5582,7 +6069,23 @@ async function nextPeriod() {
     isProcessing = false;
 }
 
-async function performAction(action){isProcessing=true;loading.style.display='block';showToast('⏳ 执行中...');try{const ar=await myFetch(`${API_BASE}/api/action`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,action:action})});const ad=await ar.json();if(!ad.success){const err=ad.error||'行为失败';showToast('❌ '+err,err.includes('行动点')?'error':undefined);loading.style.display='none';isProcessing=false;return;}const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);const sd=await sr.json();if(ad.message)addLogEntry(ad.message);updateUI({...sd,...ad,display_rank:sd.display_rank||sd.rank||'秀女',day:sd.day||1,silver:sd.silver||0,attributes:sd.attributes||{},attr_max:sd.attr_max||{宠爱:999,威望:3000},calendar_str:sd.calendar_str||'建元元年一月上旬',remaining_actions:sd.remaining_actions!==undefined?sd.remaining_actions:7,max_actions:sd.max_actions||7,inventory:sd.inventory||[],player_id:playerId});showToast('✅ '+(ad.message||'完成'));}catch(e){showToast('❌ 操作失败：'+e.message);}loading.style.display='none';isProcessing=false;}
+async function performAction(action){
+    if(!playerId||isProcessing)return;
+    const actionMap={'embroidery':'绣花','calligraphy':'练字','greet':'请安','study':'读书','rest':'休养','walk':'散步'};
+    const actionText=actionMap[action];
+    if(!actionText){showToast('❌ 未知行为');return;}
+    isProcessing=true;loading.style.display='block';showToast('⏳ 执行中...');
+    try{
+        const r=await myFetch(`${API_BASE}/api/act`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,choice:`我要${actionText}`,current_time:'辰时'})});
+        const d=await r.json();
+        if(d.error){showToast('❌ '+d.error,d.error.includes('行动点')?'error':undefined);return;}
+        updateUI(d);
+        if(d.narration){addLogEntry(d.narration);const csd=document.getElementById('currentStoryDisplay');if(csd)csd.innerHTML=d.narration;}
+        if(d.effects&&Object.keys(d.effects).length){addLogEntry(`📊 属性变化：${Object.entries(d.effects).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join(' ')}`);}
+        showToast('✅ '+actionText+'完毕');
+    }catch(e){showToast('❌ 操作失败：'+e.message);}
+    loading.style.display='none';isProcessing=false;
+}
 
 async function saveGame(slot, opts = {}) {
     const sid = playerId || localStorage.getItem('gongdou_playerId');
@@ -5932,6 +6435,21 @@ function loadIntrigueTargets() {
             toggleIntrigueTargetRequirement();
         })
         .catch(e => console.log('加载情报目标失败:', e));
+}
+
+function switchStrategyTab(tab){
+    ['attack','defend','fight'].forEach(t=>{
+        const panel=document.getElementById('strategy'+t.charAt(0).toUpperCase()+t.slice(1));
+        const btn=document.getElementById('stab_'+t);
+        if(panel)panel.style.display=(t===tab)?'block':'none';
+        if(btn)btn.style.fontWeight=(t===tab)?'600':'400';
+    });
+}
+async function strategyCleanse(){
+    const sel=document.getElementById('intrigueAction');
+    if(!sel)return;
+    sel.value='cleanse';
+    await performIntrigueAction();
 }
 
 async function performIntrigueAction() {
@@ -6833,8 +7351,7 @@ function princessMarriedHtml(p){
     }
     const kids = (c.offspring || []).filter(k => k.alive !== false);
     if(kids.length){
-        const kidLabel = kids[0]?.relation?.includes('外') ? '外孙' : '孙辈';
-        html += `<div style="font-size:7px;color:#8a6a3a;margin-top:2px;">👶 ${kids.length}个${kidLabel}：${kids.slice(0,4).map(k=>escapeHtmlText(k.name)).join('、')}${kids.length>4?'…':''}</div>`;
+        html += mansionKidsHtml(uid, kids);
     }
     const urgeable = !c.is_pregnant && !(c.postpartum_cooldown > 0) && !c.conceive_boost;
     if(urgeable && p.marriage_status !== '和亲'){
@@ -7007,14 +7524,61 @@ function princeMarriedHtml(p){
     }
     const kids = (c.offspring || []).filter(k => k.alive !== false);
     if(kids.length){
-        const kidLabel = kids[0]?.relation?.includes('外') ? '外孙' : '皇孙';
-        html += `<div style="font-size:7px;color:#8a6a3a;margin-top:2px;">👶 ${kids.length}个${kidLabel}：${kids.slice(0,4).map(k=>escapeHtmlText(k.name)).join('、')}${kids.length>4?'…':''}</div>`;
+        html += mansionKidsHtml(p.uid, kids);
     }
     const urgeable = !c.is_pregnant && !(c.postpartum_cooldown > 0) && !c.conceive_boost;
     if(urgeable){
         html += `<button class="chonghua-btn" onclick="progenyUrge('prince','${p.uid}','')" style="margin-top:2px;">🍼 催生</button>`;
     }
     return html;
+}
+
+function mansionKidsHtml(ownerUid, kids){
+    return `<div style="border-top:1px dashed rgba(158,190,178,0.15);margin-top:3px;padding-top:3px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:8px;color:var(--text-mid);">
+            <span>👶 后代 (${kids.length}人)</span>
+            <button class="chonghua-btn" id="dtgl_${ownerUid}" onclick="toggleMansionDescendants('${ownerUid}')">▶ 展开</button>
+        </div>
+        <div id="dlist_${ownerUid}" style="display:none;margin-top:3px;"></div>
+    </div>`;
+}
+async function toggleMansionDescendants(ownerUid){
+    const list=document.getElementById('dlist_'+ownerUid); const btn=document.getElementById('dtgl_'+ownerUid);
+    if(!list) return;
+    if(list.style.display!=='none'){ list.style.display='none'; if(btn)btn.textContent='▶ 展开'; return; }
+    list.style.display='block'; if(btn)btn.textContent='▼ 收起';
+    if(list.dataset.loaded==='1') return;
+    list.innerHTML='<div style="font-size:7px;color:var(--text-light);">载入中…</div>';
+    try{
+        const r=await myFetch(`${API_BASE}/api/mansion/descendants?player_id=${playerId}&child_uid=${ownerUid}`);
+        const d=await r.json();
+        if(d.error){list.innerHTML=`<div style="font-size:7px;color:#c0392b;">${d.error}</div>`;return;}
+        const ds=d.descendants||[];
+        if(!ds.length){list.innerHTML='<div style="font-size:7px;color:var(--text-light);">暂无后代</div>';list.dataset.loaded='1';return;}
+        const canManage=!!d.can_manage;
+        list.innerHTML=ds.map(g=>`<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;padding:3px 5px;margin-bottom:2px;font-size:8px;color:var(--text-mid);">
+            <span>${(g.gender||'').includes('女')?'🌸':'👑'} ${escapeHtmlText(g.name)}</span>
+            <span style="color:var(--text-light);">${g.age}岁·${g.gender}</span>
+            <span style="color:var(--text-light);">文${g.stats.文治}·武${g.stats.武略}·体${g.stats.体魄}</span>
+            <span style="color:${g.安置状态==='已入重华宫'?'#7a9ac0':'#8a6a3a'};">${g.安置状态==='已入重华宫'?'🏛️ 已入重华宫':'🏠 在府'}</span>
+            ${(g.安置状态==='在府'&&canManage)?`<button class="chonghua-btn" style="margin-left:auto;" onclick="admitDescendantChonghua('${ownerUid}','${g.uid}')">🏛️ 接入重华宫</button>`:''}
+        </div>`).join('');
+        list.dataset.loaded='1';
+    }catch(e){list.innerHTML='<div style="font-size:7px;color:#c0392b;">载入失败</div>';}
+}
+async function admitDescendantChonghua(ownerUid, gcUid){
+    if(!playerId)return;
+    try{
+        const r=await myFetch(`${API_BASE}/api/mansion/descendant/admit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,child_uid:ownerUid,descendant_uid:gcUid})});
+        const d=await r.json();
+        if(!r.ok)throw new Error(d.error||'接入失败');
+        showToast('✅ '+(d.narration||'已接入重华宫'));
+        const list=document.getElementById('dlist_'+ownerUid);
+        const wasShown=list&&list.style.display!=='none';
+        if(list)list.dataset.loaded='';
+        if(wasShown){toggleMansionDescendants(ownerUid);toggleMansionDescendants(ownerUid);}
+        refreshState();
+    }catch(e){showToast('❌ '+e.message,'error');}
 }
 
 async function princeApi(path, body){

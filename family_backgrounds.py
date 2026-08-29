@@ -494,3 +494,222 @@ def default_court_state():
 
 
 PLAYER_FAMILY_OPTIONS = []
+
+
+# ===== 前朝关联：家族事件引擎 =====
+FAMILY_EVENT_QUEUE_MAX = 2
+
+# 选项效果键（apply_family_choice 结算）：
+# 银两 / 威望（玩家）/ 家族威望 / 风险（家族风险值）/ 家族银两 / 恩荫（次数）
+# 好感_{派系}（朝堂党派好感）/ 族谊_{npc名}（NPC 家族与玩家家族关系）
+FAMILY_EVENT_TEMPLATES = [
+    {
+        "id": "clan_letter", "type": "家书问安", "icon": "✉️",
+        "title": "家父来信",
+        "desc": "父亲{father}遣人送来家书：\u201c为父在朝一切安好，家中诸事顺遂。听闻吾儿在宫中受用，阖家与有荣焉。\u201d",
+        "choices": [
+            {"text": "回信问安，附上关怀", "icon": "✉️", "effects": {"家族威望": 2}},
+            {"text": "捎回五十两补贴家用", "icon": "💰", "effects": {"银两": -50, "家族威望": 4, "风险": -3}},
+            {"text": "宫务繁忙，不必多礼", "icon": "🙅", "effects": {}},
+        ],
+    },
+    {
+        "id": "clan_favor", "type": "恩荫请托", "icon": "🏛️",
+        "title": "族中求官",
+        "desc": "族兄{brother}托人递话：愿在{faction}中谋一实缺，若得妃闱吹风，必不负家族栽培。",
+        "choices": [
+            {"text": "替他在御前美言几句", "icon": "🗣️", "effects": {"威望": -5, "恩荫": 1, "家族威望": 5, "好感_{faction}": 3}},
+            {"text": "婉拒：宫中不便干政", "icon": "🙅", "effects": {"风险": 3}},
+            {"text": "让他耐心候缺", "icon": "⏳", "effects": {}},
+        ],
+    },
+    {
+        "id": "clan_impeach", "type": "族中风波", "icon": "⚠️",
+        "title": "父亲遭弹劾",
+        "desc": "朝中有人弹劾父亲{father}政绩不实，御史连上两折。家族风险陡增，只怕风波会烧到宫里来。",
+        "choices": [
+            {"text": "花三百两打点御史", "icon": "💰", "effects": {"银两": -300, "风险": -12, "家族威望": 2}},
+            {"text": "御前剖白心迹，为父辩白", "icon": "🙇", "effects": {"威望": -8, "风险": -8}},
+            {"text": "静观其变，相信父亲", "icon": "⏳", "effects": {"风险": 6}},
+        ],
+    },
+    {
+        "id": "clan_alliance", "type": "联姻示好", "icon": "🤝",
+        "title": "同族示好",
+        "desc": "{npc}的母族遣人暗中示好：两家同朝为官，若能互为奥援，宫里宫外都好做事。",
+        "choices": [
+            {"text": "礼尚往来，两族修好", "icon": "🤝", "effects": {"族谊_{npc}": 15}},
+            {"text": "虚与委蛇，不置可否", "icon": "🎭", "effects": {"族谊_{npc}": 3}},
+            {"text": "闭门不见", "icon": "🚪", "effects": {"族谊_{npc}": -8}},
+        ],
+    },
+    {
+        "id": "clan_tribute", "type": "家族孝敬", "icon": "🧧",
+        "title": "家族孝敬",
+        "desc": "家族送来孝敬：白银二百两、绸缎四匹，另有父亲{father}手书一封，嘱托\u201c好生保重凤体\u201d。",
+        "choices": [
+            {"text": "笑纳", "icon": "🧧", "effects": {"银两": 200, "家族威望": 1}},
+            {"text": "退回大半，只留心意", "icon": "🎁", "effects": {"银两": 60, "威望": 2}},
+            {"text": "原封退回", "icon": "🚫", "effects": {"家族威望": -2}},
+        ],
+    },
+]
+
+
+def ensure_clans(game_state):
+    """补全缺失的家族结构（旧存档迁移 / NPC 新增），不产生情报。"""
+    from names import extract_surname
+    if not isinstance(getattr(game_state, "player_clan", None), dict):
+        try:
+            surname = extract_surname(game_state.name or "") or "沈"
+            game_state.player_clan = generate_player_clan(surname, getattr(game_state, "family_meta", {}) or {})
+        except Exception:
+            game_state.player_clan = None
+    clan = game_state.player_clan if isinstance(game_state.player_clan, dict) else None
+    for name, npc in (game_state.npcs or {}).items():
+        if not isinstance(npc, dict) or name == "太后" or not npc.get("alive", True):
+            continue
+        if not isinstance(npc.get("clan"), dict):
+            npc["clan"] = generate_npc_clan(name, npc.get("rank", "答应"), npc.get("family_meta"))
+        c = npc["clan"]
+        if clan and not isinstance(c.get("与玩家家族关系"), dict):
+            c["与玩家家族关系"] = initial_clan_relation(clan, c, game_state.rank.name)
+    return clan
+
+
+def process_clan_period(game_state):
+    """每旬前朝结算：家族补全、NPC 升降位反映到家族威望、风险值回落与爆发。返回情报列表。"""
+    msgs = []
+    clan = ensure_clans(game_state)
+    if not clan:
+        return msgs
+    from app import RANK_LEVELS
+    for name, npc in (game_state.npcs or {}).items():
+        if not isinstance(npc, dict) or name == "太后" or not npc.get("alive", True):
+            continue
+        c = npc.get("clan")
+        if not isinstance(c, dict):
+            continue
+        cur = npc.get("rank", "答应")
+        last = c.get("last_rank")
+        if last and last != cur:
+            old = RANK_LEVELS.get(last, 0)
+            new = RANK_LEVELS.get(cur, 0)
+            if new != old:
+                c["家族威望"] = max(10, min(95, int(c.get("家族威望", 40)) + (3 if new > old else -3)))
+                verb = "晋位" if new > old else "降位"
+                msgs.append(f"🏛️ {name}{verb}（{last}→{cur}），{c.get('surname', '')}家在朝中声势随之{'水涨船高' if new > old else '有所回落'}")
+        c["last_rank"] = cur
+    # 玩家家族风险：自然回落，积重则爆发
+    risk = int(clan.get("风险值", 0) or 0)
+    risk = max(0, risk - 1)
+    if risk >= 80 and random.random() < 0.5:
+        loss = random.randint(8, 15)
+        game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - loss)
+        clan["风险值"] = max(0, risk - 30)
+        msgs.append(f"⚠️ 家族积弊发作，御史弹劾牵连于你，威望-{loss}")
+        game_state.add_memory(f"家族风险爆发，威望-{loss}")
+    else:
+        clan["风险值"] = risk
+    return msgs
+
+
+def _alive_npc_with_clan(game_state):
+    names = [n for n, c in (game_state.npcs or {}).items()
+             if isinstance(c, dict) and c.get("alive", True) and n != game_state.name
+             and isinstance(c.get("clan"), dict)]
+    return random.choice(names) if names else None
+
+
+def generate_family_events(game_state):
+    """转旬时按概率生成 0~1 件家族事件（队列上限 2）。"""
+    if not isinstance(getattr(game_state, "family_event_queue", None), list):
+        game_state.family_event_queue = []
+    if not isinstance(getattr(game_state, "family_event_history", None), list):
+        game_state.family_event_history = []
+    if len(game_state.family_event_queue) >= FAMILY_EVENT_QUEUE_MAX:
+        return
+    if random.random() >= 0.4:
+        return
+    clan = game_state.player_clan if isinstance(game_state.player_clan, dict) else None
+    if not clan or not clan.get("father", {}).get("alive", True):
+        return
+    father = clan["father"]
+    brother = next((b["name"] for b in clan.get("brothers", []) if b.get("alive", True)), father["name"])
+    faction = clan.get("政治倾向") or "文官党"
+    npc = _alive_npc_with_clan(game_state)
+    if npc is None:
+        npc = "宫中同僚"
+    for tpl in random.sample(FAMILY_EVENT_TEMPLATES, len(FAMILY_EVENT_TEMPLATES)):
+        if "npc" in tpl["desc"] and npc == "宫中同僚" and tpl["id"] == "clan_alliance":
+            continue
+        game_state.family_event_queue.append({
+            "id": f"fam_{tpl['id']}_{game_state.year}_{game_state.month}_{len(game_state.family_event_queue)}",
+            "type": tpl["type"], "icon": tpl["icon"],
+            "title": tpl["title"].format(father=father["name"], brother=brother, faction=faction, npc=npc),
+            "desc": tpl["desc"].format(father=father["name"], brother=brother, faction=faction, npc=npc),
+            "choices": [{"text": ch["text"].format(faction=faction, npc=npc), "icon": ch.get("icon", ""),
+                         "effects": {k.format(faction=faction, npc=npc): v for k, v in (ch.get("effects") or {}).items()}}
+                        for ch in tpl["choices"]],
+            "period": f"{game_state.year}年{game_state.month}月",
+        })
+        return
+
+
+def _clamp(v, lo, hi):
+    return max(lo, min(hi, v))
+
+
+def apply_family_choice(game_state, ev, choice):
+    """结算家族事件选项。返回 {narration, effects}。"""
+    effects = {}
+    clan = game_state.player_clan if isinstance(game_state.player_clan, dict) else {}
+    favor = {"文官党": 50, "武官党": 50, "宗室党": 50}
+    favor.update(getattr(game_state, "court_faction_favor", None) or {})
+    for k, v in (choice.get("effects") or {}).items():
+        v = int(v)
+        if k == "银两":
+            game_state.silver = max(0, game_state.silver + v)
+            effects["银两"] = v
+        elif k == "威望":
+            old = int(game_state.attributes.get("威望", 0) or 0)
+            game_state.attributes["威望"] = int(_clamp(old + v, 0, game_state.get_attr_max("威望")))
+            effects["威望"] = v
+        elif k == "家族威望":
+            clan["家族威望"] = _clamp(int(clan.get("家族威望", 40) or 0) + v, 10, 95)
+            effects["家族威望"] = v
+        elif k == "风险":
+            clan["风险值"] = _clamp(int(clan.get("风险值", 0) or 0) + v, 0, 100)
+            effects["家族风险"] = v
+        elif k == "家族银两":
+            clan["家族银两"] = max(0, int(clan.get("家族银两", 0) or 0) + v)
+            effects["家族银两"] = v
+        elif k == "恩荫":
+            clan["恩荫次数"] = max(0, int(clan.get("恩荫次数", 0) or 0) + v)
+            effects["恩荫"] = v
+        elif k.startswith("好感_"):
+            faction = k.split("_", 1)[1]
+            if faction in favor:
+                favor[faction] = _clamp(int(favor[faction] or 0) + v, 0, 100)
+                effects[f"{faction}好感"] = v
+        elif k.startswith("族谊_"):
+            npc_name = k.split("_", 1)[1]
+            npc = (game_state.npcs or {}).get(npc_name)
+            rel = npc.get("clan", {}).get("与玩家家族关系") if isinstance(npc, dict) else None
+            if isinstance(rel, dict):
+                rel["好感"] = _clamp(int(rel.get("好感", 0) or 0) + v, -100, 100)
+                rel["关系"] = clan_relation_label(rel["好感"])
+                rel.setdefault("历史", []).append(f"[{ev.get('period', '')}] {ev.get('title', '')}：{choice.get('text', '')}")
+                effects[f"与{npc_name}母族"] = v
+    game_state.court_faction_favor = favor
+    narr = f"「{ev.get('title', '')}」你处置：{choice.get('text', '')}。"
+    parts = [f"{k}{'+' if v > 0 else ''}{v}" for k, v in effects.items() if v != 0]
+    if parts:
+        narr += "（" + "、".join(parts) + "）"
+    hist = getattr(game_state, "family_event_history", None)
+    if not isinstance(hist, list):
+        hist = []
+    hist.insert(0, {"id": ev.get("id"), "title": ev.get("title"), "type": ev.get("type"),
+                    "choice": choice.get("text"), "period": ev.get("period")})
+    game_state.family_event_history = hist[:20]
+    return {"narration": narr, "effects": effects}

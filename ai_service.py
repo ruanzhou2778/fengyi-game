@@ -3,19 +3,23 @@ import os
 import json
 import random
 import re
+import httpx
 from openai import OpenAI
 from dotenv import load_dotenv
 from names import generate_emperor_name_local
 
 load_dotenv()
 
-# 从环境变量或前端配置读取
+
 def get_openai_client(api_key=None, base_url=None):
-    if api_key is None:
-        api_key = os.getenv("OPENAI_API_KEY", "sk-xxx")
-    if base_url is None:
-        base_url = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
-    return OpenAI(api_key=api_key, base_url=base_url)
+    """全项目唯一的 OpenAI 客户端工厂（原 app.py 同名函数的语义）。
+
+    未配置或配置为空时返回 None（调用方自行走本地兜底）；带 15s 请求超时。
+    """
+    if not (api_key and base_url and str(api_key).strip() and str(base_url).strip()):
+        return None
+    http_client = httpx.Client(timeout=httpx.Timeout(15.0, connect=5.0))
+    return OpenAI(api_key=api_key, base_url=base_url, http_client=http_client)
 
 
 def _strip_reasoning(text):
@@ -105,6 +109,8 @@ CONFLICT_TYPES = {
 
 def generate_palace_conflict(game_state, initiator=None, target=None, api_key=None, base_url=None, model=None):
     """生成宫斗事件（优先AI，失败则降级到规则生成）"""
+    api_key = api_key or os.getenv("OPENAI_API_KEY")
+    base_url = base_url or os.getenv("OPENAI_BASE_URL")
     if initiator is None:
         all_names = [game_state.name] + list(game_state.npcs.keys())
         all_names = [n for n in all_names if n != "太后"]
@@ -149,6 +155,8 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
 
 直接输出故事："""
         client = get_openai_client(api_key, base_url)
+        if client is None:
+            raise RuntimeError("no_api_config")
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -219,6 +227,8 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
 
 def generate_emperor_name(api_key=None, base_url=None, model=None):
     """AI生成皇帝名字"""
+    api_key = api_key or os.getenv("OPENAI_API_KEY")
+    base_url = base_url or os.getenv("OPENAI_BASE_URL")
     try:
         prompt = """请生成一个古代中国风格的天子名字，风格类似"萧景琰"、"慕容九"、"李承乾"。
 要求：
@@ -229,6 +239,8 @@ def generate_emperor_name(api_key=None, base_url=None, model=None):
 
 返回纯JSON，不要其他文字。"""
         client = get_openai_client(api_key, base_url)
+        if client is None:
+            raise RuntimeError("no_api_config")
         response = client.chat.completions.create(
             model=model,
             messages=[

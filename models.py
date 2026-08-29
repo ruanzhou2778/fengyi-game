@@ -578,6 +578,24 @@ class GameState:
         self.heir_status = default_heir_status()
         # 选秀系统：None 或 {"active","scale","started_key","candidates","player_influenced"}
         self.draft = None
+        # 妃嫔举荐秀女系统（见 recommend_system.py / RECOMMEND_SYSTEM.md）
+        self.recommendations = {
+            "player_used": 0, "player_max": 2, "edition": None, "cooldown_left": 0,
+            "npc_recommendations": [], "recommendation_history": [], "dowager_plea_edition": None,
+        }
+        # 宗室系统（见 royal_clan.py / ROYAL_CLAN.md）
+        self.royal_clan = {"seeded": False}
+        # 冷宫系统（见 cold_palace.py / COLD_PALACE.md）
+        self.cold_palace = {"inmates": {}, "events": [],
+                            "environment": {"条件": "恶劣", "看守类型": "严厉", "银两储备": 0},
+                            "player": None, "log": []}
+        # 出轨/私通 + 狸猫换子（见 affair_system.py / AFFAIR_SYSTEM.md）
+        self.secret_relationships = {
+            "player": [], "npc": {}, "hidden_npc": {},
+            "swap": {"phase": None, "内应": "", "孕旬": 0, "child_uid": "", "真实父母": {},
+                     "知情者": [], "风险值": 0, "案发": False, "揭穿": False},
+            "risk_log": [],
+        }
         # 东宫内宅（太子妃 + 五级侧室）
         self.heir_consorts = default_heir_consorts()
         # 心腹系统：心腹宫人名字 + 心腹关键事件（最多20条）
@@ -600,6 +618,8 @@ class GameState:
         # 前朝关联系统：玩家家族 + 前朝总览（NPC 家族挂在 npcs[name]["clan"]）
         self.player_clan = None
         self.court = None
+        self.family_event_queue = []    # 待处理的家族事件（弹窗）
+        self.family_event_history = []  # 已处置的家族事件历史（最多20条）
         # NPC 妃嫔关系网：{A: {B: {好感, 印象, 关系类型, 历史事件, 最后互动旬}}}
         self.npc_relationships = {}
         self.relationship_events = []   # 待推送的关系变化事件
@@ -810,6 +830,10 @@ class GameState:
             "child_uid_seq": getattr(self, "child_uid_seq", 1),
             "heir_status": normalize_heir_status(getattr(self, "heir_status", None)),
             "draft": getattr(self, "draft", None),
+            "recommendations": getattr(self, "recommendations", {}),
+            "royal_clan": getattr(self, "royal_clan", {}),
+            "cold_palace": getattr(self, "cold_palace", {}),
+            "secret_relationships": getattr(self, "secret_relationships", {}),
             "heir_consorts": normalize_heir_consorts(getattr(self, "heir_consorts", None)),
             "chonghua": getattr(self, "chonghua", {"founded": False, "level": 1, "budget": 0, "children": [], "log": [], "events": []}),
             "frameups": getattr(self, "frameups", {"seq": 1, "cases": [], "log": []}),
@@ -820,6 +844,8 @@ class GameState:
             "governance_history": getattr(self, "governance_history", [])[-30:],
             "governance_cooldown": getattr(self, "governance_cooldown", 0),
             "governance_handled_streak": getattr(self, "governance_handled_streak", 0),
+            "family_event_queue": getattr(self, "family_event_queue", []),
+            "family_event_history": getattr(self, "family_event_history", [])[-20:],
             "npc_relationships": getattr(self, "npc_relationships", {}),
             "relationship_events": getattr(self, "relationship_events", []),
             "relationship_log": getattr(self, "relationship_log", [])[-40:],
@@ -965,6 +991,10 @@ class GameState:
                 game_state.governance_handled_streak = int(data.get("governance_handled_streak", 0) or 0)
             except (TypeError, ValueError):
                 game_state.governance_handled_streak = 0
+            feq = data.get("family_event_queue")
+            game_state.family_event_queue = feq if isinstance(feq, list) else []
+            feh = data.get("family_event_history")
+            game_state.family_event_history = feh[-20:] if isinstance(feh, list) else []
             nrel = data.get("npc_relationships")
             game_state.npc_relationships = nrel if isinstance(nrel, dict) else {}
             rel_ev = data.get("relationship_events")
@@ -981,6 +1011,24 @@ class GameState:
             heir_status = data.get("heir_status") if isinstance(data.get("heir_status"), dict) else default_heir_status()
             draft = data.get("draft")
             game_state.draft = draft if isinstance(draft, dict) else None
+            recs = data.get("recommendations")
+            game_state.recommendations = recs if isinstance(recs, dict) else {
+                "player_used": 0, "player_max": 2, "edition": None, "cooldown_left": 0,
+                "npc_recommendations": [], "recommendation_history": [], "dowager_plea_edition": None,
+            }
+            rc_data = data.get("royal_clan")
+            game_state.royal_clan = rc_data if isinstance(rc_data, dict) else {"seeded": False}
+            cp_data = data.get("cold_palace")
+            game_state.cold_palace = cp_data if isinstance(cp_data, dict) else {
+                "inmates": {}, "events": [], "environment": {"条件": "恶劣", "看守类型": "严厉", "银两储备": 0},
+                "player": None, "log": []}
+            sr_data = data.get("secret_relationships")
+            game_state.secret_relationships = sr_data if isinstance(sr_data, dict) else {
+                "player": [], "npc": {}, "hidden_npc": {},
+                "swap": {"phase": None, "内应": "", "孕旬": 0, "child_uid": "", "真实父母": {},
+                         "知情者": [], "风险值": 0, "案发": False, "揭穿": False},
+                "risk_log": [],
+            }
             game_state.heir_status = normalize_heir_status(heir_status)
             game_state.heir_consorts = normalize_heir_consorts(data.get("heir_consorts"))
             game_state.created_at = data.get("created_at", datetime.now().isoformat())
