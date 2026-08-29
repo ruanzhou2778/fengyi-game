@@ -12940,7 +12940,9 @@ def prince_marry():
 
 @app.route('/')
 def serve_index():
-    return send_file('index.html')
+    resp = send_file('index.html')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 @app.route('/<path:filename>', methods=['GET'])
 def serve_static(filename):

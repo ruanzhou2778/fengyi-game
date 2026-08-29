@@ -108,6 +108,10 @@ def develop_affair(game_state, target_type, way, name=None):
     """玩家主动发展/推进一段私通关系。target_type ∈ TARGET_TYPES。"""
     from app import guard_action, check_and_consume_action
     sr = get_affairs(game_state)
+    if not TARGET_TYPES.get(target_type) and name:
+        existing_rel = next((r for r in sr["player"] if r["对象"] == name), None)
+        if existing_rel:
+            target_type = existing_rel["对象类型"]  # 旧前端漏传类型时按对象名自愈
     spec = TARGET_TYPES.get(target_type)
     if not spec:
         return None, "无效的对象类型"
