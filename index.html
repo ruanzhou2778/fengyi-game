@@ -1662,6 +1662,10 @@
         .ending-act-frame { background: rgba(28,40,38,0.5); border: 1px solid rgba(158,190,178,0.08); border-radius: 6px; overflow: hidden; }
         .ending-act-img { width: 100%; height: 70px; background: linear-gradient(135deg, rgba(201,168,106,0.06), rgba(126,168,149,0.04)); display:flex; align-items:center; justify-content:center; }
         .ending-act-caption { font-size: 7px; color: var(--gold); text-align: center; padding: 3px 0; letter-spacing: 2px; border-top: 1px solid rgba(158,190,178,0.06); }
+        /* ===== 场景图美化（/avatars/ui/ 探测成功后 JS 给 body 加 scene-ok 才启用） ===== */
+        body.scene-ok .scenario-overlay { background-image: linear-gradient(rgba(245,237,229,0.86), rgba(245,237,229,0.96)), var(--scene1, none); background-size: cover; background-position: center; }
+        body.scene-ok .map-body { background-image: linear-gradient(rgba(13,20,18,0.90), rgba(13,20,18,0.96)), var(--scene2, none); background-size: cover; background-position: center; border-radius: 8px; }
+        body.scene-ok .ending-overlay { background-image: linear-gradient(rgba(8,12,11,0.87), rgba(8,12,11,0.96)), var(--scene3, none); background-size: cover; background-position: center; }
     </style>
 </head>
 <body>
@@ -7646,6 +7650,25 @@ nextPeriodBtn.addEventListener('click',nextPeriod);
 createScenarioOverlay();
 initMapCanvas();
 drawMap();
+// 场景图美化：探测 /avatars/ui/ 下三张场景图，全部可用才启用（不影响无图环境）
+(function initSceneDecor(){
+    const base = (typeof API_BASE !== 'undefined' ? API_BASE : '');
+    let okCount = 0;
+    const probes = [
+        ['scene1.jpg', '--scene1'],
+        ['scene2.jpg', '--scene2'],
+        ['scene3.jpg', '--scene3'],
+    ];
+    probes.forEach(([fname, varName])=>{
+        const img = new Image();
+        img.onload = function(){
+            document.documentElement.style.setProperty(varName, `url("${base}/avatars/ui/${fname}")`);
+            okCount++;
+            if(okCount === probes.length) document.body.classList.add('scene-ok');
+        };
+        img.src = `${base}/avatars/ui/${fname}`;
+    });
+})();
 document.body.classList.add('ui-ready');
 // 兜底保障：若上方脚本因异常未执行，2秒后强制显示界面
 setTimeout(function(){ if(!document.body.classList.contains('ui-ready')) document.body.classList.add('ui-ready'); }, 2000);

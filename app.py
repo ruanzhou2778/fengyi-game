@@ -3325,6 +3325,77 @@ def sync_npc_rel_to_player(game_state):
                 game_state.alliances[b] = max(game_state.alliances.get(b, 0), min(100, score - 40))
 
 
+TRUST_INTEL_POOL = [
+    "皇帝近日常往御书房召见兵部的人，怕是要有边事。",
+    "内务府这季度的份例被克扣了一成，好几个宫都在传。",
+    "皇后娘娘昨儿把掌事嬷嬷骂了一顿，中宫最近不太平。",
+    "某位主子深夜遣人出宫，送的东西怕是不小。",
+    "太医院最近常往慈宁宫跑，太后的凤体怕是有恙。",
+]
+
+
+def generate_npc_visits(game_state, max_visits=2):
+    """NPC 主动上门：由主控互动写入的 attitude 状态轴（好感/信任/畏惧/爱慕/敌意）驱动。
+
+    每旬最多 max_visits 条；没有 attitude 数据（旧存档/未互动过）时静默返回。
+    """
+    msgs = []
+    candidates = []
+    for name, npc in (game_state.npcs or {}).items():
+        if name in ("太后", "皇后"):
+            continue
+        if not isinstance(npc, dict) or not npc.get("alive", True):
+            continue
+        att = npc.get("attitude") or {}
+        if not isinstance(att, dict) or not att:
+            continue
+        love = int(att.get("爱慕", 0) or 0)
+        hate = int(att.get("敌意", 0) or 0)
+        trust = int(att.get("信任", 0) or 0)
+        fear = int(att.get("畏惧", 0) or 0)
+        favor = int(att.get("好感", 0) or 0)
+        if love >= 60:
+            candidates.append((0.5, "love", name))
+        elif hate >= 60:
+            candidates.append((0.5, "hate", name))
+        elif trust >= 70:
+            candidates.append((0.4, "trust", name))
+        elif fear >= 70:
+            candidates.append((0.4, "fear", name))
+        elif favor >= 55:
+            candidates.append((0.25, "favor", name))
+    if not candidates:
+        return msgs
+    random.shuffle(candidates)
+    for chance, kind, name in candidates:
+        if len(msgs) >= max_visits:
+            break
+        if random.random() > chance:
+            continue
+        if kind == "love":
+            gain = random.randint(8, 20)
+            game_state.silver += gain
+            msgs.append(f"🕊️ {name}主动来访，赠上一匣胭脂水粉（银两+{gain}）——她眼里藏不住的心思，宫里人都看在眼里。")
+            game_state.add_memory(f"{name}主动来访赠礼")
+        elif kind == "hate":
+            game_state.rivalries[name] = game_state.rivalries.get(name, 0) + random.randint(5, 12)
+            msgs.append(f"⚠️ {name}遣人在你必经的甬道上「无意」撞翻了你新制的裙裳——她对你的敌意，已经摆在明面上了。")
+            game_state.add_memory(f"{name}上门挑衅")
+        elif kind == "trust":
+            intel = random.choice(TRUST_INTEL_POOL)
+            msgs.append(f"🌙 {name}屏退左右，悄声告诉你：{intel}")
+            game_state.add_memory(f"{name}私下密告消息")
+        elif kind == "fear":
+            game_state.relationships.setdefault(name, {"好感": 0, "印象": "初识"})
+            cur = game_state.relationships[name].get("好感", 0)
+            game_state.relationships[name]["好感"] = min(100, cur + 3)
+            msgs.append(f"🍵 {name}亲自捧了盏新茶来请安，说话时眼神不敢与你相接——她怕你，也开始讨好你。")
+        else:  # favor
+            msgs.append(f"🌸 {name}遣宫人递来帖子，邀你改日同往御花园赏花。")
+            game_state.add_memory(f"收到{name}的赏花帖")
+    return msgs
+
+
 def process_npc_relationships(game_state):
     """每旬执行：NPC 之间关系自然变化 + 偶发事件。返回叙事消息列表（进情报）。"""
     msgs = []
@@ -8590,6 +8661,9 @@ def next_period():
     # ---- NPC 妃嫔关系网：每旬自然变化 ----
     for rel_msg in process_npc_relationships(game_state):
         intelligence.append(rel_msg)
+    # ---- NPC 主动上门：按互动状态轴（好感/信任/畏惧/爱慕/敌意）驱动 ----
+    for visit_msg in generate_npc_visits(game_state):
+        intelligence.append(visit_msg)
     # ---- 夺嫡暗流：储君空悬时逐旬更新皇子势头 ----
     heir_race_events = process_heir_race(game_state)
     for evt in heir_race_events:
@@ -13307,6 +13381,137 @@ def serve_avatar(fname):
     return send_from_directory(AVATAR_DIR, fname)
 
 
+INBOX_DIR = os.path.join(AVATAR_DIR, "_inbox")
+UI_ASSET_DIR = os.path.join(AVATAR_DIR, "ui")
+
+
+@app.route('/avatars/inbox/<path:fname>')
+def serve_inbox_avatar(fname):
+    """分类后的立绘图库（avatars/_inbox，文件名可能含 #/@ 等特殊字符）。"""
+    return send_from_directory(INBOX_DIR, fname)
+
+
+@app.route('/avatars/ui/<path:fname>')
+def serve_ui_asset(fname):
+    """UI 装饰用场景图（avatars/ui）。"""
+    return send_from_directory(UI_ASSET_DIR, fname)
+
+
+# ===== 按身份分桶的头像分配（avatars/index.json 由 tools/avatar_classifier.py 生成） =====
+AVATAR_INDEX_CACHE = {"mtime": None, "data": None}
+# 角色 → 桶优先级（依次回退，全空则回退旧 pack 逻辑）
+BUCKET_ALIASES = {
+    "player":  ["名妃", "妃嫔", "公主"],
+    "npc":     ["妃嫔", "名妃", "公主"],
+    "npc_太后": ["太后", "名妃", "妃嫔"],
+    "npc_皇后": ["名妃", "妃嫔"],
+    "child_m": ["皇子", "名臣", "驸马"],
+    "child_f": ["公主", "名妃", "妃嫔"],
+    "servant_宫女": ["宫女", "女官", "妃嫔"],
+    "servant_太监": ["侍卫", "男仆", "名臣"],
+    "royal_m": ["皇子", "名臣", "驸马"],
+    "royal_f": ["公主", "名妃", "妃嫔"],
+    "consort": ["妃嫔", "名妃", "公主"],
+    "cold":    ["妃嫔", "名妃"],
+}
+
+
+def _load_avatar_index():
+    """加载 avatars/index.json（带 mtime 缓存）；不存在返回 None。"""
+    path = os.path.join(AVATAR_DIR, "index.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        mt = os.path.getmtime(path)
+        if AVATAR_INDEX_CACHE["data"] is None or mt != AVATAR_INDEX_CACHE["mtime"]:
+            with open(path, "r", encoding="utf-8") as f:
+                AVATAR_INDEX_CACHE["data"] = json.load(f)
+            AVATAR_INDEX_CACHE["mtime"] = mt
+        return AVATAR_INDEX_CACHE["data"]
+    except Exception as e:
+        print(f"[warn] avatar index load: {e}")
+        return None
+
+
+def _bucket_pick(idx_data, buckets, seed_key):
+    """按桶优先级取一张确定性头像 URL；所有桶为空返回 None。"""
+    import hashlib, urllib.parse
+    for b in buckets:
+        entries = idx_data.get(b) or []
+        if not entries:
+            continue
+        idx = int(hashlib.md5(seed_key.encode()).hexdigest(), 16) % len(entries)
+        fname = entries[idx].get("file", "")
+        if not fname:
+            continue
+        return "/avatars/inbox/" + urllib.parse.quote(fname)
+    return None
+
+
+def _pack_assign_all(game_state):
+    """给所有无头像的角色批量分配头像：优先按身份桶取 _inbox 大图库，回退旧 pack。"""
+    import hashlib
+    pack_dir = os.path.join(AVATAR_DIR, "pack")
+    pack_files = sorted([f for f in os.listdir(pack_dir)
+                         if f.endswith((".jpg", ".png"))]) if os.path.isdir(pack_dir) else []
+    idx_data = _load_avatar_index()
+
+    def _assign(key, url):
+        if url:
+            _set_avatar_field(game_state.player_id, key, url)
+        elif pack_files:
+            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+            _set_avatar_field(game_state.player_id, key, f"/avatars/pack/{pack_files[idx]}")
+
+    def _buckets_for(key, fallback):
+        return BUCKET_ALIASES.get(key, fallback)
+
+    # 主控
+    if not getattr(game_state, "avatar", None):
+        _assign("player", _bucket_pick(idx_data, _buckets_for("player", ["名妃", "妃嫔"]), "player") if idx_data else None)
+    # NPC
+    for name, npc in (game_state.npcs or {}).items():
+        if isinstance(npc, dict) and not npc.get("avatar"):
+            alias = f"npc_{name}" if name in ("太后", "皇后") else "npc"
+            buckets = _buckets_for(alias, ["妃嫔", "名妃"])
+            _assign(f"npc:{name}", _bucket_pick(idx_data, buckets, f"npc:{name}") if idx_data else None)
+    # 子嗣（按性别分桶）
+    for c in (game_state.children or []):
+        if isinstance(c, dict) and not c.get("avatar"):
+            uid = str(c.get("uid", ""))
+            if not uid:
+                continue
+            key = f"child:{uid}"
+            buckets = "child_m" if c.get("gender") == "皇子" else "child_f"
+            _assign(key, _bucket_pick(idx_data, _buckets_for(buckets, ["皇子", "公主"]), key) if idx_data else None)
+    # 宫人
+    for s in (game_state.servants or []):
+        if getattr(s, "avatar", None) is None:
+            key = f"servant:{s.name}"
+            alias = "servant_宫女" if s.type == "宫女" else "servant_太监"
+            _assign(key, _bucket_pick(idx_data, _buckets_for(alias, ["宫女", "侍卫"]), key) if idx_data else None)
+    # 宗室
+    rc = getattr(game_state, "royal_clan", None)
+    if isinstance(rc, dict):
+        for pool, alias in (("males", "royal_m"), ("females", "royal_f")):
+            for name, m in (rc.get(pool) or {}).items():
+                if isinstance(m, dict) and not m.get("avatar"):
+                    key = f"royal:{name}"
+                    _assign(key, _bucket_pick(idx_data, _buckets_for(alias, ["皇子", "公主"]), key) if idx_data else None)
+    # 太后线妃嫔
+    ds = getattr(game_state, "dowager_state", None)
+    if isinstance(ds, dict):
+        for c in (ds.get("consorts") or []):
+            if isinstance(c, dict) and not c.get("avatar"):
+                key = f"consort:{c['name']}"
+                _assign(key, _bucket_pick(idx_data, _buckets_for("consort", ["妃嫔", "名妃"]), key) if idx_data else None)
+        # 冷宫
+        for name, inm in (ds.get("inmates") or {}).items():
+            if isinstance(inm, dict) and not inm.get("avatar"):
+                key = f"cold:{name}"
+                _assign(key, _bucket_pick(idx_data, _buckets_for("cold", ["妃嫔", "名妃"]), key) if idx_data else None)
+
+
 def _set_avatar_field(player_id, key, url):
     """根据 key 把头像 URL 写入对应角色的 avatar 字段。"""
     try:
@@ -13367,65 +13572,6 @@ def _pack_assign(game_state, key, seed):
     idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(files)
     url = f"/avatars/pack/{files[idx]}"
     _set_avatar_field(player_id=game_state.player_id, key=key, url=url)
-
-
-def _pack_assign_all(game_state):
-    """给所有无头像的角色批量分配图包头像。"""
-    if not os.path.isdir(os.path.join(AVATAR_DIR, "pack")):
-        return
-    import hashlib
-    pack_files = sorted([f for f in os.listdir(os.path.join(AVATAR_DIR, "pack"))
-                         if f.endswith((".jpg", ".png"))])
-    if not pack_files:
-        return
-    # 主控
-    if not getattr(game_state, "avatar", None):
-        key = "player"
-        idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
-        game_state.avatar = f"/avatars/pack/{pack_files[idx]}"
-    # NPC
-    for name, npc in (game_state.npcs or {}).items():
-        if isinstance(npc, dict) and not npc.get("avatar"):
-            key = f"npc:{name}"
-            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
-            npc["avatar"] = f"/avatars/pack/{pack_files[idx]}"
-    # 子嗣
-    for c in (game_state.children or []):
-        if isinstance(c, dict) and not c.get("avatar"):
-            key = f"child:{c.get('uid', '')}"
-            if key == "child:":
-                continue
-            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
-            c["avatar"] = f"/avatars/pack/{pack_files[idx]}"
-    # 宫人
-    for s in (game_state.servants or []):
-        if getattr(s, "avatar", None) is None:
-            key = f"servant:{s.name}"
-            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
-            s.avatar = f"/avatars/pack/{pack_files[idx]}"
-    # 宗室
-    rc = getattr(game_state, "royal_clan", None)
-    if isinstance(rc, dict):
-        for pool in ("males", "females"):
-            for name, m in (rc.get(pool) or {}).items():
-                if isinstance(m, dict) and not m.get("avatar"):
-                    key = f"royal:{name}"
-                    idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
-                    m["avatar"] = f"/avatars/pack/{pack_files[idx]}"
-    # 太后线妃嫔
-    ds = getattr(game_state, "dowager_state", None)
-    if isinstance(ds, dict):
-        for c in (ds.get("consorts") or []):
-            if isinstance(c, dict) and not c.get("avatar"):
-                key = f"consort:{c['name']}"
-                idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
-                c["avatar"] = f"/avatars/pack/{pack_files[idx]}"
-    # 冷宫
-    for name, inm in (ds.get("inmates") or {}).items() if isinstance(ds, dict) else []:
-        if isinstance(inm, dict) and not inm.get("avatar"):
-            key = f"cold:{name}"
-            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
-            inm["avatar"] = f"/avatars/pack/{pack_files[idx]}"
 
 
 def build_player_render(game_state):
