@@ -1658,6 +1658,10 @@
         .ending-actions button { padding: 5px 16px; border-radius: 10px; font-family: inherit; font-size: 9px; letter-spacing: 1px; cursor: pointer; transition: all 0.25s ease; }
         .ending-actions .eb-restart { border: 1px solid #f0a090; background: rgba(240,120,100,0.15); color: #f0b48f; }
         .ending-actions .eb-close { border: 1px solid rgba(158,190,178,0.12); background: transparent; color: #b0c0ba; }
+        .ending-act-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin: 6px 0 2px 0; }
+        .ending-act-frame { background: rgba(28,40,38,0.5); border: 1px solid rgba(158,190,178,0.08); border-radius: 6px; overflow: hidden; }
+        .ending-act-img { width: 100%; height: 70px; background: linear-gradient(135deg, rgba(201,168,106,0.06), rgba(126,168,149,0.04)); display:flex; align-items:center; justify-content:center; }
+        .ending-act-caption { font-size: 7px; color: var(--gold); text-align: center; padding: 3px 0; letter-spacing: 2px; border-top: 1px solid rgba(158,190,178,0.06); }
     </style>
 </head>
 <body>
@@ -1813,6 +1817,23 @@
 
             <!-- ===== 状态页 ===== -->
             <div class="page" id="pageStatus">
+                <!-- 主控立绘 + 外观 + 才艺加成卡 -->
+                <div class="stat-block" id="playerRenderBlock">
+                    <div style="display:flex;align-items:flex-start;gap:8px;">
+                        <div id="playerAvatarBox" style="width:64px;height:64px;flex:0 0 64px;border-radius:8px;background:rgba(28,40,38,0.5);border:1px solid var(--gold);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:32px;">👑</div>
+                        <div style="flex:1;min-width:0;">
+                            <div id="playerNameLine" style="font-size:13px;color:var(--gold);font-weight:600;letter-spacing:1px;">—</div>
+                            <div id="playerPersonalityLine" style="font-size:7px;color:var(--text-light);letter-spacing:1px;margin:1px 0 2px 0;">—</div>
+                            <div id="playerAppearanceDesc" style="font-size:8px;color:var(--text-mid);line-height:1.45;font-style:italic;">—</div>
+                        </div>
+                    </div>
+                    <div id="playerTalentBonus" style="margin-top:6px;padding-top:4px;border-top:1px dashed rgba(158,190,178,0.12);"></div>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;">
+                        <button class="cf-btn" style="flex:1;" onclick="openInteractDialog()">💬 互动对话</button>
+                        <button class="cf-btn" style="flex:1;" onclick="openPlayerDetail()">📋 详细档案</button>
+                    </div>
+                </div>
+
                 <div class="stat-block">
                     <div class="block-title">📋 基 本 信 息</div>
                     <div class="stat-row"><span class="label">姓名</span><span class="value gold" id="sName">-</span></div>
@@ -1825,7 +1846,6 @@
                     <div class="stat-row"><span class="label">性格</span><span class="value" id="sPersonality">-</span></div>
                     <div class="stat-row"><span class="label">特质</span><span class="value" id="sTraits">-</span></div>
                     <div class="stat-row"><span class="label">物品</span><span class="value"><button class="interact-btn" onclick="openInventory()">🎒 物品背包</button></span></div>
-                    <div class="stat-row"><span class="label">档案</span><span class="value"><button class="interact-btn" onclick="openPlayerDetail()">📋 我的档案</button></span></div>
                 </div>
 
                 <div class="stat-block">
@@ -2237,7 +2257,21 @@
 
         <!-- ========== 结局 / 一生回顾浮层 ========== -->
         <div class="ending-overlay" id="endingOverlay">
-            <div class="ending-box" id="endingBox"></div>
+            <div class="ending-box" id="endingBox">
+                <!-- 一生回顾三幕插画位（由 renderEndingOverlay 注入 image） -->
+                <div id="endingAct1Slot" class="ending-act-slot"></div>
+                <div id="endingAct2Slot" class="ending-act-slot"></div>
+                <div id="endingAct3Slot" class="ending-act-slot"></div>
+            </div>
+        </div>
+
+        <!-- ========== 主控互动对话弹窗 ========== -->
+        <div class="modal-overlay" id="interactDialogModal" style="display:none;">
+            <div class="modal-box" style="max-width:380px;max-height:88vh;overflow-y:auto;">
+                <div class="modal-title">💬 互 动 对 话</div>
+                <div id="interactDialogContent">加载中…</div>
+                <button class="modal-close-btn" onclick="closeInteractDialog()">关 闭</button>
+            </div>
         </div>
 
         <!-- ========== 转旬遮罩 ========== -->
@@ -3173,7 +3207,23 @@ function buildEndingStatsHtml(s){
         ['手上人命', `${s.killed_count} 条`],
     ];
     const grid = stats.map(([k,v])=>`<div class="ending-stat"><span class="es-label">${escapeHtmlText(k)}</span><span class="es-value">${escapeHtmlText(v)}</span></div>`).join('');
-    let html = `<div class="ending-section-title">📖 一 生 回 顾</div><div class="ending-stat-grid">${grid}</div>`;
+    // 一生回顾三幕：幼年/盛年/暮年 插画位（如果后端在 ending.acts 提供了 url / icon 则填充，否则留空位由玩家脑补）
+    const acts = s.acts || [];
+    const actTitles = ['🌱 幼 年','🌸 盛 年','🍂 暮 年'];
+    const actSlots = [1,2,3].map((i,idx)=>{
+        const a = acts[idx] || {};
+        const url = a.url || a.image || '';
+        const caption = a.caption || actTitles[idx];
+        const inner = url
+            ? `<img src="${escapeHtmlText(url)}" style="width:100%;height:100%;object-fit:cover;">`
+            : `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-light);font-size:9px;letter-spacing:2px;">${caption}</div>`;
+        return `<div class="ending-act-frame">
+            <div class="ending-act-img">${inner}</div>
+            <div class="ending-act-caption">${escapeHtmlText(caption)}</div>
+        </div>`;
+    }).join('');
+    let html = `<div class="ending-section-title">🎬 一 生 三 幕</div><div class="ending-act-row">${actSlots}</div>`;
+    html += `<div class="ending-section-title">📖 一 生 回 顾</div><div class="ending-stat-grid">${grid}</div>`;
     if(s.killed_list && s.killed_list.length){
         html += `<div class="ending-list">${s.killed_list.map(k=>`<div class="el-item">🕯️ ${escapeHtmlText(k.name)} · ${escapeHtmlText(k.cause)}</div>`).join('')}</div>`;
     }
@@ -3696,6 +3746,40 @@ sRank.textContent=rankText;
 sSilver.textContent=`🪙 ${data.silver||0}`;
 sCalendar.textContent=data.calendar_str||data.calendar||'建元元年一月上旬';
 sAppearance.textContent=data.appearance||'-';sTalent.textContent=data.talent||'-';sPersonality.textContent=data.personality||'-';sTraits.textContent=(data.traits||[]).length?data.traits.join('、'):'-';
+
+// === 主控立绘 + 外观 + 才艺加成 ===
+const pr = data.player_render || {};
+const avBox = document.getElementById('playerAvatarBox');
+const nameLine = document.getElementById('playerNameLine');
+const pPersonality = document.getElementById('playerPersonalityLine');
+const apDesc = document.getElementById('playerAppearanceDesc');
+const tbEl = document.getElementById('playerTalentBonus');
+if (avBox) {
+    const avUrl = pr.avatar || (window._avatars && (window._avatars['player'] || window._avatars['player:'+(data.player_name||'')]));
+    if (avUrl) avBox.innerHTML = `<img src="${avUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+    else avBox.innerHTML = data.dowager_mode ? '👑' : '🌸';
+}
+if (nameLine) nameLine.textContent = `${data.player_name||data.name||'未命名'} · ${playerAge}岁`;
+if (pPersonality) pPersonality.textContent = `${pr.personality||'—'} · ${pr.talent||'—'}`;
+if (apDesc) apDesc.textContent = pr.appearance || data.appearance || '—';
+if (tbEl) {
+    const bonus = pr.talent_bonus || [];
+    if (bonus.length === 0) {
+        tbEl.innerHTML = '<div style="font-size:7px;color:var(--text-light);">才艺尚未习得，可在开局面板选择。</div>';
+    } else {
+        // 按才艺分组渲染
+        const grouped = {};
+        bonus.forEach(b => { (grouped[b.src] = grouped[b.src] || []).push(b); });
+        const groupHtml = Object.entries(grouped).map(([src, items]) =>
+            `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:2px 0;">
+                <span style="font-size:7px;color:var(--gold);min-width:34px;">${src}</span>
+                <span style="font-size:7px;color:var(--text-mid);">${items.map(i=>`<span style="display:inline-block;padding:0 4px;margin-right:2px;background:rgba(158,190,178,0.06);border-radius:6px;">${i.attr} +${i.value}</span>`).join('')}</span>
+            </div>`
+        ).join('');
+        tbEl.innerHTML = `<div style="font-size:7px;color:var(--text-light);letter-spacing:1px;margin-bottom:2px;">🎨 才艺 · 五维加成</div>${groupHtml}`;
+    }
+}
+
 attrBars.innerHTML='';ATTR_KEYS.forEach(k=>{const v=attrs[k]??0;const mv=attrMax[k]??100;const pct=Math.min(100,Math.max(0,(v/mv)*100));attrBars.innerHTML+=`<div class="attr-bar-row"><span class="attr-name">${k}</span><div class="bar-track"><div class="bar-fill" style="width:${pct}%;"></div></div><span class="attr-value">${Math.round(v)}/${mv}</span></div>`;});
 memoriesList.innerHTML=(data.memories||[]).length===0?'暂无记忆':data.memories.slice(-6).map(m=>`<div>${m}</div>`).join('');
 changeLog.innerHTML=(data.attr_change_log||[]).length===0?'<span style="color:var(--text-light);font-size:7px;">暂无变化记录</span>':data.attr_change_log.slice().reverse().map(log=>{const ch=log.changes||{};const cs=Object.entries(ch).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join(' ');return `<div style="border-bottom:1px solid rgba(213,200,188,0.2);padding:1px 0;font-size:8px;"><span style="color:var(--text-light);font-size:6px;margin-right:2px;">${log.day?`[${log.day}日]`:''}</span> ${cs||'无变化'}${log.reason?`<span style="color:var(--text-light);font-size:6px;margin-left:2px;">（${log.reason}）</span>`:''}</div>`;}).join('');
@@ -4421,6 +4505,10 @@ function updateUI(data){
 if(data.avatars)window._avatars=Object.assign(window._avatars||{},data.avatars);
 if(data.dowager_mode!==undefined)window._dowagerMode=data.dowager_mode;
 if(data.avatars)window._avatars=Object.assign(window._avatars||{},data.avatars);
+// 后端返回的 background_tasks 时，注入宫斗日志的「后台核对」块
+if(Array.isArray(data.background_tasks) && data.background_tasks.length){
+    try { addBackgroundTaskCheck(data.background_tasks); } catch(e) {}
+}
 const displayRank=data.display_rank||data.rank||'-';const silver=data.silver||0;const calendarStr=data.calendar_str||data.calendar||'建元元年一月上旬';const rem=data.remaining_actions!==undefined?data.remaining_actions:7;const max=data.max_actions||7;const attrMax=data.attr_max||{宠爱:999,威望:3000};const playerAge=Math.max(12, Math.floor(Number(data.age||16) || 16));
 miniRank.textContent=displayRank;miniSilver.textContent=`🪙 ${silver}`;miniCalendar.textContent=calendarStr;miniActions.textContent=`⚡${rem}/${max}`;
 renderIntriguePanel(data.intrigue||window._lastGameData?.intrigue, data.intrigue_events||[]);
@@ -6291,6 +6379,148 @@ async function releaseConfidant(name){if(!playerId)return;if(!confirm(`确定要
 async function openConfidantEvent(){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/confidant/events?player_id=${playerId}`);const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const ev=d.event;if(!ev){showToast('💭 心腹暂无事禀报');return;}let body=`<div style="font-size:10px;color:var(--text-mid);line-height:1.7;">${ev.desc||''}</div>`;body+=`<div style="margin-top:4px;font-size:9px;color:var(--text-light);">🔒 心腹 · ${ev.name||''}</div>`;body+=`<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;">`;(ev.choices||[]).forEach((c,i)=>{const cost=c.cost||{};const costStr=[cost.actions?`行动点${cost.actions}`:'',cost.silver?`银两${cost.silver}`:''].filter(Boolean).join(' · ');body+=`<button onclick="confidantRespond('${ev.id}',${i},'${encodeURIComponent(ev.target||'')}')" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;text-align:left;">${c.text}${costStr?`<span style="color:var(--text-light);">（${costStr}）</span>`:''}</button>`;});body+=`</div>`;openModal(`📜 ${ev.name||'心腹密谈'}`,body,'暂且搁置',null,true);}catch(e){showToast('❌ 操作失败');}}
 async function confidantRespond(evId,idx,targetEnc){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/confidant/trigger`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,event_id:evId,choice_index:idx,target:targetEnc?decodeURIComponent(targetEnc):''})});const d=await r.json();if(!r.ok||d.error)throw new Error(d.error||'处理失败');closeModal();openModal('📜 密谈结果',`<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`,'知道了',()=>refreshState(),true);}catch(e){showToast('❌ '+(e.message||'操作失败'),'error');}}
 
+// ============================================================
+//  主控互动对话（5 风格 × 三选拼装 × NPC 表情/状态轴）
+// ============================================================
+const INTERACT_STYLE_TABLE = {
+    soft:   {label:'温柔', emoji:'🌸', desc:'低声软语，含笑带怯'},
+    cool:   {label:'冷淡', emoji:'❄️', desc:'神色淡漠，不假辞色'},
+    sharp:  {label:'锋利', emoji:'🗡️', desc:'言辞如刀，寸步不让'},
+    warm:   {label:'热情', emoji:'☀️', desc:'笑意盈盈，言语间尽是亲近'},
+    crafty: {label:'城府', emoji:'🦊', desc:'语带机锋，话外有话'},
+};
+const INTERACT_ACTIONS = [
+    "今日得闲，姐姐可愿一叙？",
+    "我有一事想请教妹妹。",
+    "姐姐可还记得昨日之言？",
+    "这盏新茶，妹妹可要尝尝？",
+    "你我何不在此间闲话几句？",
+];
+let _interactState = { npc_name: '', style: 'soft', action: INTERACT_ACTIONS[0], result: null };
+
+function _interactNpcList(){
+    const d=window._lastGameData||{};
+    return Object.entries(d.npcs||{}).filter(([n,v])=>n!=='太后'&&n!=='皇后'&&(v&&v.alive!==false)).map(([n])=>n);
+}
+
+function openInteractDialog(){
+    if(!playerId){ showToast('❌ 请先开始游戏'); return; }
+    const npcs = _interactNpcList();
+    if(npcs.length===0){ showToast('暂无可互动之人'); return; }
+    if(!npcs.includes(_interactState.npc_name)) _interactState.npc_name = npcs[0];
+    _interactState.result = null;
+    const npcOptions = npcs.map(n=>`<option value="${n}" ${n===_interactState.npc_name?'selected':''}>${n}</option>`).join('');
+    const styleBtns = Object.entries(INTERACT_STYLE_TABLE).map(([k,v])=>`
+        <button class="interact-btn" data-style="${k}" onclick="selectInteractStyle('${k}')"
+            style="flex:1;padding:4px 2px;font-size:8px;${_interactState.style===k?'border-color:var(--gold);color:var(--gold-dark);background:rgba(201,168,106,0.08);':''}">
+            ${v.emoji} ${v.label}
+        </button>`).join('');
+    const actionOpts = INTERACT_ACTIONS.map(a=>`<option value="${a.replace(/"/g,'&quot;')}" ${a===_interactState.action?'selected':''}>${a}</option>`).join('');
+    const html = `
+        <div style="display:flex;flex-direction:column;gap:6px;font-size:9px;color:var(--text-mid);">
+            <div>
+                <div style="font-size:7px;color:var(--text-light);letter-spacing:1px;margin-bottom:2px;">👤 对 象</div>
+                <select id="interactNpcSel" style="width:100%;padding:3px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:9px;background:var(--bg-card);color:var(--text-dark);">${npcOptions}</select>
+            </div>
+            <div>
+                <div style="font-size:7px;color:var(--text-light);letter-spacing:1px;margin-bottom:2px;">🎭 风 格</div>
+                <div id="interactStyleRow" style="display:flex;gap:3px;flex-wrap:wrap;">${styleBtns}</div>
+                <div id="interactStyleDesc" style="font-size:7px;color:var(--text-light);margin-top:2px;">${INTERACT_STYLE_TABLE[_interactState.style].desc}</div>
+            </div>
+            <div>
+                <div style="font-size:7px;color:var(--text-light);letter-spacing:1px;margin-bottom:2px;">🗣️ 动 作 / 开 场</div>
+                <select id="interactActionSel" style="width:100%;padding:3px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:9px;background:var(--bg-card);color:var(--text-dark);">${actionOpts}</select>
+            </div>
+            <div>
+                <div style="font-size:7px;color:var(--text-light);letter-spacing:1px;margin-bottom:2px;">📜 自 定 台 词（可选）</div>
+                <input id="interactCustomInp" placeholder="如：姐姐气色真好" style="width:100%;padding:3px 4px;border:1px solid var(--border-light);border-radius:4px;font-size:9px;background:var(--bg-card);color:var(--text-dark);box-sizing:border-box;">
+            </div>
+            <button onclick="submitInteractDialog()" class="interact-btn" style="width:100%;padding:5px;font-size:9px;margin-top:4px;">📨 发起互动</button>
+            <div id="interactResultBox" style="border-top:1px dashed rgba(158,190,178,0.12);padding-top:4px;margin-top:4px;"></div>
+        </div>`;
+    const box=document.getElementById('interactDialogContent');
+    if(box) box.innerHTML = html;
+    const m=document.getElementById('interactDialogModal');
+    if(m) m.style.display='flex';
+    setTimeout(()=>{
+        const sel=document.getElementById('interactNpcSel'); if(sel) sel.onchange=()=>{_interactState.npc_name=sel.value;};
+        const actSel=document.getElementById('interactActionSel'); if(actSel) actSel.onchange=()=>{_interactState.action=actSel.value;};
+    }, 10);
+}
+function closeInteractDialog(){
+    const m=document.getElementById('interactDialogModal'); if(m) m.style.display='none';
+}
+function selectInteractStyle(k){
+    _interactState.style = k;
+    const row=document.getElementById('interactStyleRow');
+    const desc=document.getElementById('interactStyleDesc');
+    if(row){
+        row.querySelectorAll('button[data-style]').forEach(b=>{
+            const on = b.dataset.style===k;
+            b.style.borderColor = on ? 'var(--gold)' : '';
+            b.style.color = on ? 'var(--gold-dark)' : '';
+            b.style.background = on ? 'rgba(201,168,106,0.08)' : '';
+        });
+    }
+    if(desc) desc.textContent = INTERACT_STYLE_TABLE[k].desc;
+}
+function _renderInteractAxes(axes){
+    if(!axes) return '';
+    const map = {好感:'好感', 信任:'信任', 畏惧:'畏惧', 爱慕:'爱慕', 敌意:'敌意'};
+    return Object.entries(map).map(([k,label])=>{
+        const v = axes[k]||0; const pct=Math.max(0,Math.min(100,v));
+        const color = k==='好感'||k==='爱慕' ? 'var(--gold)' : (k==='畏惧' ? '#e59a8a' : (k==='敌意' ? '#c0392b' : 'var(--text-mid)'));
+        return `<div style="display:flex;align-items:center;gap:4px;font-size:7px;color:var(--text-light);padding:1px 0;">
+            <span style="min-width:24px;">${label}</span>
+            <div style="flex:1;height:4px;background:rgba(158,190,178,0.08);border-radius:2px;overflow:hidden;">
+                <div style="width:${pct}%;height:100%;background:${color};"></div>
+            </div>
+            <span style="min-width:24px;text-align:right;color:${color};">${v}</span>
+        </div>`;
+    }).join('');
+}
+async function submitInteractDialog(){
+    if(!playerId) return;
+    const sel=document.getElementById('interactNpcSel');
+    const actSel=document.getElementById('interactActionSel');
+    const cust=document.getElementById('interactCustomInp');
+    const npc = sel ? sel.value : _interactState.npc_name;
+    const actionText = (cust && cust.value.trim()) ? cust.value.trim() : (actSel ? actSel.value : _interactState.action);
+    const styleKey = _interactState.style;
+    try{
+        const r=await myFetch(`${API_BASE}/api/player/interact`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,npc_name:npc,style:styleKey,action:actionText})});
+        const d=await r.json();
+        if(d.error){ showToast('❌ '+d.error,'error'); return; }
+        _interactState.result = d;
+        const box=document.getElementById('interactResultBox');
+        if(box){
+            const eff = d.effects||{};
+            const effText = Object.entries(eff).map(([k,v])=>{
+                const cls = v>0?'color:var(--gold);':(v<0?'color:#e59a8a;':'color:var(--text-light);');
+                return `<span style="${cls}font-size:7px;padding:0 3px;">${k}${v>0?'+':''}${v}</span>`;
+            }).join('') || '<span style="font-size:7px;color:var(--text-light);">无变化</span>';
+            box.innerHTML = `
+                <div style="font-size:9px;color:var(--text-dark);line-height:1.6;padding:4px;background:rgba(28,40,38,0.4);border-radius:4px;">
+                    <span style="font-size:18px;">${d.face||'🙂'}</span>
+                    <span style="font-size:7px;color:var(--text-light);letter-spacing:1px;">${d.npc_name} · ${d.style}姿态</span>
+                </div>
+                <div style="font-size:9px;color:var(--text-mid);line-height:1.7;padding:4px 2px;border-bottom:1px dashed rgba(158,190,178,0.12);">
+                    <span style="color:var(--gold);">${d.line||''}</span>
+                </div>
+                <div style="font-size:7px;color:var(--text-light);font-style:italic;padding:2px 0 4px 0;">${d.inner||''}</div>
+                <div style="padding-top:2px;">
+                    <div style="font-size:7px;color:var(--text-light);letter-spacing:1px;margin-bottom:2px;">📊 状态轴</div>
+                    ${_renderInteractAxes(d.axes)}
+                </div>
+                <div style="padding-top:4px;border-top:1px dashed rgba(158,190,178,0.12);margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+                    <span style="font-size:7px;color:var(--text-light);letter-spacing:1px;">本回合：</span>
+                    ${effText}
+                </div>`;
+        }
+        refreshState();
+    }catch(e){ showToast('❌ 互动失败','error'); }
+}
+
 function openRivalList(){
     const d=window._lastGameData;
     const rivals={}; if(d&&d.rivalries){for(let k in d.rivalries){if(d.rivalries[k]>0) rivals[k]=d.rivalries[k];}}
@@ -7255,6 +7485,29 @@ async function triggerRandomConflict() {
     loading.style.display = 'none';
 }
 
+// 宫斗日志分类：表情/动作描写 → 标签 chip；后台核对 → 🔒 小角标
+const CONFLICT_CATEGORY_MAP = [
+    {rx:/[😊😠😨😳😐🤔😌😲🤫😏😤🥺😡]/, cat:'表情', color:'#f4c873'},
+    {rx:/[拂袖|微笑|垂首|冷笑|掩袖|蹙眉|颔首|启唇|凝神|抬眸|叩首|抿唇|低眉|欠身|转头|侧目]/, cat:'动作', color:'#7ea895'},
+    {rx:/[下毒|陷害|造谣|争宠|拉拢|掌嘴|打胎|诅咒|栽赃|暗害|告发|受贿|私通]/, cat:'宫斗', color:'#c0392b'},
+    {rx:/[听|查|核|禀|报|记|录|账|档|册|印]/, cat:'核对', color:'#9a7ec0'},
+    {rx:/[晋|降|封|贬|黜|废|册|立|婚|丧|嫁]/, cat:'位份', color:'#c9a86a'},
+];
+function _categorizeConflict(text){
+    if(!text) return [];
+    const tags = [];
+    for(const r of CONFLICT_CATEGORY_MAP){ if(r.rx.test(text) && !tags.includes(r.cat)) tags.push(r.cat); }
+    return tags;
+}
+function _renderConflictTags(text){
+    const tags = _categorizeConflict(text);
+    if(!tags.length) return '';
+    return tags.map(t=>{
+        const c = (CONFLICT_CATEGORY_MAP.find(r=>r.cat===t)||{}).color || '#7ea895';
+        return `<span style="font-size:6px;color:${c};border:1px solid ${c};border-radius:6px;padding:0 3px;margin-right:2px;letter-spacing:1px;">${t}</span>`;
+    }).join('');
+}
+
 function addConflictLog(msg) {
     const container = document.getElementById('conflictLog');
     if (!container) return;
@@ -7262,9 +7515,42 @@ function addConflictLog(msg) {
     entry.style.borderBottom = '1px solid rgba(213,200,188,0.2)';
     entry.style.padding = '2px 0';
     entry.style.fontSize = '8px';
-    entry.innerHTML = msg;
+    const tags = _renderConflictTags(msg);
+    entry.innerHTML = (tags ? `<div style="margin-bottom:1px;">${tags}</div>` : '') + msg;
     container.prepend(entry);
     if (container.children.length > 30) container.removeChild(container.lastChild);
+}
+
+// 后台任务核对：暴露一个全局调用，主控动作后若后端返回了 background_tasks，注入一条核对记录
+function addBackgroundTaskCheck(tasks) {
+    if(!Array.isArray(tasks) || !tasks.length) return;
+    const container = document.getElementById('conflictLog');
+    if (!container) return;
+    const lines = tasks.map(t=>{
+        const status = t.status === 'ok' ? '✅' : (t.status === 'fail' ? '❌' : '⏳');
+        return `<div style="display:flex;justify-content:space-between;padding:1px 0;font-size:7px;color:var(--text-light);">
+            <span>${status} <span style="color:#9a7ec0;">${t.label||'任务'}</span></span>
+            <span>${t.detail||''}</span>
+        </div>`;
+    }).join('');
+    const wrap = document.createElement('div');
+    wrap.style.borderLeft = '2px solid #9a7ec0';
+    wrap.style.padding = '2px 4px';
+    wrap.style.marginBottom = '2px';
+    wrap.style.background = 'rgba(154,126,192,0.04)';
+    wrap.innerHTML = `<div style="font-size:7px;color:#9a7ec0;letter-spacing:1px;margin-bottom:1px;">🔒 后 台 核 对</div>${lines}`;
+    container.prepend(wrap);
+    if (container.children.length > 30) container.removeChild(container.lastChild);
+}
+
+// 一生回顾三幕插画位（结局弹窗使用）：把 stage 1/2/3 注入对应 slot
+function setEndingActSlot(stage, html) {
+    const map = {1:'endingAct1Slot', 2:'endingAct2Slot', 3:'endingAct3Slot'};
+    const el = document.getElementById(map[stage] || '');
+    if(el) el.innerHTML = html || '';
+}
+function clearEndingActSlots(){
+    for(let i=1;i<=3;i++) setEndingActSlot(i, '');
 }
 
 // ============================================================

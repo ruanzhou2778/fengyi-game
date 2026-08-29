@@ -8934,6 +8934,7 @@ def next_period():
         "key_events": classify_key_events(intelligence),
         "avatars": avatar_payload(game_state),
         "dowager_mode": is_dowager_active(game_state),
+        "player_render": build_player_render(game_state),
         "attributes": game_state.attributes,
         "attr_max": game_state.ATTR_MAX,
         "silver": game_state.silver,
@@ -9450,7 +9451,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "dowager_mode": is_dowager_active(game_state), "avatars": avatar_payload(game_state), "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state), "child_event_queue": getattr(game_state, "child_event_queue", []), "governance_events": getattr(game_state, "governance_events", []), "governance_history": getattr(game_state, "governance_history", [])[-10:], "family_event_queue": getattr(game_state, "family_event_queue", []), "family_event_history": (getattr(game_state, "family_event_history", []) or [])[-10:], "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5], **confidant_payload(game_state)})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "player_render": build_player_render(game_state), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "dowager_mode": is_dowager_active(game_state), "avatars": avatar_payload(game_state), "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state), "child_event_queue": getattr(game_state, "child_event_queue", []), "governance_events": getattr(game_state, "governance_events", []), "governance_history": getattr(game_state, "governance_history", [])[-10:], "family_event_queue": getattr(game_state, "family_event_queue", []), "family_event_history": (getattr(game_state, "family_event_history", []) or [])[-10:], "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5], **confidant_payload(game_state)})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -13425,6 +13426,191 @@ def _pack_assign_all(game_state):
             key = f"cold:{name}"
             idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
             inm["avatar"] = f"/avatars/pack/{pack_files[idx]}"
+
+
+def build_player_render(game_state):
+    """主控状态页所需：立绘 + 外观描写 + 才艺对五维的加成。"""
+    appearance = (getattr(game_state, "appearance", "") or "").strip()
+    talent = (getattr(game_state, "talent", "") or "").strip()
+    personality = (getattr(game_state, "personality", "") or "").strip()
+    # 固定外观描写（缺省时给一段古风模板）
+    if not appearance:
+        age = max(15, int(getattr(game_state, "age", 18) or 18))
+        appearance = "云鬓如墨，肤若凝脂，眉目间一派婉约，端的是温婉贤淑之姿。"
+    # 才艺对五维的加成：每位才艺最多 3 条修饰（属性 + 数值）
+    bonus_map = {
+        "琴艺": [("宠爱", 2), ("才情", 4), ("魅力", 2)],
+        "棋艺": [("谋略", 4), ("心计", 2), ("才情", 1)],
+        "书画": [("才情", 5), ("福运", 1), ("魅力", 1)],
+        "诗词": [("才情", 5), ("威望", 1), ("魅力", 1)],
+        "歌舞": [("宠爱", 3), ("魅力", 4), ("福运", 1)],
+        "刺绣": [("才艺", 5), ("福运", 1), ("才情", 1)],
+        "厨艺": [("宠爱", 2), ("福运", 2), ("健康", 1)],
+        "医理": [("健康", 2), ("福运", 3), ("才情", 1)],
+        "音律": [("才情", 3), ("魅力", 2), ("宠爱", 1)],
+        "花艺": [("福运", 3), ("魅力", 2), ("才情", 1)],
+    }
+    talent_bonus = []
+    for k in re.split(r"[、，,\s]+", talent):
+        k = k.strip()
+        if not k:
+            continue
+        if k in bonus_map:
+            for attr, val in bonus_map[k]:
+                talent_bonus.append({"attr": attr, "value": val, "src": k})
+    return {
+        "avatar": getattr(game_state, "avatar", None) or "",
+        "appearance": appearance,
+        "talent": talent or "—",
+        "personality": personality or "—",
+        "traits": list(getattr(game_state, "traits", []) or []),
+        "talent_bonus": talent_bonus,
+    }
+
+
+# ===== 主控互动对话：手势/语气/动作 三选拼装 + NPC 状态轴改动 =====
+INTERACT_STYLES = {
+    "soft":   {"label": "温柔",   "emoji": "🌸", "tone": "低声软语，含笑带怯"},
+    "cool":   {"label": "冷淡",   "emoji": "❄️", "tone": "神色淡漠，不假辞色"},
+    "sharp":  {"label": "锋利",   "emoji": "🗡️", "tone": "言辞如刀，寸步不让"},
+    "warm":   {"label": "热情",   "emoji": "☀️", "tone": "笑意盈盈，言语间尽是亲近"},
+    "crafty": {"label": "城府",   "emoji": "🦊", "tone": "语带机锋，话外有话"},
+}
+NPC_FACES = {
+    "joy": "😊", "shy": "😳", "anger": "😠", "fear": "😨",
+    "cold": "😐", "puzzled": "🤔", "satisfied": "😌", "amazed": "😲",
+}
+
+def _pick_npc_face(npc, axes):
+    """根据 NPC 当前状态轴（好感/信任/畏惧/爱慕）选择表情。"""
+    if axes is None:
+        return NPC_FACES["puzzled"]
+    trust = axes.get("信任", 30)
+    fear = axes.get("畏惧", 0)
+    favor = axes.get("好感", 30)
+    love = axes.get("爱慕", 0)
+    if fear >= 60: return NPC_FACES["fear"]
+    if love >= 50: return NPC_FACES["shy"]
+    if trust >= 70: return NPC_FACES["joy"]
+    if favor >= 60: return NPC_FACES["satisfied"]
+    if favor <= 20 or axes.get("敌意", 0) >= 50: return NPC_FACES["anger"]
+    if trust <= 20: return NPC_FACES["cold"]
+    return NPC_FACES["puzzled"]
+
+
+def _ensure_npc_axes(npc):
+    """保证 NPC 有 4 维状态轴（态度/信任/畏惧/爱慕），旧数据兼容。"""
+    if not isinstance(npc, dict):
+        return
+    npc.setdefault("attitude", {})
+    axes = npc["attitude"]
+    axes.setdefault("好感", 30)
+    axes.setdefault("信任", 30)
+    axes.setdefault("畏惧", 0)
+    axes.setdefault("爱慕", 0)
+    axes.setdefault("敌意", 0)
+
+
+def _compute_interact_effects(style_key, npc_axes):
+    """根据 5 种风格计算对 NPC 四轴的影响（好感/信任/畏惧/爱慕）。"""
+    table = {
+        "soft":   {"好感": 4, "信任": 3, "畏惧": -2, "爱慕": 2, "敌意": -1},
+        "cool":   {"好感": -1, "信任": 1, "畏惧": 3, "爱慕": 0, "敌意": 1},
+        "sharp":  {"好感": -3, "信任": -2, "畏惧": 6, "爱慕": -1, "敌意": 4},
+        "warm":   {"好感": 5, "信任": 4, "畏惧": -1, "爱慕": 3, "敌意": -2},
+        "crafty": {"好感": 0, "信任": 2, "畏惧": 4, "爱慕": 1, "敌意": 0},
+    }
+    base = dict(table.get(style_key, table["soft"]))
+    # 主控的才情/心计对结果有微调
+    return base
+
+
+def build_interact_line(player_name, style_key, action, target_name):
+    """根据风格 + 动作拼出一句主控台词。"""
+    s = INTERACT_STYLES.get(style_key, INTERACT_STYLES["soft"])
+    templates = {
+        "soft":   ["{p}朝{t}盈盈一福，轻声道：「{act}。」", "{p}低眉浅笑，对{t}柔声道：「{act}。」"],
+        "cool":   ["{p}瞥了{t}一眼，淡声道：「{act}。」", "{p}负手而立，对{t}冷冷道：「{act}。」"],
+        "sharp":  ["{p}目光微凛，对{t}冷笑道：「{act}。」", "{p}一字一顿，对{t}道：「{act}！」"],
+        "warm":   ["{p}挽住{t}的臂膀，爽朗笑道：「{act}！」", "{p}满脸堆欢，对{t}道：「{act}。」"],
+        "crafty": ["{p}轻轻一笑，对{t}意味深长道：「{act}？」", "{p}端起茶盏，对{t}悠悠道：「{act}。」"],
+    }
+    pool = templates.get(style_key, templates["soft"])
+    line = random.choice(pool)
+    return line.format(p=player_name or "我", t=target_name or "对方", act=action or "今日倒有闲心")
+
+
+def player_interact_npc(game_state, npc_name, style_key, action_text):
+    """主控主动与 NPC 互动：三选拼装 + 状态轴改动 + 表情反应。"""
+    if npc_name not in game_state.npcs:
+        return None, "NPC不存在"
+    npc = game_state.npcs[npc_name]
+    if isinstance(npc, dict) and not npc.get("alive", True):
+        return None, "该妃嫔已不在后宫"
+    _ensure_npc_axes(npc)
+    axes = npc["attitude"]
+    style = INTERACT_STYLES.get(style_key)
+    if not style:
+        return None, "未知风格"
+    effects = _compute_interact_effects(style_key, axes)
+    for k, v in effects.items():
+        axes[k] = max(0, min(100, int(axes.get(k, 30)) + int(v)))
+    # 同步主控关系的「好感」（影响宫斗/举荐）
+    if "好感" in axes:
+        cur = game_state.relationships.get(npc_name, {}).get("好感", 0)
+        delta = effects["好感"] // 2
+        if delta != 0:
+            game_state.relationships.setdefault(npc_name, {"好感": 0, "印象": "初识"})
+            game_state.relationships[npc_name]["好感"] = max(-100, min(100, cur + delta))
+    # 主角台词 + NPC 表情 + 内心活动
+    line = build_interact_line(getattr(game_state, "name", ""), style_key, action_text, npc_name)
+    face = _pick_npc_face(npc, axes)
+    inner = ""
+    if axes.get("畏惧", 0) >= 60:
+        inner = f"{npc_name}心头一凛，不敢直视。"
+    elif axes.get("爱慕", 0) >= 50:
+        inner = f"{npc_name}粉面微红，垂下了眼睫。"
+    elif axes.get("敌意", 0) >= 50:
+        inner = f"{npc_name}眉峰一挑，拂袖欲去。"
+    elif axes.get("信任", 0) >= 70:
+        inner = f"{npc_name}会心一笑，点了点头。"
+    else:
+        inner = f"{npc_name}神色不动，似在揣度来意。"
+    # 落账
+    game_state.add_attr_change(
+        {"心计": (1 if style_key in ("crafty", "sharp") else 0) - (1 if style_key == "soft" else 0)},
+        f"与{npc_name}互动：{style['label']}姿态"
+    )
+    game_state.add_memory(f"以{style['label']}姿态对{npc_name}：{action_text}")
+    return {
+        "line": line,
+        "face": face,
+        "inner": inner,
+        "effects": effects,
+        "axes": dict(axes),
+        "style": style["label"],
+        "npc_name": npc_name,
+    }, None
+
+
+@app.route('/api/player/interact', methods=['POST'])
+def api_player_interact():
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    npc_name = data.get('npc_name')
+    style_key = data.get('style', 'soft')
+    action_text = (data.get('action') or '').strip() or "今日天气正好"
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    ok, err = guard_action(game_state)
+    if not err and not ok:
+        return err
+    payload, err_msg = player_interact_npc(game_state, npc_name, style_key, action_text)
+    if err_msg:
+        return jsonify({"error": err_msg}), 400
+    autosave_session(player_id)
+    return jsonify({**payload, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions})
 
 
 def avatar_payload(game_state):
