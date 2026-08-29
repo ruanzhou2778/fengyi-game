@@ -13334,8 +13334,87 @@ def _set_avatar_field(player_id, key, url):
         print(f"[warn] avatar set {key}: {e}")
 
 
+def _pack_assign(game_state, key, seed):
+    """角色无自定义头像时，从图包中确定性分配一张。"""
+    if getattr(game_state, "avatar", None) and key == "player":
+        return  # 玩家有自定义头像
+    pack_dir = os.path.join(AVATAR_DIR, "pack")
+    if not os.path.isdir(pack_dir):
+        return
+    files = sorted([f for f in os.listdir(pack_dir) if f.endswith((".jpg", ".png"))])
+    if not files:
+        return
+    import hashlib
+    idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(files)
+    url = f"/avatars/pack/{files[idx]}"
+    _set_avatar_field(player_id=game_state.player_id, key=key, url=url)
+
+
+def _pack_assign_all(game_state):
+    """给所有无头像的角色批量分配图包头像。"""
+    if not os.path.isdir(os.path.join(AVATAR_DIR, "pack")):
+        return
+    import hashlib
+    pack_files = sorted([f for f in os.listdir(os.path.join(AVATAR_DIR, "pack"))
+                         if f.endswith((".jpg", ".png"))])
+    if not pack_files:
+        return
+    # 主控
+    if not getattr(game_state, "avatar", None):
+        key = "player"
+        idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+        game_state.avatar = f"/avatars/pack/{pack_files[idx]}"
+    # NPC
+    for name, npc in (game_state.npcs or {}).items():
+        if isinstance(npc, dict) and not npc.get("avatar"):
+            key = f"npc:{name}"
+            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+            npc["avatar"] = f"/avatars/pack/{pack_files[idx]}"
+    # 子嗣
+    for c in (game_state.children or []):
+        if isinstance(c, dict) and not c.get("avatar"):
+            key = f"child:{c.get('uid', '')}"
+            if key == "child:":
+                continue
+            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+            c["avatar"] = f"/avatars/pack/{pack_files[idx]}"
+    # 宫人
+    for s in (game_state.servants or []):
+        if getattr(s, "avatar", None) is None:
+            key = f"servant:{s.name}"
+            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+            s.avatar = f"/avatars/pack/{pack_files[idx]}"
+    # 宗室
+    rc = getattr(game_state, "royal_clan", None)
+    if isinstance(rc, dict):
+        for pool in ("males", "females"):
+            for name, m in (rc.get(pool) or {}).items():
+                if isinstance(m, dict) and not m.get("avatar"):
+                    key = f"royal:{name}"
+                    idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+                    m["avatar"] = f"/avatars/pack/{pack_files[idx]}"
+    # 太后线妃嫔
+    ds = getattr(game_state, "dowager_state", None)
+    if isinstance(ds, dict):
+        for c in (ds.get("consorts") or []):
+            if isinstance(c, dict) and not c.get("avatar"):
+                key = f"consort:{c['name']}"
+                idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+                c["avatar"] = f"/avatars/pack/{pack_files[idx]}"
+    # 冷宫
+    for name, inm in (ds.get("inmates") or {}).items() if isinstance(ds, dict) else []:
+        if isinstance(inm, dict) and not inm.get("avatar"):
+            key = f"cold:{name}"
+            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+            inm["avatar"] = f"/avatars/pack/{pack_files[idx]}"
+
+
 def avatar_payload(game_state):
-    """收集所有已设置头像的 key→URL 映射，供前端批量挂载。"""
+    """收集所有已设置头像的 key→URL 映射，供前端批量挂载。
+
+    首次调用时自动为无头像角色从图包确定性分配。
+    """
+    _pack_assign_all(game_state)
     out = {}
     if getattr(game_state, "avatar", None):
         out["player"] = game_state.avatar

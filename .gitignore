@@ -25,3 +25,4 @@ config.local.json
 .idea/
 .DS_Store
 avatars/
+avatars/pack/
