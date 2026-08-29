@@ -96,6 +96,19 @@
             align-items: center;
             gap: 2px;
         }
+        .top-bar .right { display: flex; align-items: center; gap: 0; }
+        .tool-dropdown { position: relative; display: inline-block; }
+        .tool-dropdown-menu {
+            display: none; position: absolute; right: 0; top: 100%;
+            background: #1a2828; border: 1px solid rgba(201,168,106,.3); border-radius: 8px;
+            padding: 4px 0; z-index: 9999; min-width: 140px; box-shadow: 0 8px 24px rgba(0,0,0,.6);
+        }
+        .tool-dropdown.open .tool-dropdown-menu { display: block; }
+        .tool-dropdown-menu button {
+            display: block; width: 100%; padding: 6px 14px; background: none; border: none;
+            color: #d6cfc2; font-size: 11px; cursor: pointer; text-align: left; font-family: inherit;
+        }
+        .tool-dropdown-menu button:hover { background: rgba(201,168,106,.15); color: var(--gold-dark); }
         .top-bar .right .tool-btn {
             background: transparent;
             border: none;
@@ -1662,18 +1675,23 @@
                 <span id="miniSilver">🪙 100</span>
             </div>
             <div class="right">
-                <button class="tool-btn" onclick="toggleMap()" title="宫廷舆图">🗺️</button>
-                <button class="tool-btn" onclick="openRelationNet()" title="后宫关系网">🕸️</button>
-                <button class="tool-btn" onclick="openCourtOverview()" title="前朝家族">🏛️</button>
-                <button class="tool-btn" onclick="openRoyalClan()" title="宗室势力">🏵️</button>
-                <button class="tool-btn" onclick="openColdPalace()" title="冷宫">🏚️</button>
-                <button class="tool-btn" onclick="openAffairs()" title="私通·狸猫">🌙</button>
-                <button class="tool-btn" onclick="openDowager()" title="垂帘听政">🕯️</button>
-                <button class="tool-btn" onclick="openLedger()" title="内务府账册">📒<span class="badge">亏</span></button>
                 <button class="tool-btn" onclick="saveGame()" title="存档">💾</button>
                 <button class="tool-btn" onclick="openSaveList()" title="读档">📂</button>
-                <button class="tool-btn" onclick="openLifeReview()" title="一生回顾">📖</button>
                 <button class="tool-btn" onclick="confirmReset()" title="重开">🔄</button>
+                <div class="tool-dropdown" id="moreMenu">
+                    <button class="tool-btn" onclick="toggleMoreMenu()" title="更多功能">☰</button>
+                    <div class="tool-dropdown-menu">
+                        <button onclick="toggleMap();closeMoreMenu()">🗺️ 宫廷舆图</button>
+                        <button onclick="openRelationNet();closeMoreMenu()">🕸️ 后宫关系网</button>
+                        <button onclick="openCourtOverview();closeMoreMenu()">🏛️ 前朝家族</button>
+                        <button onclick="openRoyalClan();closeMoreMenu()">🏵️ 宗室势力</button>
+                        <button onclick="openColdPalace();closeMoreMenu()">🏚️ 冷宫</button>
+                        <button onclick="openAffairs();closeMoreMenu()">🌙 私通·狸猫</button>
+                        <button onclick="openDowager();closeMoreMenu()">🕯️ 垂帘听政</button>
+                        <button onclick="openLedger();closeMoreMenu()">📒 内务府账册</button>
+                        <button onclick="openLifeReview();closeMoreMenu()">📖 一生回顾</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -3049,6 +3067,9 @@ function removeAvatar(key){
             refreshState();
         }).catch(e=>showToast('❌ 操作失败'));
 }
+function toggleMoreMenu(){const d=document.getElementById('moreMenu');d.classList.toggle('open');}
+function closeMoreMenu(){const d=document.getElementById('moreMenu');d.classList.remove('open');}
+document.addEventListener('click',function(e){const d=document.getElementById('moreMenu');if(d&&!d.contains(e.target))d.classList.remove('open');});
 function showToast(msg, type){const e=document.querySelector('.toast-notification');if(e)e.remove();const t=document.createElement('div');t.className='toast-notification'+(type==='error'?' toast-error':'');t.textContent=msg;document.body.appendChild(t);const duration=type==='error'?3500:2000;setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity 0.5s ease';setTimeout(()=>t.remove(),500);},duration);}
 function showChildInteractError(msg){showToast('❌ '+msg,'error');const warnEl=document.getElementById('childModalWarn');if(warnEl){warnEl.textContent='⚡ '+msg;warnEl.style.display='block';}}
 function childMoodEmoji(mood){const m={'开心':'😊','平静':'😌','思念':'🥺','兴奋':'🤩','闷闷不乐':'😔','生病':'🤒'};return m[mood]||'😌';}
