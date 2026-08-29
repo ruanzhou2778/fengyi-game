@@ -2449,6 +2449,17 @@ def ensure_child_fields(child):
     child.setdefault("adoptive_mother", "")       # 养母
     child.setdefault("adoption_history", [])
     child.setdefault("needs_doctor", child.get("health", 70) < 45)
+    # 旧档迁移：有 talent/health/wit 但无 stats 时，从旧字段生成 stats
+    if "stats" not in child:
+        gender = child.get("gender", "皇子")
+        if gender == "公主":
+            child["stats"] = {"文采": child.get("talent", 40), "容貌": random.randint(40, 70),
+                              "体魄": child.get("health", 70), "心性": child.get("wit", 40),
+                              "仪态": random.randint(30, 60)}
+        else:
+            child["stats"] = {"文治": child.get("talent", 40), "武略": random.randint(20, 50),
+                              "体魄": child.get("health", 70), "心性": child.get("wit", 40),
+                              "仪容": random.randint(30, 60)}
     child.setdefault("want_return_home", False)
     child.setdefault("honorary_title", None)   # 徽号
     child.setdefault("palace", "")             # 所居宫殿
@@ -3461,9 +3472,6 @@ def create_newborn_child(gender, name, game_state, mother_name=None):
         "birth_year": game_state.year,
         "trait": newborn_trait(gender),
         "affection": random.randint(35, 55),
-        "talent": random.randint(40, 75),
-        "health": random.randint(70, 95),
-        "wit": random.randint(20, 50),
         "emperor_favor": random.randint(20, 45),
         "tutor_level": 0,
         "personality": random.choice(CHILD_PERSONALITIES),
@@ -3481,6 +3489,11 @@ def create_newborn_child(gender, name, game_state, mother_name=None):
     }
     # 五维遗传（出生值含噪声，不受互斥钳制）
     child["stats"] = calc_child_birth_stats(gender, game_state, mother_name)
+    # 旧属性从遗传五维派生（不再独立随机），保持现有逻辑兼容
+    _s = child["stats"]
+    child["talent"] = _s.get("文治", _s.get("文采", 40))
+    child["health"] = _s.get("体魄", 70)
+    child["wit"] = _s.get("心性", 40)
     # 标签系统：特殊规则 + 出生随机标签
     special = []
     stats = child["stats"]
