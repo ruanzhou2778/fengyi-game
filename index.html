@@ -3038,6 +3038,7 @@ function pickAvatar(key){
     };
     inp.click();
 }
+function removeAvatarBtn(btn){ removeAvatar(btn.dataset.avkey); }
 function removeAvatar(key){
     if(!confirm('确定移除此头像？'))return;
     myFetch(`${API_BASE}/api/avatar/remove`, {method:'POST', headers:{'Content-Type':'application/json'},
@@ -4637,7 +4638,7 @@ function openRoyalMember(kind, name){
                 const conf={befriend:'🎁 结交（20两）',pull:'🤲 拉拢其父系（50两·郡主县主）',intel:'🕵️ 获取情报（1行动点）',recommend:'📜 推荐入宫（关系≥30·宗室女）',match:'💒 促成联姻（100两·待字闺中）',bond:'🌸 结为手帕交（关系≥30）'}[a];
                 return `<button class="interact-btn" onclick="royalAct('female','${m.name}','${a}')">${conf}</button>`;}).join('')}</div>`;
     }
-    openModal(`🏵️ ${m.name} 详情`, body+'<div style="margin-top:6px;text-align:center;">'+avatarUploadBtn('royal:'+m.name)+' <button class="chonghua-mini-btn" onclick="removeAvatar(\'royal:'+m.name+'\')">🗑️</button></div>', '关闭', null, true);
+    openModal(`🏵️ ${m.name} 详情`, body+'<div style="margin-top:6px;text-align:center;">'+avatarUploadBtn('royal:'+m.name)+' <button class="chonghua-mini-btn" onclick="removeAvatarBtn(this)" data-avkey="\'royal:'+m.name+'\'">🗑️</button></div>', '关闭', null, true);
 }
 
 async function royalAct(kind, name, action){
@@ -5141,7 +5142,7 @@ async function openInteract(type, name) {
 
         openModal(`👤 ${d.name}`, html, '关闭', null, true);
         /* 头像按钮追加在 modalBody 底部 */
-        {const mb=document.getElementById('modalBody');if(mb){const ab=document.createElement('div');ab.style.cssText='margin-top:6px;text-align:center;';ab.innerHTML=avatarUploadBtn('npc:'+d.name)+' <button class="chonghua-mini-btn" onclick="removeAvatar(\'npc:'+d.name+'\')">🗑️</button>';mb.appendChild(ab);}}
+        {const mb=document.getElementById('modalBody');if(mb){const ab=document.createElement('div');ab.style.cssText='margin-top:6px;text-align:center;';ab.innerHTML=avatarUploadBtn('npc:'+d.name)+' <button class="chonghua-mini-btn" onclick="removeAvatarBtn(this)" data-avkey="\'npc:'+d.name+'\'">🗑️</button>';mb.appendChild(ab);}}
     } catch (e) {
         showToast('❌ 获取NPC信息失败');
         console.error(e);
@@ -5557,7 +5558,7 @@ function openPlayerChildDetail(childIndex) {
     if (!child) { showToast('❌ 子嗣信息不存在'); return; }
     const motherName = d.player_name || d.name || '你';
     child._index = childIndex;
-    openModal(`👶 ${child.name}`, renderChildDetailHtml(child, motherName)+'<div style="margin-top:6px;text-align:center;">'+avatarUploadBtn('child:'+(child.uid||''))+' <button class="chonghua-mini-btn" onclick="removeAvatar('child:'+(child.uid||'')+'')">🗑️</button></div>', '关闭', null, true);
+    openModal(`👶 ${child.name}`, renderChildDetailHtml(child, motherName)+`<div style="margin-top:6px;text-align:center;">${avatarUploadBtn('child:'+(child.uid||''))} <button class="chonghua-mini-btn" onclick="removeAvatarBtn(this)" data-avkey="child:${child.uid||''}">🗑️</button></div>`, '关闭', null, true);
 }
 
 async function childInteract(motherName, childIndex, action, givenChar) {
@@ -5597,7 +5598,7 @@ async function childInteract(motherName, childIndex, action, givenChar) {
         if (res.child) {
             const mother = payload.mother_name || (window._lastGameData.player_name || window._lastGameData.name || '你');
             res.child._index = childIndex;
-            openModal(`👶 ${res.child.name}`, renderChildDetailHtml(res.child, mother)+'<div style="margin-top:6px;text-align:center;">'+avatarUploadBtn('child:'+(res.child.uid||''))+' <button class="chonghua-mini-btn" onclick="removeAvatar('child:'+(res.child.uid||'')+'')">🗑️</button></div>', '关闭', null, true);
+            openModal(`👶 ${res.child.name}`, renderChildDetailHtml(res.child, mother)+`<div style="margin-top:6px;text-align:center;">${avatarUploadBtn('child:'+(res.child.uid||''))} <button class="chonghua-mini-btn" onclick="removeAvatarBtn(this)" data-avkey="child:${res.child.uid||''}">🗑️</button></div>`, '关闭', null, true);
         }
     } catch (e) {
         showToast('❌ 互动失败', 'error');
@@ -5679,7 +5680,7 @@ async function submitChildRename(childIndex, mode) {
         if (res.child) {
             res.child._index = childIndex;
             const mother = (window._lastGameData || {}).player_name || (window._lastGameData || {}).name || '你';
-            openModal(`👶 ${res.child.name}`, renderChildDetailHtml(res.child, mother)+'<div style="margin-top:6px;text-align:center;">'+avatarUploadBtn('child:'+(res.child.uid||''))+' <button class="chonghua-mini-btn" onclick="removeAvatar('child:'+(res.child.uid||'')+'')">🗑️</button></div>', '关闭', null, true);
+            openModal(`👶 ${res.child.name}`, renderChildDetailHtml(res.child, mother)+`<div style="margin-top:6px;text-align:center;">${avatarUploadBtn('child:'+(res.child.uid||''))} <button class="chonghua-mini-btn" onclick="removeAvatarBtn(this)" data-avkey="child:${res.child.uid||''}">🗑️</button></div>`, '关闭', null, true);
         }
     } catch (e) {
         showToast('❌ 命名失败：' + e.message, 'error');
@@ -5694,7 +5695,7 @@ function openChildDetail(motherName, childIndex) {
             const child = d.children[childIndex];
             if (!child) { showToast('❌ 子嗣信息不存在'); return; }
             child._index = childIndex;
-            openModal(`👶 ${child.name}`, renderChildDetailHtml(child, motherName)+'<div style="margin-top:6px;text-align:center;">'+avatarUploadBtn('child:'+(child.uid||''))+' <button class="chonghua-mini-btn" onclick="removeAvatar('child:'+(child.uid||'')+'')">🗑️</button></div>', '关闭', null, true);
+            openModal(`👶 ${child.name}`, renderChildDetailHtml(child, motherName)+`<div style="margin-top:6px;text-align:center;">${avatarUploadBtn('child:'+(child.uid||''))} <button class="chonghua-mini-btn" onclick="removeAvatarBtn(this)" data-avkey="child:${child.uid||''}">🗑️</button></div>`, '关闭', null, true);
         })
         .catch(e => {
             showToast('❌ 获取子嗣信息失败');
@@ -6093,7 +6094,7 @@ const mems=gd.confidant_memory||[];
 let memBlock='';
 if(mems.length){memBlock=`<div style="margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><div style="font-size:8px;color:var(--gold-dark);">📜 心腹要事录</div>${mems.slice(-4).map(m=>`<div style="font-size:8px;color:var(--text-light);line-height:1.3;">${m}</div>`).join('')}</div>`;}
 const html=`<div style="display:flex;flex-direction:column;gap:2px;font-size:9px;color:var(--text-mid);"><div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap;"><span style="font-size:12px;font-weight:600;color:var(--text-dark);">${servant.type==='宫女'?'👩':'🧑'} ${servant.name}</span><span style="display:flex;gap:4px;align-items:center;"><span style="background:var(--gold-light);padding:1px 5px;border-radius:8px;font-size:8px;color:var(--text-mid);">${servant.type}</span>${confBadge}</span></div><div><span style="color:var(--text-light);">年龄：</span>${servant.age||'-'}岁</div><div><span style="color:var(--text-light);">忠诚度：</span>${servant.loyalty}</div><div><span style="color:var(--text-light);">技能：</span>${servant.skill}</div>${memBlock}<div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:2px;border-top:1px solid var(--border-light);padding-top:2px;"><button onclick="trainServant('${servant.name}')" class="interact-btn">📚 训练 (15两)</button>${confBtns}<button onclick="dismissServant('${servant.name}')" class="interact-btn" style="border-color:rgba(192,57,43,0.5);color:#e59a8a;">🚪 遣散</button></div><div id="servantResultArea" class="interact-result-area"></div></div>`;
-openModal(`👤 ${servant.name}`,html.replace('</div>','')+avatarUploadBtn('servant:'+servant.name)+' <button class="chonghua-mini-btn" onclick="removeAvatar(\'servant:'+servant.name+'\')">🗑️</button>','关闭',null,true);
+openModal(`👤 ${servant.name}`,html.replace('</div>','')+avatarUploadBtn('servant:'+servant.name)+' <button class="chonghua-mini-btn" onclick="removeAvatarBtn(this)" data-avkey="\'servant:'+servant.name+'\'">🗑️</button>','关闭',null,true);
 }
 
 async function trainServant(name){if(!playerId)return;try{const r=await myFetch(`${API_BASE}/api/servant/train`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,name:name})});const d=await r.json();if(d.error){showToast('❌ '+d.error);return;}const msg=d.message||'训练完成';showInteractFeedback(msg,name);setInteractResult('servantResultArea',msg);const sr=await myFetch(`${API_BASE}/api/state/${playerId}`);updateUI(await sr.json());}catch(e){showToast('❌ 操作失败');}}
