@@ -2,6 +2,8 @@
 # 上朝奏事裁决 · 摄政权威/朝堂控制 · 新帝成长与母子博弈 · 归政/称制/失势三条出路
 import random
 
+from names import random_given, EMPEROR_GIVEN
+
 COURT_LOG_MAX = 20
 EMPEROR_ADULT_AGE = 16          # 新帝请求亲政的年龄
 RETURN_POWER_GRACE = 3          # 亲政请求后可周旋的旬数
@@ -19,6 +21,79 @@ HAREM_MODES = {
               "authority": -2, "emperor_affection": 3, "queen_favor": 4},
 }
 HAREM_MODE_DEFAULT = "共治"
+
+# 新帝性格（登基时按幼时养育定型，影响奉事反应/亲政时机/母子博弈/结局叙事）
+EMPEROR_PERSONALITIES = {
+    "仁厚": {
+        "desc": "宽和纳谏，敬重母后",
+        "affection_drift": 1,      # 每旬母子亲近自然变化
+        "majesty_drift": 0,
+        "authority_drift": 0,
+        "adult_offset": 2,         # 请亲政的年龄偏移（+ 表示更晚）
+        "seize_risk": 0.0,         # 逾期未决时提前夺权的额外概率
+        "obedient": True,          # 训诫/催促时反弹更小
+        "flavor": "他听你的话，哪怕心里未必情愿。",
+    },
+    "多疑": {
+        "desc": "猜忌深重，忌母后干政",
+        "affection_drift": -1,
+        "majesty_drift": 1,
+        "authority_drift": -1,
+        "adult_offset": -2,        # 更早要亲政
+        "seize_risk": 0.25,
+        "obedient": False,
+        "flavor": "他看你的眼神里，总藏着一层试探。",
+    },
+    "暴戾": {
+        "desc": "刚烈嗜杀，动辄雷霆",
+        "affection_drift": -1,
+        "majesty_drift": 2,
+        "authority_drift": -1,
+        "adult_offset": -1,
+        "seize_risk": 0.35,
+        "obedient": False,
+        "flavor": "他发怒时，殿上没有人敢抬头——包括你。",
+    },
+    "庸懒": {
+        "desc": "疏懒惮政，乐得撒手",
+        "affection_drift": 0,
+        "majesty_drift": -1,
+        "authority_drift": 1,
+        "adult_offset": 4,         # 很晚才提亲政
+        "seize_risk": 0.0,
+        "obedient": True,
+        "flavor": "他乐得把奏本推给你，自己去听戏。",
+    },
+}
+
+
+def derive_emperor_personality(heir_child):
+    """由子嗣五维/标签推导新帝性格（无数据时按仁厚）。"""
+    c = heir_child or {}
+    tags = c.get("tags") or []
+    stats = c.get("stats") or {}
+    xin = int(stats.get("心性", c.get("wit", 40)) or 40)
+    wu = int(stats.get("武略", 40) or 40)
+    wen = int(stats.get("文治", c.get("talent", 40)) or 40)
+    if "孤僻" in tags or xin <= 30:
+        return "多疑"
+    if "尚武" in tags or wu >= 75:
+        return "暴戾"
+    if "娇纵" in tags or (wen <= 35 and xin <= 45):
+        return "庸懒"
+    return "仁厚"
+
+
+def emperor_personality_spec(d):
+    return EMPEROR_PERSONALITIES.get(
+        (d.get("emperor") or {}).get("personality") or "仁厚",
+        EMPEROR_PERSONALITIES["仁厚"],
+    )
+
+
+def emperor_adult_age(d):
+    """该性格的新帝请求亲政的实际年龄。"""
+    return max(12, EMPEROR_ADULT_AGE + int(emperor_personality_spec(d).get("adult_offset", 0)))
 
 # 上朝奏事模板：每条三选，效果键 权威/朝堂/国库/帝心/民心/派系_x
 COURT_AFFAIRS = [
@@ -104,6 +179,139 @@ COURT_AFFAIRS = [
     },
 ]
 
+# 垂帘期三方势力干政（外戚=你的家族 / 宗室=royal_clan / 权臣=朝堂重臣）
+MEDDLE_KINDS = {
+    "外戚": {"icon": "🏠", "who": "母家"},
+    "宗室": {"icon": "🏵️", "who": "宗室"},
+    "权臣": {"icon": "⚖️", "who": "权臣"},
+}
+MINISTER_NAMES = ["张", "李", "王", "沈", "崔", "裴", "杨", "韩"]
+MINISTER_TITLES = ["内阁首辅", "吏部尚书", "兵部尚书", "都察院左都御史", "户部尚书"]
+# ===== 女帝称制期 =====
+REGNANT_YEARS_TO_LEGACY = 12      # 称制满此旬数可从容传位（善终）
+REGNANT_STABILITY_CRISIS = 25     # 朝局稳固跌破此值则有倾覆之危
+
+REGNANT_AGENDA = [
+    {
+        "id": "change_name", "title": "改制易号",
+        "desc": "礼部请旨：既已称制，宜改国号、易衣冠、定新历，以正天命。",
+        "choices": [
+            {"text": "大改国号，另立新朝", "effects": {"稳固": -8, "威权": 10, "民心": -5, "青史": 8}},
+            {"text": "仍用旧号，只改年号", "effects": {"稳固": 4, "威权": 3, "民心": 2, "青史": 2}},
+            {"text": "一切照旧，不事更张", "effects": {"稳固": 6, "威权": -3, "民心": 3}},
+        ],
+    },
+    {
+        "id": "female_officials", "title": "开女科",
+        "desc": "有臣上疏：既有女主，何妨开女科取士，使天下才女得列朝班。",
+        "choices": [
+            {"text": "准开女科，破千年例", "effects": {"稳固": -6, "威权": 6, "民心": 6, "青史": 12}},
+            {"text": "只设内学，教而不仕", "effects": {"稳固": 2, "民心": 3, "青史": 4}},
+            {"text": "驳回，恐骇物听", "effects": {"稳固": 5, "威权": -2, "青史": -3}},
+        ],
+    },
+    {
+        "id": "old_emperor", "title": "旧帝安置",
+        "desc": "被你取而代之的那位——你亲手抚养大的孩子——如今幽居别宫。朝臣问：何以处之？",
+        "choices": [
+            {"text": "尊为太上，优礼奉养", "effects": {"稳固": 6, "民心": 8, "青史": 6, "威权": -2}},
+            {"text": "废为亲王，迁出京师", "effects": {"稳固": 3, "威权": 4, "民心": -4, "青史": -4}},
+            {"text": "一杯酒了结此事", "effects": {"稳固": -4, "威权": 8, "民心": -12, "青史": -15}},
+        ],
+    },
+    {
+        "id": "regnant_consort", "title": "内廷侍奉",
+        "desc": "内侍省奏请：女主临朝，内廷侍奉之制当有定例——是否遴选年少俊秀入侍？",
+        "choices": [
+            {"text": "依前朝故事，设内侍之班", "effects": {"稳固": -5, "威权": 5, "民心": -6, "青史": -5}},
+            {"text": "只置女官，不设男侍", "effects": {"稳固": 4, "民心": 4, "青史": 3}},
+            {"text": "内廷从简，专心政事", "effects": {"稳固": 5, "威权": 2, "青史": 5}},
+        ],
+    },
+    {
+        "id": "regnant_heir", "title": "立储之议",
+        "desc": "你已称制，储位空悬。是立自己的血脉，还是从宗室择贤？此一步定百年。",
+        "choices": [
+            {"text": "立己出（或己养）之嗣", "effects": {"稳固": 6, "威权": 4, "青史": 4}},
+            {"text": "从宗室择贤而立", "effects": {"稳固": 8, "威权": -4, "民心": 4, "青史": 2}},
+            {"text": "储位仍悬，待我百年", "effects": {"稳固": -8, "威权": 6, "青史": -6}},
+        ],
+    },
+    {
+        "id": "rebellion", "title": "宗室举兵",
+        "desc": "宗室某王以「复辟」为名举兵，檄文传至京师，斥你「以妇人窃神器」。",
+        "choices": [
+            {"text": "御驾亲征，以雷霆扫之", "effects": {"稳固": 8, "威权": 12, "民心": -4, "青史": 6}},
+            {"text": "遣将讨之，坐镇京师", "effects": {"稳固": 4, "威权": 3, "青史": 2}},
+            {"text": "遣使许以封地，罢兵息事", "effects": {"稳固": -6, "威权": -8, "民心": 4, "青史": -4}},
+        ],
+    },
+]
+
+NEW_HAREM_RANKS = ["答应", "常在", "贵人", "嫔", "妃", "贵妃", "皇后"]
+NEW_HAREM_MAX = 8
+MEDDLE_QUEUE_MAX = 2
+MINISTER_SEIZE_POWER = 85        # 权臣势力达此值则挟制朝政
+
+# 干政事件模板：三选一，效果键同 _apply_effects，另有 外戚势/宗室势/权臣势
+MEDDLE_EVENTS = [
+    {
+        "id": "clan_office", "kind": "外戚", "title": "母家请官",
+        "desc": "你的兄弟递来密笺：如今太后垂帘，正该为母家在六部谋一实缺。",
+        "choices": [
+            {"text": "破格擢用，母家为援", "effects": {"外戚势": 10, "权威": 3, "朝堂": -5, "民心": -4}},
+            {"text": "循资叙用，不徇私情", "effects": {"外戚势": 3, "朝堂": 3, "民心": 3}},
+            {"text": "严词斥回，以塞人口", "effects": {"外戚势": -8, "权威": 2, "朝堂": 5}},
+        ],
+    },
+    {
+        "id": "clan_greed", "kind": "外戚", "title": "母家骄纵",
+        "desc": "母家子弟仗着太后势，在京中强买民田，御史已具折待发。",
+        "choices": [
+            {"text": "压下折子，保住体面", "effects": {"外戚势": 5, "朝堂": -6, "民心": -8, "权威": -2}},
+            {"text": "责令退田，罚俸示众", "effects": {"外戚势": -6, "民心": 8, "朝堂": 4, "权威": 3}},
+            {"text": "交宗人府议处，避亲避嫌", "effects": {"外戚势": -10, "民心": 10, "权威": 5, "帝心": 3}},
+        ],
+    },
+    {
+        "id": "royal_regent", "kind": "宗室", "title": "宗室请与摄政",
+        "desc": "几位亲王联名上表：幼帝在位，宜由宗室长者共参机务，以安社稷。",
+        "choices": [
+            {"text": "允其共参，分权求安", "effects": {"宗室势": 12, "权威": -6, "朝堂": 5}},
+            {"text": "只许议政不许决事", "effects": {"宗室势": 4, "权威": 1, "朝堂": 2}},
+            {"text": "断然驳回，帘政独任", "effects": {"宗室势": -8, "权威": 6, "朝堂": -6}},
+        ],
+    },
+    {
+        "id": "royal_heir_push", "kind": "宗室", "title": "宗室议储",
+        "desc": "宗室私下议论：万一幼帝有恙，当从某亲王之子中择贤。此言已传入慈宁宫。",
+        "choices": [
+            {"text": "彻查散布者，以正名分", "effects": {"宗室势": -10, "权威": 5, "朝堂": -4, "帝心": 5}},
+            {"text": "召其入宫，温言抚慰", "effects": {"宗室势": 3, "朝堂": 3}},
+            {"text": "听之任之，留作后手", "effects": {"宗室势": 8, "权威": -3, "帝心": -4}},
+        ],
+    },
+    {
+        "id": "minister_faction", "kind": "权臣", "title": "权臣结党",
+        "desc": "{minister}门生故吏遍布台省，票拟未上先定，朝议几成虚设。",
+        "choices": [
+            {"text": "夺其票拟之权", "effects": {"权臣势": -12, "权威": 5, "朝堂": -6}},
+            {"text": "引另一党相制", "effects": {"权臣势": -5, "朝堂": 4, "权威": 2}},
+            {"text": "倚其办事，暂且相安", "effects": {"权臣势": 10, "朝堂": 6, "权威": -4}},
+        ],
+    },
+    {
+        "id": "minister_impeach", "kind": "权臣", "title": "权臣劾帘",
+        "desc": "{minister}上疏：太后久居帘后，非社稷长计，请早还大政。满朝观望。",
+        "choices": [
+            {"text": "廷杖之，以立威", "effects": {"权臣势": -8, "权威": 6, "朝堂": -8, "民心": -4}},
+            {"text": "留中不发，冷处理", "effects": {"权臣势": 4, "权威": -2}},
+            {"text": "优诏褒答，示我大度", "effects": {"权臣势": 2, "朝堂": 6, "民心": 5, "权威": -3}},
+        ],
+    },
+]
+
+
 # 太后可主动施为（每旬各一次）
 DOWAGER_ACTIONS = {
     "instruct": {"name": "亲授帝学", "cost": {"actions": 1}, "desc": "亲课新帝经史，帝心与帝威俱进"},
@@ -134,6 +342,25 @@ def default_dowager():
         "new_queen": "",                    # 新后名（新帝的皇后）
         "queen_favor": 50,                  # 新后对你的敬顺度 0-100
         "harem_log": [],
+        # ---- 三方势力干政 ----
+        "clan_power": 30,                   # 外戚（母家）势力
+        "royal_power": 40,                  # 宗室势力
+        "minister_power": 45,               # 权臣势力
+        "minister": "",                     # 当朝权臣名号
+        "meddle": [],                       # 待决干政事件
+        "meddle_log": [],
+        # ---- 新帝妃嫔名册 ----
+        "consorts": [],                     # [{name, rank, favor(帝宠), respect(对你敬顺), pregnant, children}]
+        "consort_log": [],
+        # ---- 女帝称制期 ----
+        "regnant": False,                   # 是否已称制（进入女帝朝政循环）
+        "reign_name": "",                   # 年号
+        "reign_periods": 0,                 # 称制已历旬数
+        "stability": 55,                    # 朝局稳固
+        "sovereignty": 70,                  # 威权
+        "legacy": 40,                       # 青史（史笔评价）
+        "agenda": [],                       # 待决国是
+        "reign_log": [],
     }
 
 
@@ -180,6 +407,7 @@ def enter_dowager_mode(game_state, heir_child):
         "affection": int((heir_child or {}).get("affection", 60) or 60),
         "majesty": _clamp(20 + int((heir_child or {}).get("emperor_favor", 30) or 30) // 3),
         "alive": True,
+        "personality": derive_emperor_personality(heir_child),
     }
     d["periods"] = 0
     game_state.dowager_mode = True
@@ -189,8 +417,11 @@ def enter_dowager_mode(game_state, heir_child):
     game_state.game_over = False
     _log(d, f"{d['emperor']['name']}登基，你于养心殿后垂帘听政")
     game_state.add_memory(f"👑 你以太后之尊垂帘听政，辅幼帝{d['emperor']['name']}")
+    p = d["emperor"]["personality"]
+    pspec = EMPEROR_PERSONALITIES[p]
     return True, (f"👑 新帝{d['emperor']['name']}年方{d['emperor']['age']}，冲龄践祚。"
                   f"珠帘之后，你第一次听见满殿朝臣向帘幕行礼。\n"
+                  f"这孩子性子{p}——{pspec['desc']}。{pspec['flavor']}\n"
                   f"摄政权威{d['authority']} · 朝堂控制{d['court']} · 国库{d['treasury']}万 · 民心{d['people']}")
 
 
@@ -349,12 +580,24 @@ def return_power(game_state, mode):
     d = get_dowager(game_state)
     if not d.get("active"):
         return None, "你不在垂帘听政"
-    if d["emperor"]["age"] < EMPEROR_ADULT_AGE and mode == "yield":
-        return False, f"新帝尚未及{EMPEROR_ADULT_AGE}岁，此时归政恐社稷动摇"
+    adult_at = emperor_adult_age(d)
+    if d["emperor"]["age"] < adult_at and mode == "yield":
+        return False, f"新帝尚未及{adult_at}岁，此时归政恐社稷动摇"
     if mode == "yield":
         d["active"] = False
         game_state.dowager_mode = False
         affection = d["emperor"]["affection"]
+        pname = d["emperor"].get("personality", "仁厚")
+        if pname == "暴戾" and affection < 50:
+            trigger_ending(game_state, "还政归养",
+                           f"{d['emperor']['name']}性暴戾，你趁其未及发难先行撤帘")
+            return True, ("🍂 你抢在他开口之前撤了帘。这不是让贤，是保命——"
+                          "他接玺时脸上那点意外，是你这十年最后一次胜过他。（终局：还政归养）")
+        if pname == "庸懒" and affection >= 50:
+            trigger_ending(game_state, "还政归养",
+                           f"{d['emperor']['name']}疏懒，你撤帘后他仍事事来问")
+            return True, ("🌤️ 你撤了帘，可他仍旧三天两头往慈宁宫跑，"
+                          "拿着奏本问「母后你看这个怎么办」。你笑着替他看了——最后一次。（终局：还政归养）")
         if affection >= 60 and d["people"] >= 50:
             trigger_ending(game_state, "还政归养",
                            f"{d['emperor']['name']}既冠,你撤帘还政，母慈子孝")
@@ -374,11 +617,20 @@ def return_power(game_state, mode):
         if d["authority"] < EMPRESS_REGNANT_AUTH or d["court"] < EMPRESS_REGNANT_COURT:
             return False, (f"临朝称制需摄政权威≥{EMPRESS_REGNANT_AUTH}、朝堂控制≥{EMPRESS_REGNANT_COURT}"
                            f"（现{d['authority']}/{d['court']}）")
-        d["active"] = False
-        game_state.dowager_mode = False
-        trigger_ending(game_state, "临朝称制", "你受群臣之请，去帘临朝，改元称制")
-        return True, ("👑 那道珠帘被撤了下来——不是还政，是不必再隔着帘子。"
-                      "你着帝服受百官朝贺，改元称制。史笔如何写你，你已不在意。（终局：临朝称制）")
+        # 称制后进入女帝朝政循环（不再直接终局）
+        d["regnant"] = True
+        d["reign_name"] = random.choice(["天授", "神龙", "正元", "开成", "永昌", "承光"])
+        d["reign_periods"] = 0
+        d["stability"] = _clamp(30 + d["court"] // 2)
+        d["sovereignty"] = _clamp(50 + d["authority"] // 3)
+        d["legacy"] = 40
+        d["agenda"] = []
+        _reign_log(d, f"去帘临朝，改元{d['reign_name']}")
+        game_state.add_memory(f"👑 你临朝称制，改元{d['reign_name']}")
+        return True, ("👑 那道珠帘被撤了下来——不是还政，是不必再隔着帘子。\n"
+                      f"你着帝服受百官朝贺，改元{d['reign_name']}。\n"
+                      f"朝局稳固{d['stability']} · 威权{d['sovereignty']} · 青史{d['legacy']}\n"
+                      "从今往后，这天下的事，你自己拿主意。")
     return None, "无效的抉择"
 
 
@@ -497,7 +749,8 @@ def harem_action(game_state, action):
         if not queen:
             return False, "新帝尚未立后，无人可训"
         applied = _apply_effects(game_state, d, {"权威": 3})
-        d["queen_favor"] = _clamp(d.get("queen_favor", 50) - 6)
+        backlash = 4 if emperor_personality_spec(d).get("obedient") else 8
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) - backlash)
         msg = (f"📖 你召{queen}至慈宁宫，从晨昏定省讲到内帑出入，讲了一个时辰。"
                f"她跪谢受教，膝下的砖被跪出了印子。（权威+3，新后敬顺-6）")
     elif action == "bless_consort":
@@ -506,7 +759,8 @@ def harem_action(game_state, action):
         msg = ("🎁 你以私帑赏赐新帝的妃嫔，人人有份，厚薄得宜。"
                "宫里都说太后慈厚。（民心+3，朝堂+2，新后敬顺+6）")
     elif action == "urge_heir":
-        applied = _apply_effects(game_state, d, {"帝心": -3, "权威": 1})
+        heart = -2 if emperor_personality_spec(d).get("obedient") else -5
+        applied = _apply_effects(game_state, d, {"帝心": heart, "权威": 1})
         d["grandchild_chance"] = min(70, int(d.get("grandchild_chance", 0)) + 20)
         msg = (f"🍼 你当着朝臣的面问{d['emperor']['name']}：「皇嗣之事，可有消息了？」"
                f"他脸上一红，答不上话。（帝心-3，权威+1，皇孙可期）")
@@ -527,9 +781,365 @@ def harem_action(game_state, action):
     return True, msg
 
 
-def dowager_period_tick(game_state):
-    """转旬：奏事生成、国库民心自然变动、新帝成长、亲政请求与失势危机。"""
+# ===== 三方势力干政 =====
+def ensure_minister(game_state, d):
+    if d.get("minister"):
+        return d["minister"]
+    d["minister"] = f"{random.choice(MINISTER_TITLES)}{random.choice(MINISTER_NAMES)}{random_given(EMPEROR_GIVEN, 0.5)}"
+    return d["minister"]
+
+
+def _meddle_log(d, text):
+    d.setdefault("meddle_log", []).insert(0, text)
+    del d["meddle_log"][12:]
+
+
+def _apply_meddle_effects(game_state, d, effects):
+    """在 _apply_effects 之上追加三方势力键。"""
+    core = {k: v for k, v in (effects or {}).items()
+            if k not in ("外戚势", "宗室势", "权臣势")}
+    applied = _apply_effects(game_state, d, core)
+    mapping = {"外戚势": "clan_power", "宗室势": "royal_power", "权臣势": "minister_power"}
+    for k, field in mapping.items():
+        if k in (effects or {}):
+            v = int(effects[k])
+            d[field] = _clamp(int(d.get(field, 40) or 0) + v)
+            applied[k] = v
+    return applied
+
+
+def generate_meddle_events(game_state):
+    """转旬按势力高低生成干政事件（队列上限 2）。"""
     d = get_dowager(game_state)
+    if not d.get("active"):
+        return []
+    msgs = []
+    if len(d.get("meddle") or []) >= MEDDLE_QUEUE_MAX:
+        return msgs
+    # 势力越高越容易生事
+    weights = {
+        "外戚": max(1, int(d.get("clan_power", 30)) // 10),
+        "宗室": max(1, int(d.get("royal_power", 40)) // 10),
+        "权臣": max(1, int(d.get("minister_power", 45)) // 10),
+    }
+    if random.random() >= 0.45:
+        return msgs
+    kind = random.choices(list(weights), weights=list(weights.values()))[0]
+    pool = [e for e in MEDDLE_EVENTS if e["kind"] == kind
+            and not any(p.get("tpl") == e["id"] for p in (d.get("meddle") or []))]
+    if not pool:
+        return msgs
+    tpl = random.choice(pool)
+    minister = ensure_minister(game_state, d)
+    desc = tpl["desc"].replace("{minister}", minister)
+    d.setdefault("meddle", []).append({
+        "id": f"md{random.randint(1000, 9999)}",
+        "tpl": tpl["id"], "kind": kind, "icon": MEDDLE_KINDS[kind]["icon"],
+        "title": tpl["title"], "desc": desc,
+        "choices": [{"text": c["text"], "effects": c["effects"]} for c in tpl["choices"]],
+        "period": f"{game_state.year}年{game_state.month}月",
+    })
+    msgs.append(f"{MEDDLE_KINDS[kind]['icon']} {MEDDLE_KINDS[kind]['who']}有动静：{tpl['title']}")
+    return msgs
+
+
+def respond_meddle(game_state, meddle_id, choice_index):
+    """裁决一件干政事件。"""
+    d = get_dowager(game_state)
+    if not d.get("active"):
+        return None, "你不在垂帘听政"
+    ev = next((p for p in (d.get("meddle") or []) if p.get("id") == meddle_id), None)
+    if not ev:
+        return None, "此事已了或不存在"
+    idx = int(choice_index or 0)
+    choices = ev.get("choices") or []
+    if not (0 <= idx < len(choices)):
+        return False, "无此选项"
+    choice = choices[idx]
+    applied = _apply_meddle_effects(game_state, d, choice.get("effects"))
+    d["meddle"] = [p for p in d["meddle"] if p.get("id") != meddle_id]
+    parts = [f"{k}{'+' if v > 0 else ''}{v}" for k, v in applied.items() if v]
+    narr = f"「{ev['title']}」你于帘后处置：{choice['text']}。"
+    if parts:
+        narr += "（" + "、".join(parts) + "）"
+    _meddle_log(d, f"{ev['title']}：{choice['text']}")
+    game_state.add_memory(f"垂帘处置{ev['kind']}：{ev['title']}")
+    return True, narr
+
+
+def _sync_external_powers(game_state, d):
+    """与既有家族/宗室/朝堂系统对齐（单向读取，避免双轨）。"""
+    clan = getattr(game_state, "player_clan", None)
+    if isinstance(clan, dict):
+        d["clan_power"] = _clamp(int(clan.get("家族威望", 40) or 40))
+    rc = getattr(game_state, "royal_clan", None)
+    if isinstance(rc, dict) and rc.get("males"):
+        alive = [m for m in rc["males"].values() if isinstance(m, dict) and m.get("alive")]
+        if alive:
+            d["royal_power"] = _clamp(int(sum(int(m.get("实力", 30) or 30) for m in alive) / len(alive)))
+
+
+# ===== 新帝妃嫔名册 =====
+def _consort_log(d, text):
+    d.setdefault("consort_log", []).insert(0, text)
+    del d["consort_log"][12:]
+
+
+def _new_consort(game_state, rank="常在"):
+    from names import generate_female_name
+    try:
+        name = generate_female_name()
+    except Exception:
+        name = "新人"
+    return {"name": name, "rank": rank,
+            "favor": random.randint(20, 55), "respect": random.randint(35, 65),
+            "pregnant": False, "children": 0, "alive": True}
+
+
+def ensure_new_harem(game_state, d, count=None):
+    """新帝立后前后自动铺开后宫名册。"""
+    roster = d.setdefault("consorts", [])
+    if roster:
+        return roster
+    if d["emperor"]["age"] < 13:
+        return roster
+    n = count if count is not None else random.randint(3, 5)
+    used = set()
+    for _ in range(n):
+        c = _new_consort(game_state, random.choice(["答应", "常在", "贵人", "嫔"]))
+        if c["name"] in used:
+            continue
+        used.add(c["name"])
+        roster.append(c)
+    _consort_log(d, f"新帝后宫初立，共{len(roster)}人")
+    return roster
+
+
+def find_consort(d, name):
+    for c in d.get("consorts") or []:
+        if c.get("name") == name and c.get("alive", True):
+            return c
+    return None
+
+
+def consort_action(game_state, name, action):
+    """太后处置新帝妃嫔：提拔 / 贬黜 / 赐婚（出宫）/ 抚慰。"""
+    from app import guard_action
+    d = get_dowager(game_state)
+    if not d.get("active"):
+        return None, "你不在垂帘听政"
+    mode = d.get("harem_mode", HAREM_MODE_DEFAULT)
+    if mode == "放权" and action in ("promote", "demote", "dismiss"):
+        return False, "你已全付新后，妃嫔位份升降不再经慈宁宫"
+    c = find_consort(d, name)
+    if not c:
+        return None, "名册上查无此人"
+    ok, err = guard_action(game_state)
+    if not ok:
+        return False, err
+    if action == "promote":
+        idx = NEW_HAREM_RANKS.index(c["rank"]) if c["rank"] in NEW_HAREM_RANKS else 1
+        if idx >= NEW_HAREM_RANKS.index("贵妃"):
+            return False, f"{name}已至{c['rank']}，再进便是中宫，非你可专断"
+        old_rank = c["rank"]
+        c["rank"] = NEW_HAREM_RANKS[idx + 1]
+        c["respect"] = _clamp(c["respect"] + 15)
+        c["favor"] = _clamp(c["favor"] + 5)
+        applied = _apply_effects(game_state, d, {"权威": 2})
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) - 3)
+        _consort_log(d, f"{name}{old_rank}→{c['rank']}")
+        return True, (f"📜 你一句话把{name}由{old_rank}擢为{c['rank']}。"
+                      f"她伏地谢恩，从此这条命是你给的。（她敬顺+15，权威+2，新后敬顺-3）")
+    if action == "demote":
+        idx = NEW_HAREM_RANKS.index(c["rank"]) if c["rank"] in NEW_HAREM_RANKS else 1
+        if idx <= 0:
+            return False, f"{name}已是末位，再降便当出宫"
+        old_rank = c["rank"]
+        c["rank"] = NEW_HAREM_RANKS[idx - 1]
+        c["respect"] = _clamp(c["respect"] - 20)
+        c["favor"] = _clamp(c["favor"] - 8)
+        applied = _apply_effects(game_state, d, {"权威": 3, "帝心": -2})
+        _consort_log(d, f"{name}{old_rank}→{c['rank']}（贬）")
+        return True, (f"⚖️ 你以「不谨」为由将{name}由{old_rank}降为{c['rank']}。"
+                      f"六宫看在眼里，谁还敢在慈宁宫前失仪。（权威+3，帝心-2）")
+    if action == "dismiss":
+        if int(c.get("children", 0) or 0) > 0:
+            return False, f"{name}已有子嗣，出宫之议不合宗法"
+        c["alive"] = False
+        applied = _apply_effects(game_state, d, {"权威": 2, "帝心": -4})
+        d["queen_favor"] = _clamp(d.get("queen_favor", 50) + 4)
+        _consort_log(d, f"{name}出宫")
+        return True, (f"🚪 你赐{name}归家，另择良配。轿子出宫那日，"
+                      f"新帝在殿上坐了很久没说话。（权威+2，帝心-4，新后敬顺+4）")
+    if action == "comfort":
+        if game_state.silver < 60:
+            return False, "私帑不足（需60两）"
+        game_state.silver -= 60
+        c["respect"] = _clamp(c["respect"] + 12)
+        applied = _apply_effects(game_state, d, {"民心": 1})
+        _consort_log(d, f"抚慰{name}")
+        return True, f"🎁 你赏了{name}一副头面，又叫太医替她诊了脉。她记着这份恩（敬顺+12）"
+    return None, "无效的处置"
+
+
+def dowager_harem_roster(d):
+    return [{k: c.get(k) for k in ("name", "rank", "favor", "respect", "pregnant", "children")}
+            for c in (d.get("consorts") or []) if c.get("alive", True)]
+
+
+# ===== 女帝称制期 =====
+def is_regnant(game_state):
+    d = getattr(game_state, "dowager_state", None)
+    return isinstance(d, dict) and bool(d.get("regnant"))
+
+
+def _reign_log(d, text):
+    d.setdefault("reign_log", []).insert(0, text)
+    del d["reign_log"][COURT_LOG_MAX:]
+
+
+def _apply_reign_effects(game_state, d, effects):
+    applied = {}
+    mapping = {"稳固": "stability", "威权": "sovereignty", "青史": "legacy"}
+    for k, v in (effects or {}).items():
+        v = int(v)
+        if k in mapping:
+            d[mapping[k]] = _clamp(int(d.get(mapping[k], 50) or 0) + v)
+            applied[k] = v
+        elif k == "民心":
+            d["people"] = _clamp(d["people"] + v)
+            applied["民心"] = v
+    return applied
+
+
+def generate_reign_agenda(game_state):
+    """称制期每旬按概率生成国是（队列上限 2）。"""
+    d = get_dowager(game_state)
+    if not d.get("regnant"):
+        return []
+    if len(d.get("agenda") or []) >= 2:
+        d["stability"] = _clamp(d["stability"] - 2)
+        return ["📜 国是悬而未决，六部无所适从（朝局稳固-2）"]
+    if random.random() >= 0.5:
+        return []
+    pool = [a for a in REGNANT_AGENDA
+            if not any(x.get("tpl") == a["id"] for x in (d.get("agenda") or []))]
+    if not pool:
+        return []
+    tpl = random.choice(pool)
+    d.setdefault("agenda", []).append({
+        "id": f"rg{random.randint(1000, 9999)}", "tpl": tpl["id"],
+        "title": tpl["title"], "desc": tpl["desc"],
+        "choices": [{"text": c["text"], "effects": c["effects"]} for c in tpl["choices"]],
+        "period": f"{d['reign_name']}{game_state.year}年",
+    })
+    return [f"📜 国是待决：{tpl['title']}"]
+
+
+def respond_reign_agenda(game_state, agenda_id, choice_index):
+    d = get_dowager(game_state)
+    if not d.get("regnant"):
+        return None, "你尚未称制"
+    ev = next((a for a in (d.get("agenda") or []) if a.get("id") == agenda_id), None)
+    if not ev:
+        return None, "此国是已决或不存在"
+    idx = int(choice_index or 0)
+    choices = ev.get("choices") or []
+    if not (0 <= idx < len(choices)):
+        return False, "无此选项"
+    choice = choices[idx]
+    applied = _apply_reign_effects(game_state, d, choice.get("effects"))
+    d["agenda"] = [a for a in d["agenda"] if a.get("id") != agenda_id]
+    parts = [f"{k}{'+' if v > 0 else ''}{v}" for k, v in applied.items() if v]
+    narr = f"「{ev['title']}」你降旨：{choice['text']}。"
+    if parts:
+        narr += "（" + "、".join(parts) + "）"
+    _reign_log(d, f"{ev['title']}：{choice['text']}")
+    game_state.add_memory(f"称制降旨：{ev['title']}")
+    return True, narr
+
+
+def reign_abdicate(game_state):
+    """女帝传位：按青史/稳固落定三种终局。"""
+    from app import trigger_ending
+    d = get_dowager(game_state)
+    if not d.get("regnant"):
+        return None, "你尚未称制"
+    if d.get("reign_periods", 0) < 4:
+        return False, "改元未久，此时传位则新政尽废"
+    d["regnant"] = False
+    d["active"] = False
+    game_state.dowager_mode = False
+    legacy = int(d.get("legacy", 40) or 40)
+    stability = int(d.get("stability", 50) or 50)
+    if legacy >= 70 and stability >= 55:
+        trigger_ending(game_state, "女帝功成",
+                       f"改元{d['reign_name']}凡{d['reign_periods']}旬，功成传位，史称贤主")
+        return True, ("👑 你在生前把玉玺交了出去，这是历代女主都没做到的事。\n"
+                      "新君奉你为太上，年号仍用你的。史官落笔时手是稳的——"
+                      f"「{d['reign_name']}之政，海内称治」。（终局：女帝功成）")
+    if stability <= 30:
+        trigger_ending(game_state, "神器倾覆",
+                       f"改元{d['reign_name']}后朝局崩坏，神器旁落")
+        return True, ("🔥 你终究没有守住。玄武门的火光照到了含元殿的檐角，"
+                      "他们冲进来时你还坐在御座上——你没有起身。（终局：神器倾覆）")
+    trigger_ending(game_state, "女帝功成",
+                   f"改元{d['reign_name']}凡{d['reign_periods']}旬，倦而传位")
+    return True, ("🍂 你把玉玺交了出去，没有人挽留。史书上给你留了一卷，"
+                  "褒贬各半——「以妇人而有天下，亦异数也」。（终局：女帝功成）")
+
+
+def reign_period_tick(game_state):
+    """称制期转旬：国是、稳固消长、倾覆危机、传位时机。"""
+    d = get_dowager(game_state)
+    if not d.get("regnant"):
+        return []
+    msgs = []
+    d["reign_periods"] = int(d.get("reign_periods", 0) or 0) + 1
+    # 威权高则稳固缓升，民心低则稳固下滑
+    drift = 1 if d["sovereignty"] >= 60 else -1
+    if d["people"] < 40:
+        drift -= 2
+    d["stability"] = _clamp(d["stability"] + drift)
+    if d["stability"] <= REGNANT_STABILITY_CRISIS:
+        if random.random() < 0.35:
+            from app import trigger_ending
+            d["regnant"] = False
+            d["active"] = False
+            game_state.dowager_mode = False
+            trigger_ending(game_state, "神器倾覆", "朝局崩坏，宗室与外朝合力复辟")
+            msgs.append("🔥 复辟的兵马已进了朱雀门——这一次，没有帘子可以躲。（终局：神器倾覆）")
+            return msgs
+        msgs.append("⚠️ 朝局已危：州郡观望，京中流言四起（朝局稳固<25）")
+    if d["reign_periods"] == REGNANT_YEARS_TO_LEGACY:
+        msgs.append(f"👑 改元{d['reign_name']}已{d['reign_periods']}旬，你可从容议传位之事（青史{d['legacy']}）")
+    msgs.extend(generate_reign_agenda(game_state))
+    return msgs
+
+
+def reign_payload(d):
+    return {
+        "regnant": bool(d.get("regnant")),
+        "reign_name": d.get("reign_name", ""),
+        "reign_periods": int(d.get("reign_periods", 0) or 0),
+        "stability": int(d.get("stability", 55) or 0),
+        "sovereignty": int(d.get("sovereignty", 70) or 0),
+        "legacy": int(d.get("legacy", 40) or 0),
+        "agenda": list(d.get("agenda") or []),
+        "reign_log": list(d.get("reign_log") or [])[:6],
+        "can_abdicate": int(d.get("reign_periods", 0) or 0) >= 4,
+        "legacy_gate": REGNANT_YEARS_TO_LEGACY,
+    }
+
+
+def dowager_period_tick(game_state):
+    """转旬：奏事生成、国库民心自然变动、新帝成长、亲政请求与失势危机。
+
+    已称制则转入女帝朝政循环（reign_period_tick）。
+    """
+    d = get_dowager(game_state)
+    if d.get("regnant"):
+        return reign_period_tick(game_state)
     if not d.get("active"):
         return []
     msgs = []
@@ -544,6 +1154,11 @@ def dowager_period_tick(game_state):
     if len(d["pending"]) >= 3:
         d["authority"] = _clamp(d["authority"] - 3)
         msgs.append("📜 奏本积压不批，朝臣私议太后倦政（摄政权威-3）")
+    # 新帝性格的每旬漂移
+    pspec = emperor_personality_spec(d)
+    d["emperor"]["affection"] = _clamp(d["emperor"]["affection"] + int(pspec.get("affection_drift", 0)))
+    d["emperor"]["majesty"] = _clamp(d["emperor"]["majesty"] + int(pspec.get("majesty_drift", 0)))
+    d["authority"] = _clamp(d["authority"] + int(pspec.get("authority_drift", 0)))
     # 后宫治理模式的每旬效应
     mode = d.get("harem_mode", HAREM_MODE_DEFAULT)
     spec = HAREM_MODES.get(mode) or {}
@@ -573,9 +1188,13 @@ def dowager_period_tick(game_state):
     if d["periods"] % 3 == 0:
         d["emperor"]["age"] += 1
         d["emperor"]["majesty"] = _clamp(d["emperor"]["majesty"] + random.randint(0, 2))
-        if d["emperor"]["age"] == EMPEROR_ADULT_AGE:
+        adult_at = emperor_adult_age(d)
+        if d["emperor"]["age"] == adult_at:
             d["return_requested"] = 1
-            msgs.append(f"👑 {d['emperor']['name']}已及{EMPEROR_ADULT_AGE}岁，行冠礼，朝野皆言当亲政（可归政或拒还）")
+            pname = d["emperor"].get("personality", "仁厚")
+            hint = {"多疑": "他等这一日已久", "暴戾": "他说这话时手按在剑柄上",
+                    "庸懒": "倒是朝臣比他还急", "仁厚": "他先向你行了礼才开口"}.get(pname, "")
+            msgs.append(f"👑 {d['emperor']['name']}已及{adult_at}岁，行冠礼，朝野皆言当亲政——{hint}（可归政或拒还）")
         else:
             msgs.append(f"👦 {d['emperor']['name']}又长一岁（{d['emperor']['age']}岁，威仪{d['emperor']['majesty']}）")
     # 亲政请求逾期未决
@@ -583,6 +1202,16 @@ def dowager_period_tick(game_state):
         d["return_requested"] += 1
         if d["return_requested"] > RETURN_POWER_GRACE:
             from app import trigger_ending
+            seize = float(pspec.get("seize_risk", 0.0) or 0.0)
+            if seize > 0 and random.random() < seize:
+                d["active"] = False
+                game_state.dowager_mode = False
+                pname = d["emperor"].get("personality", "多疑")
+                why = "疑你久握权柄，先下手为强" if pname == "多疑" else "一怒之下命禁军围了慈宁宫"
+                trigger_ending(game_state, "幽居慈宁",
+                               f"{d['emperor']['name']}性{pname}，{why}")
+                msgs.append(f"⛓️ {d['emperor']['name']}{why}——这一次他没有再问你的意思。（终局：幽居慈宁）")
+                return msgs
             if d["emperor"]["majesty"] >= 60 and d["emperor"]["affection"] < 40:
                 d["active"] = False
                 game_state.dowager_mode = False
@@ -603,6 +1232,41 @@ def dowager_period_tick(game_state):
             msgs.append("⛓️ 朝臣联名请太后「颐养天年」。这一次，没有人再向帘幕行礼。（终局：幽居慈宁）")
             return msgs
         msgs.append("⚠️ 帘外的礼数越来越薄了——摄政权威已危（<25）")
+    # 新帝后宫名册：铺开 / 生育 / 请安
+    if d["emperor"]["age"] >= 13:
+        roster = ensure_new_harem(game_state, d)
+        if roster and random.random() < 0.12:
+            c = random.choice(roster)
+            if not c.get("pregnant") and int(c.get("children", 0) or 0) < 3:
+                c["pregnant"] = True
+                msgs.append(f"🤰 {c['rank']}{c['name']}传出有孕，慈宁宫先得了消息")
+        for c in roster:
+            if c.get("pregnant") and random.random() < 0.35:
+                c["pregnant"] = False
+                c["children"] = int(c.get("children", 0) or 0) + 1
+                d["authority"] = _clamp(d["authority"] + 2)
+                d["people"] = _clamp(d["people"] + 2)
+                msgs.append(f"👶 {c['rank']}{c['name']}诞下皇嗣，宗庙又添一枝（权威+2，民心+2）")
+                break
+        low = [c for c in roster if int(c.get("respect", 50) or 50) <= 15]
+        if low and random.random() < 0.2:
+            c = random.choice(low)
+            d["authority"] = _clamp(d["authority"] - 2)
+            msgs.append(f"🕸️ {c['rank']}{c['name']}称病不来慈宁宫问安，宫里都在看（权威-2）")
+    # 三方势力：与既有系统对齐 + 自然消长 + 干政事件
+    _sync_external_powers(game_state, d)
+    d["minister_power"] = _clamp(int(d.get("minister_power", 45)) + random.choice([-1, 0, 1, 1]))
+    if len(d.get("meddle") or []) >= MEDDLE_QUEUE_MAX:
+        d["authority"] = _clamp(d["authority"] - 2)
+        msgs.append("🕸️ 外朝内廷的请托积压不理，人人都在看太后能不能压住场（摄政权威-2）")
+    if int(d.get("minister_power", 45)) >= MINISTER_SEIZE_POWER:
+        d["authority"] = _clamp(d["authority"] - 4)
+        d["court"] = _clamp(d["court"] - 3)
+        msgs.append(f"⚖️ {ensure_minister(game_state, d)}权势已成，票拟不复经帘（摄政权威-4，朝堂-3）")
+    if int(d.get("clan_power", 30)) >= 80:
+        d["people"] = _clamp(d["people"] - 3)
+        msgs.append("🏠 母家势盛，京中已有「一门两国舅」的讥议（民心-3）")
+    msgs.extend(generate_meddle_events(game_state))
     # 生成新奏事
     msgs.extend(generate_court_affairs(game_state))
     return msgs
@@ -616,6 +1280,11 @@ def dowager_payload(game_state):
         "authority": d["authority"], "court": d["court"],
         "treasury": d["treasury"], "people": d["people"],
         "emperor": dict(d["emperor"]),
+        "emperor_personality": {
+            "name": (d.get("emperor") or {}).get("personality", "仁厚"),
+            **{k: v for k, v in emperor_personality_spec(d).items() if k in ("desc", "flavor")},
+        },
+        "adult_age_actual": emperor_adult_age(d),
         "periods": d["periods"],
         "pending": list(d["pending"]),
         "history": list(d["history"])[:6],
@@ -637,4 +1306,14 @@ def dowager_payload(game_state):
                            "used": ("harem_" + k) in (d.get("used_actions") or [])}
                           for k, v in HAREM_ACTIONS.items()],
         "harem_log": list(d.get("harem_log") or [])[:5],
+        "clan_power": int(d.get("clan_power", 30) or 0),
+        "royal_power": int(d.get("royal_power", 40) or 0),
+        "minister_power": int(d.get("minister_power", 45) or 0),
+        "minister": d.get("minister", ""),
+        "meddle": list(d.get("meddle") or []),
+        "meddle_log": list(d.get("meddle_log") or [])[:5],
+        "consorts": dowager_harem_roster(d),
+        "consort_log": list(d.get("consort_log") or [])[:5],
+        "consort_ranks": list(NEW_HAREM_RANKS),
+        **reign_payload(d),
     }

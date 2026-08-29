@@ -59,7 +59,8 @@ FAIL_ENDING_KEYS = {"冷宫幽闭", "药石无医", "白绫赐死", "血溅椒�
 TRIUMPH_ENDING_KEYS = {"母仪天下"}
 # 后续新增的趣味/剧情结局（皇帝系 4 种 + 狸猫线 3 种）
 EXTRA_ENDING_KEYS = {"厨神皇帝", "隐士皇帝", "驯兽师皇帝", "昏君传", "狸猫之祸", "废为庶人", "狸猫天子",
-                     "还政归养", "临朝称制", "幽居慈宁"}  # + 太后垂帘线三出路
+                     "还政归养", "临朝称制", "幽居慈宁",   # 太后垂帘线三出路
+                     "女帝功成", "神器倾覆"}                # 女帝称制期二结局
 expected_keys = FAIL_ENDING_KEYS | TRIUMPH_ENDING_KEYS | EXTRA_ENDING_KEYS
 check("结局配置齐备", set(ENDINGS) == expected_keys, f"实际 {set(ENDINGS)}")
 for key, meta in ENDINGS.items():

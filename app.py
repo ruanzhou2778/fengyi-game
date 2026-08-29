@@ -65,6 +65,8 @@ from dowager_system import (
     respond_court_affair, dowager_action, return_power,
     dowager_period_tick, dowager_payload, get_dowager,
     set_harem_mode, harem_action, HAREM_MODES,
+    respond_meddle, consort_action, is_regnant,
+    respond_reign_agenda, reign_abdicate,
 )
 from affair_system import (
     get_affairs, develop_affair, use_affair_perk, mitigate_risk,
@@ -13103,6 +13105,66 @@ def dowager_harem_api():
                     "silver": game_state.silver,
                     "remaining_actions": game_state.remaining_actions,
                     "max_actions": game_state.max_actions})
+
+
+@app.route('/api/dowager/meddle', methods=['POST'])
+def dowager_meddle_api():
+    """裁决外戚/宗室/权臣的干政请托。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = respond_meddle(game_state, data.get('meddle_id'), data.get('choice_index'))
+    if ok is None:
+        return jsonify({"error": msg}), 404
+    if not ok:
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg, "overview": dowager_payload(game_state),
+                    "attributes": game_state.attributes})
+
+
+@app.route('/api/dowager/consort', methods=['POST'])
+def dowager_consort_api():
+    """处置新帝妃嫔：promote/demote/dismiss/comfort。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    ok, msg = consort_action(game_state, data.get('name'), data.get('action'))
+    if ok is None:
+        return jsonify({"error": msg}), 404
+    if not ok:
+        if isinstance(msg, tuple):
+            return msg[0], msg[1]
+        return jsonify({"error": str(msg)}), 400
+    return jsonify({"success": True, "narration": msg, "overview": dowager_payload(game_state),
+                    "silver": game_state.silver,
+                    "remaining_actions": game_state.remaining_actions,
+                    "max_actions": game_state.max_actions})
+
+
+@app.route('/api/reign/action', methods=['POST'])
+def reign_action_api():
+    """女帝称制期：agenda=裁决国是 / abdicate=传位。"""
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    if data.get('agenda_id'):
+        ok, msg = respond_reign_agenda(game_state, data.get('agenda_id'), data.get('choice_index'))
+    elif data.get('action') == 'abdicate':
+        ok, msg = reign_abdicate(game_state)
+    else:
+        return jsonify({"error": "须指定 agenda_id 或 action=abdicate"}), 400
+    if ok is None:
+        return jsonify({"error": msg}), 400
+    if not ok:
+        return jsonify({"error": str(msg)}), 400
+    resp = {"success": True, "narration": msg, "overview": dowager_payload(game_state)}
+    if is_game_over(game_state):
+        resp["game_over"] = True
+        resp["ending"] = ending_payload(game_state)
+    return jsonify(resp)
 
 
 @app.route('/api/dowager/power', methods=['POST'])

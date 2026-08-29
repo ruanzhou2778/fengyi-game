@@ -43,9 +43,10 @@ def fresh_state(rank=Rank.皇后):
     return gs
 
 
-def heir(name="承煜", age=8):
+def heir(name="承煜", age=8, tags=None, stats=None):
     return {"name": name, "gender": "皇子", "age": age, "alive": True,
-            "affection": 65, "emperor_favor": 45, "recent_events": []}
+            "affection": 65, "emperor_favor": 45, "recent_events": [],
+            "tags": tags or [], "stats": stats or {}}
 
 
 # 1. 进入垂帘
@@ -110,10 +111,13 @@ tre_before = d2["treasury"]
 msgs2 = D.dowager_period_tick(gs2)
 ok("国库有进项", d2["treasury"] != tre_before, (tre_before, d2["treasury"]))
 ok("旬数累加", d2["periods"] == 1)
-# 三旬长一岁 → 及冠触发亲政请求
-for _ in range(2):
+# 三旬长一岁 → 及冠触发亲政请求（仁厚性格 adult_offset=+2 → 18 岁）
+adult_at = D.emperor_adult_age(d2)
+ok("亲政年龄随性格", adult_at == 18 and d2["emperor"]["personality"] == "仁厚",
+   (adult_at, d2["emperor"].get("personality")))
+while d2["emperor"]["age"] < adult_at and d2["periods"] < 40:
     D.dowager_period_tick(gs2)
-ok("新帝长岁", d2["emperor"]["age"] == 16, d2["emperor"]["age"])
+ok("新帝长岁", d2["emperor"]["age"] == adult_at, d2["emperor"]["age"])
 ok("及冠请亲政", d2["return_requested"] >= 1, d2["return_requested"])
 # 积压奏本削权威
 d2["pending"] = [{"id": f"x{i}", "tpl": "t", "title": "t", "desc": "", "choices": []} for i in range(3)]
@@ -130,7 +134,7 @@ ok_, msg = D.return_power(gs3, "yield")
 ok("幼帝不可归政", ok_ is False, msg)
 # 5b 归政成功
 d3 = D.get_dowager(gs3)
-d3["emperor"]["age"] = 17
+d3["emperor"]["age"] = D.emperor_adult_age(d3) + 1
 d3["emperor"]["affection"] = 70
 d3["people"] = 60
 ok_, msg = D.return_power(gs3, "yield")
@@ -141,6 +145,7 @@ ok("退出垂帘", not D.is_dowager_active(gs3))
 gs4 = fresh_state()
 D.enter_dowager_mode(gs4, heir(age=16))
 d4 = D.get_dowager(gs4)
+d4["emperor"]["age"] = D.emperor_adult_age(d4)
 d4["return_requested"] = 1
 auth_b = d4["authority"]
 ok_, msg = D.return_power(gs4, "refuse")
@@ -152,7 +157,8 @@ ok("称制条件不足被拒", ok_ is False, msg)
 d4["authority"] = 95
 d4["court"] = 90
 ok_, msg = D.return_power(gs4, "regnant")
-ok("临朝称制成功", ok_ and (gs4.ending or {}).get("key") == "临朝称制", (msg, (gs4.ending or {}).get("key")))
+# v1.2-D：称制不再直接终局，转入女帝朝政循环
+ok("临朝称制成功", ok_ and D.is_regnant(gs4) and not A.is_game_over(gs4), (msg, (gs4.ending or {}).get("key")))
 # 5e 失势：权威跌破 → 幽居慈宁
 gs5 = fresh_state()
 D.enter_dowager_mode(gs5, heir(age=10))
@@ -285,6 +291,321 @@ r = c2.post("/api/dowager/harem", json={"player_id": pid2, "action": "bless_cons
 ok("api 后宫施为", r.status_code == 200, r.get_json())
 r = c2.post("/api/dowager/harem", json={"player_id": pid2})
 ok("api 缺参数400", r.status_code == 400, r.status_code)
+
+
+# 10. 新帝性格分支
+section("10. 新帝性格分支")
+cases = [
+    ("多疑", {"tags": ["孤僻"]}),
+    ("暴戾", {"tags": ["尚武"]}),
+    ("庸懒", {"tags": ["娇纵"]}),
+    ("仁厚", {}),
+]
+for want, kw in cases:
+    got = D.derive_emperor_personality(heir(**kw))
+    ok(f"推导性格 {want}", got == want, got)
+ok("低心性→多疑", D.derive_emperor_personality(heir(stats={"心性": 20})) == "多疑")
+ok("高武略→暴戾", D.derive_emperor_personality(heir(stats={"武略": 80})) == "暴戾")
+
+# 亲政年龄按性格浮动
+g10 = fresh_state()
+D.enter_dowager_mode(g10, heir(age=10, tags=["孤僻"]))
+d10 = D.get_dowager(g10)
+ok("多疑帝性格入档", d10["emperor"]["personality"] == "多疑", d10["emperor"])
+ok("多疑提前亲政(14)", D.emperor_adult_age(d10) == 14, D.emperor_adult_age(d10))
+g10b = fresh_state()
+D.enter_dowager_mode(g10b, heir(age=10, tags=["娇纵"]))
+ok("庸懒延后亲政(20)", D.emperor_adult_age(D.get_dowager(g10b)) == 20)
+
+# 性格漂移：多疑帝每旬帝心-1、帝威+1、权威-1
+aff0 = d10["emperor"]["affection"]
+maj0 = d10["emperor"]["majesty"]
+auth0 = d10["authority"]
+d10["harem_mode"] = "共治"
+with patch("dowager_system.random.random", return_value=0.99):
+    D.dowager_period_tick(g10)
+ok("多疑帝心下滑", d10["emperor"]["affection"] < aff0, (aff0, d10["emperor"]["affection"]))
+ok("多疑帝威渐长", d10["emperor"]["majesty"] > maj0, (maj0, d10["emperor"]["majesty"]))
+
+# 多疑/暴戾：亲政逾期会提前夺权
+g11 = fresh_state()
+D.enter_dowager_mode(g11, heir(age=14, tags=["尚武"]))
+d11 = D.get_dowager(g11)
+d11["emperor"]["age"] = D.emperor_adult_age(d11)
+d11["return_requested"] = D.RETURN_POWER_GRACE + 1
+d11["emperor"]["majesty"] = 30      # 未达旧的 60 门槛
+d11["emperor"]["affection"] = 60    # 帝心也不低
+d11["authority"] = 70
+with patch("dowager_system.random.random", return_value=0.0):
+    msgs11 = D.dowager_period_tick(g11)
+ok("暴戾帝提前夺权", (g11.ending or {}).get("key") == "幽居慈宁", (g11.ending or {}).get("key"))
+ok("夺权叙事带性格", any("禁军" in m or "先下手" in m for m in msgs11), msgs11)
+
+# 仁厚帝不会提前夺权
+g12 = fresh_state()
+D.enter_dowager_mode(g12, heir(age=14))
+d12 = D.get_dowager(g12)
+d12["emperor"]["age"] = D.emperor_adult_age(d12)
+d12["return_requested"] = D.RETURN_POWER_GRACE + 1
+d12["emperor"]["majesty"] = 30
+d12["emperor"]["affection"] = 60
+with patch("dowager_system.random.random", return_value=0.0):
+    D.dowager_period_tick(g12)
+ok("仁厚帝不夺权", not A.is_game_over(g12), (g12.ending or {}).get("key"))
+
+# 暴戾帝低帝心时归政有专属叙事
+g13 = fresh_state()
+D.enter_dowager_mode(g13, heir(age=14, tags=["尚武"]))
+d13 = D.get_dowager(g13)
+d13["emperor"]["age"] = D.emperor_adult_age(d13) + 1
+d13["emperor"]["affection"] = 30
+ok_, msg13 = D.return_power(g13, "yield")
+ok("暴戾帝抢先撤帘叙事", ok_ and "保命" in msg13, msg13)
+
+# 庸懒帝归政专属叙事
+g14 = fresh_state()
+D.enter_dowager_mode(g14, heir(age=14, tags=["娇纵"]))
+d14 = D.get_dowager(g14)
+d14["emperor"]["age"] = D.emperor_adult_age(d14) + 1
+d14["emperor"]["affection"] = 60
+ok_, msg14 = D.return_power(g14, "yield")
+ok("庸懒帝仍来问政叙事", ok_ and "怎么办" in msg14, msg14)
+
+# obedient 影响反弹幅度
+g15 = fresh_state()
+D.enter_dowager_mode(g15, heir(age=15))          # 仁厚 obedient
+d15 = D.get_dowager(g15)
+g15.remaining_actions = 10
+D.ensure_new_queen(g15, d15)
+qf0 = d15["queen_favor"]
+D.harem_action(g15, "instruct_queen")
+soft = qf0 - d15["queen_favor"]
+g16 = fresh_state()
+D.enter_dowager_mode(g16, heir(age=15, tags=["孤僻"]))   # 多疑 不 obedient
+d16 = D.get_dowager(g16)
+g16.remaining_actions = 10
+D.ensure_new_queen(g16, d16)
+qf1 = d16["queen_favor"]
+D.harem_action(g16, "instruct_queen")
+hard = qf1 - d16["queen_favor"]
+ok("多疑帝下训诫反弹更大", hard > soft, (soft, hard))
+
+# payload 暴露性格
+pl = D.dowager_payload(g10)
+ok("payload 含性格", (pl.get("emperor_personality") or {}).get("name") == "多疑", pl.get("emperor_personality"))
+ok("payload 含实际亲政年龄", pl.get("adult_age_actual") == 14, pl.get("adult_age_actual"))
+
+
+# 11. 三方势力干政
+section("11. 外戚/宗室/权臣干政")
+g20 = fresh_state()
+D.enter_dowager_mode(g20, heir(age=12))
+d20 = D.get_dowager(g20)
+ok("三方势力初值", all(isinstance(d20.get(k), int) for k in ("clan_power", "royal_power", "minister_power")),
+   {k: d20.get(k) for k in ("clan_power", "royal_power", "minister_power")})
+ok("权臣命名", bool(D.ensure_minister(g20, d20)), d20.get("minister"))
+with patch("dowager_system.random.random", return_value=0.0):
+    msgs20 = D.generate_meddle_events(g20)
+ok("干政事件生成", len(d20["meddle"]) == 1, d20["meddle"])
+ev20 = d20["meddle"][0]
+ok("事件三选", len(ev20["choices"]) == 3 and ev20["kind"] in D.MEDDLE_KINDS, ev20["kind"])
+ok("模板变量已填", "{minister}" not in ev20["desc"], ev20["desc"][:40])
+before = {k: d20[k] for k in ("clan_power", "royal_power", "minister_power", "authority")}
+ok_, narr20 = D.respond_meddle(g20, ev20["id"], 0)
+ok("干政裁决", ok_ and "处置" in narr20, narr20)
+ok("移出队列", not d20["meddle"])
+ok("势力已变", {k: d20[k] for k in before} != before, (before, {k: d20[k] for k in before}))
+ok_, err20 = D.respond_meddle(g20, "nope", 0)
+ok("无效事件404类", ok_ is None, err20)
+# 队列满 → 削权威
+d20["meddle"] = [{"id": "a", "tpl": "x", "kind": "外戚", "title": "t", "desc": "", "choices": []},
+                 {"id": "b", "tpl": "y", "kind": "宗室", "title": "t", "desc": "", "choices": []}]
+auth_b = d20["authority"]
+with patch("dowager_system.random.random", return_value=0.99):
+    msgs20b = D.dowager_period_tick(g20)
+ok("积压请托削权威", d20["authority"] < auth_b, (auth_b, d20["authority"]))
+# 权臣坐大
+d20["meddle"] = []
+d20["minister_power"] = 90
+auth_c, court_c = d20["authority"], d20["court"]
+with patch("dowager_system.random.random", return_value=0.99):
+    msgs20c = D.dowager_period_tick(g20)
+ok("权臣坐大压帘", any("权势已成" in x for x in msgs20c), msgs20c)
+ok("权臣坐大扣双项", d20["authority"] < auth_c and d20["court"] < court_c)
+# 外戚势盛损民心
+d20["minister_power"] = 40
+d20["clan_power"] = 85
+ppl_c = d20["people"]
+with patch("dowager_system.random.random", return_value=0.99):
+    msgs20d = D.dowager_period_tick(g20)
+ok("外戚势盛损民心", d20["people"] < ppl_c, (ppl_c, d20["people"]))
+ok("payload 含势力字段", all(k in D.dowager_payload(g20) for k in
+   ("clan_power", "royal_power", "minister_power", "minister", "meddle")))
+
+# 12. 新帝妃嫔名册
+section("12. 新帝妃嫔名册")
+g21 = fresh_state()
+D.enter_dowager_mode(g21, heir(age=15))
+d21 = D.get_dowager(g21)
+g21.remaining_actions = 40
+g21.silver = 5000
+roster = D.ensure_new_harem(g21, d21)
+ok("名册铺开", 3 <= len(roster) <= 5, len(roster))
+ok("名册字段", all(k in roster[0] for k in ("name", "rank", "favor", "respect", "children")), roster[0])
+c21 = roster[0]
+c21["rank"] = "常在"
+r0 = c21["respect"]
+ok_, msg21 = D.consort_action(g21, c21["name"], "promote")
+ok("提拔妃嫔", ok_ and c21["rank"] == "贵人" and c21["respect"] > r0, (msg21, c21["rank"]))
+ok_, msg21b = D.consort_action(g21, c21["name"], "demote")
+ok("贬黜妃嫔", ok_ and c21["rank"] == "常在", (msg21b, c21["rank"]))
+ok_, msg21c = D.consort_action(g21, c21["name"], "comfort")
+ok("抚慰妃嫔", ok_ and g21.silver == 5000 - 60, (msg21c, g21.silver))
+c21["children"] = 1
+ok_, msg21d = D.consort_action(g21, c21["name"], "dismiss")
+ok("有子不得遣出", ok_ is False, msg21d)
+c21["children"] = 0
+ok_, msg21e = D.consort_action(g21, c21["name"], "dismiss")
+ok("遣出宫", ok_ and D.find_consort(d21, c21["name"]) is None, msg21e)
+ok_, err21 = D.consort_action(g21, "查无此人", "promote")
+ok("查无此人", err21 and ok_ is None, err21)
+# 放权后不得升降
+D.set_harem_mode(g21, "放权")
+c21b = (d21.get("consorts") or [])[1] if len(d21.get("consorts") or []) > 1 else None
+if c21b:
+    ok_, msg21f = D.consort_action(g21, c21b["name"], "promote")
+    ok("放权后不得升降", ok_ is False, msg21f)
+    ok_, msg21g = D.consort_action(g21, c21b["name"], "comfort")
+    ok("放权后仍可抚慰", ok_ is True, msg21g)
+# 妃嫔生育
+D.set_harem_mode(g21, "共治")
+for c in d21["consorts"]:
+    c["pregnant"] = True
+auth_e = d21["authority"]
+with patch("dowager_system.random.random", return_value=0.0):
+    msgs21 = D.dowager_period_tick(g21)
+ok("妃嫔诞下皇嗣", any("诞下皇嗣" in x for x in msgs21), msgs21)
+ok("生育提权威", d21["authority"] >= auth_e)
+
+# 13. 女帝称制循环
+section("13. 女帝称制循环")
+g22 = fresh_state()
+D.enter_dowager_mode(g22, heir(age=12))
+d22 = D.get_dowager(g22)
+ok_, msg22 = D.return_power(g22, "regnant")
+ok("条件不足不得称制", ok_ is False, msg22)
+d22["authority"] = 95
+d22["court"] = 90
+ok_, msg22b = D.return_power(g22, "regnant")
+ok("称制成功", ok_ and D.is_regnant(g22), msg22b)
+ok("称制不直接终局", not A.is_game_over(g22), (g22.ending or {}).get("key"))
+ok("年号已定", bool(d22["reign_name"]), d22["reign_name"])
+ok("三维初值", all(isinstance(d22.get(k), int) for k in ("stability", "sovereignty", "legacy")))
+# 国是生成与裁决
+with patch("dowager_system.random.random", return_value=0.0):
+    msgs22 = D.generate_reign_agenda(g22)
+ok("国是生成", len(d22["agenda"]) == 1, d22["agenda"])
+ag = d22["agenda"][0]
+ok("国是三选", len(ag["choices"]) == 3, ag["title"])
+st0, so0, lg0 = d22["stability"], d22["sovereignty"], d22["legacy"]
+ok_, narr22 = D.respond_reign_agenda(g22, ag["id"], 0)
+ok("国是裁决", ok_ and "降旨" in narr22, narr22)
+ok("三维已变", (d22["stability"], d22["sovereignty"], d22["legacy"]) != (st0, so0, lg0))
+ok_, err22 = D.respond_reign_agenda(g22, "nope", 0)
+ok("无效国是", ok_ is None, err22)
+# tick 分流到称制循环
+p0 = d22["reign_periods"]
+with patch("dowager_system.random.random", return_value=0.99):
+    D.dowager_period_tick(g22)
+ok("tick 走称制循环", d22["reign_periods"] == p0 + 1, d22["reign_periods"])
+# 传位过早被拒
+g23 = fresh_state()
+D.enter_dowager_mode(g23, heir(age=12))
+d23 = D.get_dowager(g23)
+d23["authority"], d23["court"] = 95, 90
+D.return_power(g23, "regnant")
+ok_, msg23 = D.reign_abdicate(g23)
+ok("改元未久不得传位", ok_ is False, msg23)
+# 功成传位
+d23["reign_periods"] = 14
+d23["legacy"] = 80
+d23["stability"] = 60
+ok_, msg23b = D.reign_abdicate(g23)
+ok("功成传位", ok_ and (g23.ending or {}).get("key") == "女帝功成", (g23.ending or {}).get("key"))
+ok("称制退出", not D.is_regnant(g23))
+# 倾覆
+g24 = fresh_state()
+D.enter_dowager_mode(g24, heir(age=12))
+d24 = D.get_dowager(g24)
+d24["authority"], d24["court"] = 95, 90
+D.return_power(g24, "regnant")
+d24["reign_periods"] = 10
+d24["stability"] = 20
+with patch("dowager_system.random.random", return_value=0.0):
+    msgs24 = D.reign_period_tick(g24)
+ok("稳固崩坏倾覆", (g24.ending or {}).get("key") == "神器倾覆", (g24.ending or {}).get("key"))
+ok("倾覆叙事", any("复辟" in x for x in msgs24), msgs24)
+# 主动传位但稳固过低 → 倾覆
+g25 = fresh_state()
+D.enter_dowager_mode(g25, heir(age=12))
+d25 = D.get_dowager(g25)
+d25["authority"], d25["court"] = 95, 90
+D.return_power(g25, "regnant")
+d25["reign_periods"] = 8
+d25["stability"] = 20
+d25["legacy"] = 30
+ok_, msg25 = D.reign_abdicate(g25)
+ok("低稳固传位=倾覆", ok_ and (g25.ending or {}).get("key") == "神器倾覆", (g25.ending or {}).get("key"))
+
+# 14. v1.2 API 冒烟
+section("14. v1.2 API")
+c3 = flask_app.test_client()
+r = c3.post("/api/start", json={"name": "沈太后3", "api_base": "", "api_key": "", "api_model": ""})
+pid3 = r.get_json()["player_id"]
+g3 = A.sessions[pid3]
+g3.remaining_actions = 40
+g3.silver = 5000
+D.enter_dowager_mode(g3, heir(age=15))
+d3 = D.get_dowager(g3)
+with patch("dowager_system.random.random", return_value=0.0):
+    D.generate_meddle_events(g3)
+if d3.get("meddle"):
+    r = c3.post("/api/dowager/meddle", json={"player_id": pid3,
+                                             "meddle_id": d3["meddle"][0]["id"], "choice_index": 1})
+    ok("api 干政裁决", r.status_code == 200 and r.get_json().get("success"), r.get_json())
+D.ensure_new_harem(g3, d3)
+nm = (d3.get("consorts") or [{}])[0].get("name")
+r = c3.post("/api/dowager/consort", json={"player_id": pid3, "name": nm, "action": "comfort"})
+ok("api 妃嫔处置", r.status_code == 200 and r.get_json().get("success"), r.get_json())
+r = c3.post("/api/dowager/consort", json={"player_id": pid3, "name": "无此人", "action": "promote"})
+ok("api 妃嫔404", r.status_code == 404, r.status_code)
+d3["authority"], d3["court"] = 95, 90
+r = c3.post("/api/dowager/power", json={"player_id": pid3, "mode": "regnant"})
+ok("api 称制", r.status_code == 200 and r.get_json().get("success"), r.get_json())
+ov3 = c3.get(f"/api/dowager/overview?player_id={pid3}").get_json() or {}
+ok("api overview 含称制", ov3.get("regnant") is True and ov3.get("reign_name"), ov3.get("reign_name"))
+with patch("dowager_system.random.random", return_value=0.0):
+    D.generate_reign_agenda(g3)
+ag3 = (D.get_dowager(g3).get("agenda") or [{}])[0].get("id")
+if ag3:
+    r = c3.post("/api/reign/action", json={"player_id": pid3, "agenda_id": ag3, "choice_index": 2})
+    ok("api 国是裁决", r.status_code == 200 and r.get_json().get("success"), r.get_json())
+r = c3.post("/api/reign/action", json={"player_id": pid3})
+ok("api 缺参数400", r.status_code == 400, r.status_code)
+r = c3.post("/api/reign/action", json={"player_id": pid3, "action": "abdicate"})
+ok("api 传位过早400", r.status_code == 400, r.status_code)
+
+# 15. v1.2 存读档
+section("15. v1.2 存读档")
+payload3 = g3.to_save_data()
+rest3 = A.GameState.from_save_data(payload3)
+rd3 = D.get_dowager(rest3)
+sd3 = D.get_dowager(g3)
+ok("称制状态恢复", rd3.get("regnant") is True and rd3.get("reign_name") == sd3.get("reign_name"))
+ok("三维恢复", (rd3["stability"], rd3["sovereignty"], rd3["legacy"]) ==
+   (sd3["stability"], sd3["sovereignty"], sd3["legacy"]))
+ok("妃嫔名册恢复", len(rd3.get("consorts") or []) == len(sd3.get("consorts") or []))
+ok("势力恢复", rd3.get("minister") == sd3.get("minister"))
 
 print(f"\n太后垂帘系统验证: {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
