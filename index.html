@@ -1562,7 +1562,7 @@
         .interact-result-area:empty { display: none; }
         .status-tag { font-size: 7px; padding: 1px 6px; border-radius: 8px; display: inline-block; margin: 1px 2px; }
         .status-tag.pregnant { background: rgba(240,180,143,0.15); color: #f0b48f; }
-        .status-tag.child { background: rgba(126,168,149,0.15); color: #7ea895; }
+        .status-tag.child { background: rgba(126,168,149,0.15); color: #ffffff; }
         .status-tag.rival { background: rgba(240,120,100,0.15); color: #f0a090; }
         .status-tag.alliance { background: rgba(126,150,200,0.15); color: #90a8d8; }
         .config-toggle-btn { display: inline-block; margin-top: 2px; padding: 1px 8px; border: 1px solid rgba(158,190,178,0.12); border-radius: 12px; background: transparent; color: #7a8a86; font-size: 7px; cursor: pointer; font-family: inherit; }
@@ -3997,7 +3997,7 @@ function renderConsortPanel(data) {
     const hasSpouse = groups.some(g => g.rank === '太子妃' && g.count > 0);
     html += `<div style="font-size:7px;color:var(--text-light);margin-bottom:3px;display:flex;justify-content:space-between;align-items:center;">
         <span>👥 内宅 ${cs.total || 0} / ${cs.max_total || 47} 人</span>
-        ${hasSpouse ? `<button onclick="heirConsortFill()" style="padding:1px 5px;border:1px solid rgba(90,130,70,0.5);border-radius:4px;background:rgba(90,130,70,0.15);color:#9cc8a0;font-size:7px;cursor:pointer;font-family:inherit;">🎐 依例添置</button>` : ''}
+        ${hasSpouse ? `<button onclick="heirConsortFill()" style="padding:1px 5px;border:1px solid rgba(90,130,70,0.5);border-radius:4px;background:rgba(90,130,70,0.15);color:#ffffff;font-size:7px;cursor:pointer;font-family:inherit;">🎐 依例添置</button>` : ''}
     </div>`;
 
     if (!hasSpouse && !sel) {
@@ -4950,7 +4950,7 @@ async function openChildTransferMenu(npcName) {
             html += `<div style="display:flex;align-items:center;gap:4px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;padding:4px 6px;">
                 <span>${c.gender === '皇子' ? '👑' : '🌸'} ${c.name || '未命名'}</span>
                 <span style="font-size:7px;color:var(--text-light);">${age}岁</span>
-                <button onclick="confirmAdoptOut('${npcName.replace(/'/g, "\\'")}', ${idx})" style="margin-left:auto;padding:2px 8px;border:1px solid rgba(90,130,70,0.5);border-radius:6px;background:rgba(90,130,70,0.15);font-size:8px;cursor:pointer;font-family:inherit;color:#9cc8a0;">📤 托付</button>
+                <button onclick="confirmAdoptOut('${npcName.replace(/'/g, "\\'")}', ${idx})" style="margin-left:auto;padding:2px 8px;border:1px solid rgba(90,130,70,0.5);border-radius:6px;background:rgba(90,130,70,0.15);font-size:8px;cursor:pointer;font-family:inherit;color:#ffffff;">📤 托付</button>
             </div>`;
         });
     }
@@ -5630,7 +5630,7 @@ function openDraftPanel() {
     const rows = dp.candidates.map(c=>{
         const tags = c.endorsed_by.map(endorseTag).join(' ') + (c.influenced?' <span style="background:rgba(63,114,175,0.2);color:#9cc0e8;padding:0 5px;border-radius:6px;">🤝已打点</span>':'')
             + (c.npc_rec?` <span style="background:rgba(142,68,173,0.2);color:#c39bd3;padding:0 5px;border-radius:6px;">🏷️ ${c.npc_rec}已举荐</span>`:'')
-            + (c.rec_state==='ok'?' <span style="background:rgba(39,134,67,0.2);color:#7dcea0;padding:0 5px;border-radius:6px;">✅圣意属意</span>':'')
+            + (c.rec_state==='ok'?' <span style="background:rgba(39,134,67,0.2);color:#ffffff;padding:0 5px;border-radius:6px;">✅圣意属意</span>':'')
             + (c.rec_state==='failed'?' <span style="background:rgba(120,120,120,0.2);color:#aaa;padding:0 5px;border-radius:6px;">❌举荐未成</span>':'')
             + (c.impression_bonus?` <span style="background:rgba(212,172,13,0.15);color:var(--gold-dark);padding:0 5px;border-radius:6px;">👀偶遇+${c.impression_bonus}</span>`:'');
         let ops = '';
@@ -6659,7 +6659,7 @@ function buildConflictExtraHtml(d) {
     if (d.event?.assist_servants?.length) {
         const names = d.event.assist_servants.map(s => `${s.type === '宫女' ? '👩' : '🧑'}${s.name}`).join('、');
         const bonus = d.event.assist_bonus ? `（助力+${d.event.assist_bonus}）` : '';
-        html += `<div style="background:rgba(76,175,80,0.12);border:1px solid rgba(76,175,80,0.35);border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#9cc8a0;font-weight:600;">👥 ${names} 暗中协助${bonus}</div>`;
+        html += `<div style="background:rgba(76,175,80,0.12);border:1px solid rgba(76,175,80,0.35);border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#ffffff;font-weight:600;">👥 ${names} 暗中协助${bonus}</div>`;
     }
     if (d.demotion_message) {
         html += `<div style="background:rgba(192,57,43,0.15);border:1px solid rgba(192,57,43,0.4);border-radius:6px;padding:4px 8px;margin-top:4px;font-size:8px;color:#e59a8a;font-weight:600;">📉 ${d.demotion_message}</div>`;

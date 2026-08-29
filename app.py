@@ -6116,6 +6116,48 @@ def _guard_inner_palace_routes():
     return None
 
 
+
+def npc_manage_inner_palace(game_state):
+    """玩家非内务府掌管者时，由现任皇后/协理六宫者自动经营：
+    每旬自动向皇帝请拨内帑（约五成准奏），并用库银自动升级产业（每旬至多一项）。
+
+    玩家本人是皇后或协理者时不干预（由玩家手动掌管）。返回情报消息列表。
+    """
+    qa = queen_authority(game_state)
+    holder = qa.get("assistant") or qa.get("holder") or ""
+    if not holder or holder == game_state.name:
+        return []
+    npc = (game_state.npcs or {}).get(holder)
+    if not isinstance(npc, dict) or not npc.get("alive", True):
+        return []
+    ip = normalize_inner_palace(getattr(game_state, "inner_palace", None))
+    msgs = []
+    acted = False
+    # ① 自动请拨内帑
+    if random.random() < 0.5:
+        grant = random.randint(5000, 8000)
+        ip["budget"] = int(ip.get("budget", 0) or 0) + grant
+        msgs.append(f"🏛️ 内务府：{holder}奏请内帑，拨银{grant}两入库")
+        acted = True
+    # ② 自动经营产业：从等级最低的可升项目做起，每旬至多一项
+    projects = ip.get("projects") or {}
+    for pname, proj in sorted(projects.items(), key=lambda kv: int((kv[1] or {}).get("level", 0) or 0)):
+        level = int((proj or {}).get("level", 0) or 0)
+        cost = 100 + 80 * level
+        if level < 5 and int(ip.get("budget", 0) or 0) >= cost:
+            ip["budget"] = int(ip.get("budget", 0) or 0) - cost
+            proj["level"] = level + 1
+            proj["invested"] = int(proj.get("invested", 0) or 0) + cost
+            proj["income_per_period"] = proj["level"] * 5
+            msgs.append(f"🏛️ 内务府：{holder}经营产业，{pname}升至{proj['level']}级（收益{proj['income_per_period']}两/旬）")
+            acted = True
+            break
+    if acted:
+        from inner_palace_system import _ip_log
+        _ip_log(ip, f"{holder}掌内务府：请帑与产业经营")
+        game_state.inner_palace = ip
+    return msgs
+
 def guard_action(game_state):
     """行动前统一守卫：先查终局与冷宫囚禁，再扣行动点。
 
@@ -8285,6 +8327,9 @@ def next_period():
             CHONGHUA_UPKEEP_PER_CHILD=CHONGHUA_UPKEEP_PER_CHILD,
         )
         for msg in ip_events:
+            intelligence.append(msg)
+        # 非主控掌管内务府时，现任皇后/协理者自动请帑与经营产业
+        for msg in npc_manage_inner_palace(game_state):
             intelligence.append(msg)
             game_state.add_memory(msg)
     except Exception as e:
