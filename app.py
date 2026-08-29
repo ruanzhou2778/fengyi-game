@@ -9359,8 +9359,10 @@ def save_game():
     save_data = game_state.to_save_data()
     filename = os.path.join(SAVE_DIR, f"{player_id}_{slot_name}.json")
     try:
-        with open(filename, 'w', encoding='utf-8') as f:
+        tmp_path = filename + ".tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(save_data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, filename)  # 原子替换：写入中断不再产生截断存档
         return jsonify({"success": True, "message": f"游戏已保存 ({slot_name})", "slot": slot_name, "save_time": save_data.get("save_time", datetime.now().isoformat())})
     except Exception as e:
         return jsonify({"error": f"保存失败: {str(e)}"}), 500

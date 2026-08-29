@@ -72,10 +72,10 @@ with m.app.test_client() as c:
     ok('invalid target status', r.status_code==400, r.get_json())
 
     gs.intrigue['rumors']=[{'target':gs.name,'type':'player','severity':2,'turns_left':2,'text':'旧谣'}]
-    gs.intrigue['heat']=25
+    gs.intrigue['heat']=20
     gs.intrigue['dirt'][target]={'points':3,'age':6,'label':'旧账'}
     day=gs.day
-    with patch('app.generate_period_events', return_value={'events':[], 'ai_used':False, 'fallback':True}), patch('app.random.random', return_value=1.0):
+    with patch('app.generate_period_events', return_value={'events':[], 'ai_used':False, 'fallback':True}), patch('app.random.random', return_value=0.0):
         r=post(c,'/api/next_period',{'player_id':pid})
     np=r.get_json() or {}
     top=np.get('intrigue',{}).get('top_dirt',[])

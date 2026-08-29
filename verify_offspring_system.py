@@ -68,12 +68,15 @@ def test_pregnancy_to_birth():
     holder["pregnancy_month"] = 0.0
 
     births = 0
-    for i in range(12):
-        msgs = process_offspring_for_holder(gs, holder, "皇子弘", holder["name"], "皇子", True)
-        for m in msgs:
-            print(f"  旬{i+1}: {m}")
-        if any("喜得" in m for m in msgs):
-            births += 1
+    from unittest.mock import patch as _patch1
+    with _patch1('app.random.random', return_value=0.0):
+        # PREGNANCY_STEP=10/30，孕满需 30 旬；固定随机排除流产/受孕波动
+        for i in range(31):
+            msgs = process_offspring_for_holder(gs, holder, "皇子弘", holder["name"], "皇子", True)
+            for m in msgs:
+                print(f"  旬{i+1}: {m}")
+            if any("喜得" in m for m in msgs):
+                births += 1
 
     kids = holder.get("offspring", [])
     assert births >= 1, "应至少分娩一次"
@@ -87,6 +90,7 @@ def test_pregnancy_to_birth():
     age_before = gc["age"]
     process_offspring_for_holder(gs, holder, "皇子弘", holder["name"], "皇子", True)
     assert kids[0]["age"] > age_before, "孙辈年龄应增长"
+    return True
 # ---------- 测试 3：公主出降生外孙 ----------
 def test_princess_grandchild():
     print("\n=== 测试 3：公主出降 → 外孙/外孙女 ===")
@@ -94,8 +98,10 @@ def test_princess_grandchild():
     holder = make_consort(name="驸马乙", fertility=90)
     ensure_offspring_fields(holder)
     holder["is_pregnant"] = True
-    for _ in range(12):
-        process_offspring_for_holder(gs, holder, "公主华", "驸马乙", "公主", False)
+    from unittest.mock import patch as _patch3
+    with _patch3('app.random.random', return_value=0.0):
+        for _ in range(32):  # 孕满需 30 旬
+            process_offspring_for_holder(gs, holder, "公主华", "驸马乙", "公主", False)
     kids = holder.get("offspring", [])
     assert len(kids) >= 1
     rel = kids[0]["relation"]
@@ -128,8 +134,10 @@ def test_postpartum_cooldown():
     holder = make_consort(fertility=99)
     ensure_offspring_fields(holder)
     holder["is_pregnant"] = True
-    for _ in range(11):
-        process_offspring_for_holder(gs, holder, "皇子弘", holder["name"], "皇子", True)
+    from unittest.mock import patch as _patch5
+    with _patch5('app.random.random', return_value=0.0):
+        for _ in range(31):  # 孕满需 30 旬；第 31 旬留 1 旬休养期
+            process_offspring_for_holder(gs, holder, "皇子弘", holder["name"], "皇子", True)
     assert len(holder["offspring"]) >= 1
     assert holder["postpartum_cooldown"] >= 1, "分娩后应有休养期"
     cd = holder["postpartum_cooldown"]
@@ -147,7 +155,7 @@ def test_urge_api():
     print("\n=== 测试 6：/api/progeny/urge 催生 API ===")
     appmod.app.config['TESTING'] = True
     client = appmod.app.test_client()
-    pid = "test_offspring_urge"
+    pid = None  # /api/start 自行生成 player_id
     try:
         p = os.path.join(appmod.SAVE_DIR, f"{pid}_default.json")
         if os.path.exists(p):
@@ -161,7 +169,8 @@ def test_urge_api():
         "background": "小家碧玉",
     })
     data = resp.get_json()
-    assert data and data.get("success"), f"启动失败：{data}"
+    assert data and data.get("player_id"), f"启动失败：{data}"
+    pid = data["player_id"]
     gs = appmod.sessions.get(pid)
     assert gs is not None, "会话未建立"
 

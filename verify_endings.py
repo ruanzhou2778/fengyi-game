@@ -57,7 +57,9 @@ section("1. 结局配置表")
 # ------------------------------------------------------------
 FAIL_ENDING_KEYS = {"冷宫幽闭", "药石无医", "白绫赐死", "血溅椒房", "鹤顶红", "迟暮宫墙"}
 TRIUMPH_ENDING_KEYS = {"母仪天下"}
-expected_keys = FAIL_ENDING_KEYS | TRIUMPH_ENDING_KEYS
+# 后续新增的趣味/剧情结局（皇帝系 4 种 + 狸猫线 3 种）
+EXTRA_ENDING_KEYS = {"厨神皇帝", "隐士皇帝", "驯兽师皇帝", "昏君传", "狸猫之祸", "废为庶人", "狸猫天子"}
+expected_keys = FAIL_ENDING_KEYS | TRIUMPH_ENDING_KEYS | EXTRA_ENDING_KEYS
 check("结局配置齐备", set(ENDINGS) == expected_keys, f"实际 {set(ENDINGS)}")
 for key, meta in ENDINGS.items():
     check(f"{key} 字段完整",
