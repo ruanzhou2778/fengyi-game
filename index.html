@@ -4814,144 +4814,263 @@ async function openDowager(){
             return;
         }
         window._dowager = d;
-        if(d.regnant){ renderRegnantPanel(d); return; }
-        const emp = d.emperor || {};
-        const bar = (label, v, color) => `<span style="display:inline-block;min-width:52px;">${label}</span><span style="display:inline-block;width:40px;height:5px;background:rgba(158,190,178,0.18);border-radius:3px;vertical-align:middle;overflow:hidden;"><span style="display:block;width:${Math.max(0,Math.min(100,v))}%;height:100%;background:${color};"></span></span> <b style="color:${color};">${v}</b>`;
-        let body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.9;">
-            <div>${bar('摄政权威', d.authority, d.authority<=25?'#c0392b':d.authority>=80?'#d4ac0d':'#7a9ac0')}　${bar('朝堂控制', d.court, '#9a7ac0')}</div>
-            <div>${bar('民心', d.people, '#4a8a5a')}　国库：<b style="color:var(--gold-dark);">${d.treasury}</b> 万　垂帘${d.periods}旬</div>
-            <div>⚖️ 派系：${Object.entries(d.factions||{}).map(([k,v])=>`${k} ${v}`).join(' · ')}</div>
+        window._dowagerTab = window._dowagerTab || 'court';
+        renderDowagerPanel(d, window._dowagerTab);
+    } catch(e){ showToast('❌ 操作失败'); }
+}
+
+function renderDowagerPanel(d, tab){
+    window._dowager = d;
+    window._dowagerTab = tab;
+    const emp = d.emperor || {};
+    const pn = (d.emperor_personality||{});
+    const bar = (label, v, color, max) => {
+        max = max || 100;
+        return `<span style="display:inline-block;min-width:48px;font-size:8px;">${label}</span><span style="display:inline-block;width:44px;height:5px;background:rgba(158,190,178,0.18);border-radius:3px;vertical-align:middle;overflow:hidden;"><span style="display:block;width:${Math.max(0,Math.min(100,(v/max)*100))}%;height:100%;background:${color};"></span></span> <b style="color:${color};font-size:8px;">${v}</b>`;
+    };
+
+    const header = `
+        <div style="background:rgba(201,168,106,.08);border:1px solid rgba(201,168,106,.25);border-radius:8px;padding:6px 10px;margin-bottom:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">
+                <span style="font-size:11px;color:var(--gold-dark);font-weight:600;">👑 ${d.regnant?d.reign_name+'朝':'太后垂帘'}</span>
+                <span style="font-size:8px;color:var(--text-light);">第 ${d.regnant?(d.reign_periods||0):(d.periods||0)} 旬 · 幼帝 ${emp.name||''}（${emp.age||0}岁·${pn.name||'仁厚'}）</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:3px;">
+                ${bar('权威', d.authority, d.authority<=25?'#c0392b':d.authority>=80?'#d4ac0d':'#7a9ac0')}
+                ${bar('朝堂', d.court, d.court<=30?'#c0392b':'#9a7ac0')}
+                ${bar('民心', d.people, '#4a8a5a')}
+            </div>
         </div>`;
-        body += `<div style="margin-top:5px;border:1px solid var(--border-light);border-radius:8px;padding:5px;background:var(--bg-card);font-size:9px;color:var(--text-mid);">
-            <div style="font-weight:600;color:var(--text-dark);">👑 幼帝 ${emp.name||''}（${emp.age||0}岁）</div>
-            <div>母子亲近 ${emp.affection} · 帝王威仪 ${emp.majesty}${emp.age>=(d.adult_age_actual||d.adult_age||16)?' · <span style="color:#c0392b;">已及冠，朝野请亲政</span>':''}</div>
-            <div style="color:var(--text-light);">性情：<b style="color:var(--gold-dark);">${(d.emperor_personality||{}).name||'仁厚'}</b>（${(d.emperor_personality||{}).desc||''}）· 亲政之龄 ${d.adult_age_actual||16}</div>
-            <div style="color:var(--text-light);font-size:7px;">${(d.emperor_personality||{}).flavor||''}</div></div>`;
-        // 待裁奏事
-        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">📜 待裁奏事（${(d.pending||[]).length}/3）</div>`;
-        if(!(d.pending||[]).length){ body += `<div style="font-size:8px;color:var(--text-light);">通政司暂无积压奏本。</div>`; }
-        (d.pending||[]).forEach(p=>{
-            body += `<div style="border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);background:rgba(192,57,43,.05);">
-                <div style="font-weight:600;">${p.icon||'📜'} ${p.type} · ${p.title}</div>
-                <div style="line-height:1.6;margin-top:2px;">${p.desc||''}</div>
-                <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
-                ${(p.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="dowagerAffair('${p.id}',${i})">${c.icon||'⚖️'} ${c.text}</button>`).join('')}
+
+    const tabs = [
+        {key:'court', label:'朝堂'},
+        {key:'harem', label:'六宫'},
+        {key:'heir', label:'皇嗣'},
+        {key:'powers', label:'朝局'},
+    ];
+    const tabBar = `<div style="display:flex;gap:2px;margin-bottom:6px;border-bottom:1px solid rgba(201,168,106,.2);padding-bottom:4px;">
+        ${tabs.map(t=>`<button class="chonghua-btn" style="flex:1;padding:4px 2px;font-size:8px;${t.key===tab?'border-color:var(--gold);color:var(--gold-dark);font-weight:600;':''}" onclick="dowagerSwitchTab('${t.key}')">${t.label}</button>`).join('')}
+    </div>`;
+
+    let content = '';
+
+    if(tab==='court'){
+        const sess = (d.pending||[]).find(p=>p.tpl==='grand_session');
+        if(sess){
+            content += `<div style="border:1px solid rgba(201,168,106,.4);border-radius:8px;padding:6px;background:rgba(201,168,106,.06);margin-bottom:6px;">
+                <div style="font-size:10px;color:var(--gold-dark);font-weight:600;">👑 大朝会 · 百官入朝</div>
+                <div style="font-size:9px;color:var(--text-mid);line-height:1.7;margin-top:3px;">${sess.desc||''}</div>
+                <div style="display:flex;flex-direction:column;gap:4px;margin-top:6px;">
+                ${(sess.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;padding:5px 8px;${c.effects&&c.effects.way==='preside'?'border-color:var(--gold);color:var(--gold-dark);':''}" onclick="dowagerAffair('${sess.id}',${i})">${c.icon||'👑'} ${c.text}</button>`).join('')}
+                </div></div>`;
+        }
+        const affairs = (d.pending||[]).filter(p=>p.tpl!=='grand_session');
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-bottom:3px;">📜 待裁奏事（${affairs.length}）</div>`;
+        if(!affairs.length){ content += `<div style="font-size:8px;color:var(--text-light);padding:4px;">通政司暂无积压奏本。</div>`; }
+        affairs.forEach(p=>{
+            content += `<div style="border:1px solid var(--border-light);border-radius:6px;padding:5px;margin-bottom:4px;background:var(--bg-card);">
+                <div style="font-weight:600;font-size:9px;">${p.icon||'📜'} ${p.type} · ${p.title}</div>
+                <div style="font-size:8px;color:var(--text-mid);line-height:1.6;margin-top:2px;">${p.desc||''}</div>
+                <div style="display:flex;flex-direction:column;gap:3px;margin-top:4px;">
+                ${(p.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;padding:4px 8px;font-size:8px;" onclick="dowagerAffair('${p.id}',${i})">${c.text}</button>`).join('')}
                 </div></div>`;
         });
-        // 后宫治理（新帝的后宫）
-        const hm = d.harem_mode || '共治';
-        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🏮 新帝后宫 · 治理之法：<span style="color:var(--gold-dark);">${hm}</span></div>`;
-        body += `<div style="font-size:8px;color:var(--text-mid);">新后：${d.new_queen||'（尚未立后）'}${d.new_queen?`　敬顺 ${d.queen_favor}`:''}${d.grandchild_chance?`　皇孙可期 ${d.grandchild_chance}%`:''}</div>`;
-        body += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">` + (d.harem_modes||[]).map(m =>
-            m.key===hm ? `<span style="font-size:8px;color:var(--gold-dark);padding:3px 7px;">◉ ${m.name}</span>`
-                       : `<button class="chonghua-btn" title="${m.desc}" onclick="dowagerHarem({mode:'${m.key}'})">${m.name}</button>`
-        ).join('') + `</div>`;
-        body += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">` + (d.harem_actions||[]).map(a =>
-            a.used ? `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;">✓ ${a.name}</span>`
-                   : (a.allowed ? `<button class="chonghua-btn" title="${a.desc}" onclick="dowagerHarem({action:'${a.key}'})">${a.name}</button>`
-                                : `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;" title="当前治理之法不许">🔒 ${a.name}</span>`)
-        ).join('') + `</div>`;
-        if((d.harem_log||[]).length){ body += `<div style="font-size:7px;color:var(--text-light);margin-top:2px;">${(d.harem_log||[]).slice(0,3).map(l=>'· '+l).join('<br>')}</div>`; }
-        // 三方势力与干政
-        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🕸️ 内外势力</div>`;
-        body += `<div style="font-size:8px;color:var(--text-mid);">🏠 外戚 ${d.clan_power} · 🏵️ 宗室 ${d.royal_power} · ⚖️ 权臣 ${d.minister_power}${d.minister?`（${d.minister}）`:''}</div>`;
-        (d.meddle||[]).forEach(m=>{
-            body += `<div style="border:1px solid rgba(142,68,173,.35);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);background:rgba(142,68,173,.06);">
-                <div style="font-weight:600;">${m.icon||'🕸️'} ${m.kind} · ${m.title}</div>
-                <div style="line-height:1.6;margin-top:2px;">${m.desc||''}</div>
-                <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
-                ${(m.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="dowagerMeddle('${m.id}',${i})">${c.text}</button>`).join('')}
-                </div></div>`;
-        });
-        // 新帝妃嫔名册
-        if((d.consorts||[]).length){
-            body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🌸 新帝妃嫔（${(d.consorts||[]).length}人）</div>`;
-            (d.consorts||[]).forEach(c=>{
-                body += `<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap;border-bottom:1px dashed var(--border-light);padding:2px 0;font-size:8px;color:var(--text-mid);">
-                    <span>${charIcon('consort:'+c.name, c.rank.includes('妃')?'🌸':'🌺', 18)} ${c.rank}·<b>${c.name}</b>${c.pregnant?' 🤰':''}${c.children?` 👶${c.children}`:''} ${avatarUploadBtn('consort:'+c.name)}</span>
-                    <span style="color:var(--text-light);">帝宠${c.favor} 敬顺${c.respect}</span>
-                    <span style="display:flex;gap:2px;">
-                        <button class="chonghua-btn" onclick="dowagerConsort('${c.name}','promote')">↑擢</button>
-                        <button class="chonghua-btn" onclick="dowagerConsort('${c.name}','demote')">↓贬</button>
-                        <button class="chonghua-btn" onclick="dowagerConsort('${c.name}','dismiss')">🚪遣</button>
-                        <button class="chonghua-btn" onclick="dowagerConsort('${c.name}','comfort')">🎁抚(60两)</button>
-                    </span></div>`;
+        const meddle = (d.meddle||[]);
+        if(meddle.length){
+            content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:6px;">🕸️ 内外干政</div>`;
+            meddle.forEach(m=>{
+                content += `<div style="border:1px solid rgba(142,68,173,.35);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);background:rgba(142,68,173,.06);">
+                    <div style="font-weight:600;">${m.icon||'🕸️'} ${m.kind} · ${m.title}</div>
+                    <div style="line-height:1.6;margin-top:2px;">${m.desc||''}</div>
+                    <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
+                    ${(m.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="dowagerMeddle('${m.id}',${i})">${c.text}</button>`).join('')}
+                    </div></div>`;
             });
         }
-        // 主动施为
-        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🕯️ 太后施为（每旬各一次）</div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">`;
+        const agenda = (d.agenda||[]);
+        if(agenda.length){
+            content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:6px;">📜 国是待决</div>`;
+            agenda.forEach(a=>{
+                content += `<div style="border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);">
+                    <div style="font-weight:600;">📜 ${a.title}</div>
+                    <div style="line-height:1.6;margin-top:2px;">${a.desc||''}</div>
+                    <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
+                    ${(a.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="reignAgenda('${a.id}',${i})">${c.text}</button>`).join('')}
+                    </div></div>`;
+            });
+        }
+    }
+
+    if(tab==='harem'){
+        const mode = d.harem_mode || '共治';
+        const modeName = {'亲掌':'太后亲掌','共治':'与后共治','放权':'全付新后'}[mode] || mode;
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;">🏮 治理之法：<span style="color:var(--gold-dark);">${modeName}</span></div>`;
+        content += `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px;">` + (d.harem_modes||[]).map(m=>
+            m.key===mode ? `<span style="font-size:8px;color:var(--gold-dark);padding:3px 7px;font-weight:600;">◉ ${m.name}</span>`
+                         : `<button class="chonghua-btn" title="${m.desc}" onclick="dowagerHarem({mode:'${m.key}'})">${m.name}</button>`
+        ).join('') + `</div>`;
+        if(d.new_queen){
+            content += `<div style="margin-top:5px;border:1px solid rgba(201,168,106,.3);border-radius:8px;padding:5px;background:rgba(201,168,106,.05);font-size:9px;">
+                <div style="font-weight:600;color:var(--gold-dark);">👑 中宫皇后 ${d.new_queen}</div>
+                <div style="font-size:8px;color:var(--text-light);">对太后敬顺 ${d.queen_favor}${d.queen_favor<=20?' <span style="color:#c0392b;">⚠️ 濒临反弹</span>':''}</div>
+            </div>`;
+        }
+        const consorts = (d.consorts||[]).filter(c=>c.alive!==false);
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🌸 妃嫔（${consorts.length}人）</div>`;
+        if(!consorts.length){ content += `<div style="font-size:8px;color:var(--text-light);">六宫尚无妃嫔。</div>`; }
+        consorts.forEach(c=>{
+            content += `<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;flex-wrap:wrap;border-bottom:1px dashed var(--border-light);padding:3px 0;font-size:8px;color:var(--text-mid);">
+                <span>${charIcon('consort:'+c.name, '🌸', 20)} <b>${c.name}</b>（${c.rank}）${c.pregnant?' 🤰':''}${c.children?` 👶${c.children}`:''}</span>
+                <span style="color:var(--text-light);">帝宠 ${c.favor} · 敬顺 ${c.respect}</span>
+                <span style="display:flex;gap:2px;">
+                    <button class="chonghua-btn" title="提拔" onclick="dowagerConsort('${c.name}','promote')">↑</button>
+                    <button class="chonghua-btn" title="贬黜" onclick="dowagerConsort('${c.name}','demote')">↓</button>
+                    <button class="chonghua-btn" title="遣出宫" onclick="dowagerConsort('${c.name}','dismiss')">🚪</button>
+                    <button class="chonghua-btn" title="抚慰(60两)" onclick="dowagerConsort('${c.name}','comfort')">🎁</button>
+                </span></div>`;
+        });
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🕯️ 后宫施为</div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">`;
+        (d.harem_actions||[]).forEach(a=>{
+            const locked = !a.allowed;
+            content += a.used
+                ? `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;">✓ ${a.name}</span>`
+                : locked
+                    ? `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;opacity:.5;" title="当前治理之法不许">🔒 ${a.name}</span>`
+                    : `<button class="chonghua-btn" title="${a.desc}" onclick="dowagerHarem({action:'${a.key}'})">${a.name}</button>`;
+        });
+        content += `</div>`;
+        if((d.harem_log||[]).length){ content += `<div style="font-size:7px;color:var(--text-light);margin-top:3px;">${(d.harem_log||[]).slice(0,3).map(l=>'· '+l).join('<br>')}</div>`; }
+    }
+
+    if(tab==='heir'){
+        content += `<div style="border:1px solid rgba(201,168,106,.3);border-radius:10px;padding:10px;background:rgba(201,168,106,.04);text-align:center;">
+            <div style="font-size:14px;font-weight:600;color:var(--gold-dark);">👑 ${emp.name||'新帝'}</div>
+            <div style="font-size:9px;color:var(--text-mid);margin-top:3px;">${emp.age||0}岁 · ${pn.name||'仁厚'}</div>
+            <div style="font-size:8px;color:var(--text-light);margin-top:2px;font-style:italic;">${pn.flavor||''}</div>
+            <div style="display:flex;justify-content:center;gap:12px;margin-top:6px;">
+                ${bar('帝心', emp.affection||0, (emp.affection||0)>=60?'#4a8a5a':(emp.affection||0)<=20?'#c0392b':'#8a6a20')}
+                ${bar('威仪', emp.majesty||0, (emp.majesty||0)>=60?'#d4ac0d':'#7a9ac0')}
+            </div></div>`;
+        const adult = d.adult_age_actual || d.adult_age || 16;
+        const left = Math.max(0, adult - (emp.age||0));
+        content += `<div style="font-size:9px;color:var(--text-mid);text-align:center;margin-top:4px;">`;
+        if(d.return_requested){
+            content += `<span style="color:#c0392b;font-weight:600;">⚡ 已请求亲政 ${d.return_requested}/3 旬</span>`;
+        } else if(left > 0){
+            content += `<span style="color:var(--text-light);">距亲政还有 ${left} 岁</span>`;
+        } else {
+            content += `<span style="color:#c0392b;">已及亲政之龄</span>`;
+        }
+        content += `</div>`;
+        if(d.grandchild_chance > 0){
+            content += `<div style="font-size:9px;color:var(--text-mid);text-align:center;margin-top:3px;">👶 皇孙可期 ${d.grandchild_chance}%</div>`;
+        }
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">🕯️ 母子互动</div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">`;
         (d.actions||[]).forEach(a=>{
-            body += a.used
+            content += a.used
                 ? `<span style="font-size:8px;color:var(--text-light);padding:3px 7px;">✓ ${a.name}</span>`
                 : `<button class="chonghua-btn" title="${a.desc}" onclick="dowagerAct('${a.key}')">${a.name}</button>`;
         });
-        body += `</div>`;
-        // 权柄抉择
-        body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">👑 权柄抉择</div><div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
-            <button class="chonghua-btn" onclick="dowagerPower('yield')">🌤️ 撤帘还政（需帝满${d.adult_age||16}岁）</button>
-            ${d.return_requested?`<button class="chonghua-btn" style="border-color:rgba(192,57,43,.5);color:#e59a8a;" onclick="dowagerPower('refuse')">🚫 拒还政（权威-6·帝心-10）</button>`:''}
-            <button class="chonghua-btn" style="border-color:var(--gold);color:var(--gold-dark);" onclick="dowagerPower('regnant')">👑 临朝称制（权威≥${(d.regnant_req||{}).authority}·朝堂≥${(d.regnant_req||{}).court}）</button>
-        </div>`;
-        if((d.log||[]).length){ body += `<div style="font-size:7px;color:var(--text-light);margin-top:5px;border-top:1px dashed var(--border-light);padding-top:3px;">${(d.log||[]).slice(0,4).map(l=>'· '+l).join('<br>')}</div>`; }
-        openModal(`🕯️ 垂帘听政 · 第${d.periods}旬`, body, '退朝', null, true);
-    } catch(e){ showToast('❌ 操作失败'); }
+        content += `</div>`;
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:6px;">⚖️ 权柄抉择</div><div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;">
+            <button class="chonghua-btn" onclick="dowagerPower('yield')">🌤️ 撤帘还政（需帝满${d.adult_age_actual||16}岁）</button>
+            ${d.return_requested?`<button class="chonghua-btn" style="border-color:rgba(192,57,43,.5);color:#e59a8a;" onclick="dowagerPower('refuse')">🚫 拒还政</button>`:''}
+            <button class="chonghua-btn" style="border-color:var(--gold);color:var(--gold-dark);" onclick="dowagerPower('regnant')">👑 临朝称制</button>
+        </div>
+        <div style="font-size:7px;color:var(--text-light);margin-top:3px;">称制需权威≥${(d.regnant_req||{}).authority||90}·朝堂≥${(d.regnant_req||{}).court||85}。</div>`;
+    }
+
+    if(tab==='powers'){
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;">🕸️ 内外势力</div><div style="margin-top:3px;">`;
+        content += `${bar('外戚', d.clan_power||0, (d.clan_power||0)>=80?'#c0392b':'#7a9ac0')}<br>`;
+        content += `${bar('宗室', d.royal_power||0, (d.royal_power||0)>=80?'#c0392b':'#7a9ac0')}<br>`;
+        content += `${bar('权臣', d.minister_power||0, (d.minister_power||0)>=85?'#c0392b':'#7a9ac0')}`;
+        if(d.minister) content += `（${d.minister}）`;
+        content += `</div>`;
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:6px;">👥 百官班次</div>`;
+        (d.ministers||[]).forEach(m=>{
+            const color = m.attitude>=50?'#4a8a5a':m.attitude<=18?'#c0392b':'#8a6a20';
+            content += `<div style="display:flex;justify-content:space-between;align-items:center;font-size:8px;color:var(--text-mid);padding:2px 0;border-bottom:1px dashed var(--border-light);">
+                <span>${m.faction}·<b>${m.name}</b>（势${m.power}）</span>
+                <span style="color:${color};">态度 ${m.attitude}${m.attitude<=18?' ⚠️':''}</span>
+            </div>`;
+        });
+        content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:6px;">⚖️ 派系好感</div><div style="font-size:8px;color:var(--text-mid);line-height:1.8;">`;
+        content += Object.entries(d.factions||{}).map(([k,v])=>`${k} ${v}`).join(' · ');
+        content += `</div>`;
+        if((d.log||[]).length){
+            content += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:6px;">📜 朝政日志</div><div style="font-size:7px;color:var(--text-light);margin-top:2px;">`;
+            content += (d.log||[]).slice(0,6).map(l=>'· '+l).join('<br>');
+            content += `</div>`;
+        }
+    }
+
+    const body = header + tabBar + `<div style="max-height:48vh;overflow-y:auto;">${content}</div>`;
+    const title = d.regnant ? `👑 ${d.reign_name}朝 · 第${d.reign_periods||0}旬` : `🕯️ 垂帘听政 · 第${d.periods||0}旬`;
+    openModal(title, body, '退朝', null, true);
 }
+
+function renderRegnantPanel(d){
+    let b = '<div style="font-size:9px;color:var(--text-mid);line-height:1.9;">';
+    b += '<div>年号 <b style="color:var(--gold-dark);">'+(d.reign_name||'')+'</b> · 临朝 '+(d.reign_periods||0)+' 旬</div>';
+    b += '<div>稳固 '+(d.stability||0)+' · 威权 '+(d.sovereignty||0)+' · 青史 '+(d.legacy||0)+' · 民心 '+(d.people||0)+'</div>';
+    b += '<div>外戚 '+(d.clan_power||0)+' · 宗室 '+(d.royal_power||0)+' · 权臣 '+(d.minister_power||0)+(d.minister?'('+d.minister+')':'')+'</div>';
+    b += '</div>';
+    (d.agenda||[]).forEach(function(a){
+        b += '<div style="border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);"><b>📜 '+a.title+'</b><br>'+(a.desc||'')+'</div>';
+        b += '<div style="margin-top:3px;">';
+        (a.choices||[]).forEach(function(c, i){
+            b += '<button class="chonghua-btn" onclick="reignAgenda(\''+a.id+'\','+i+')">'+c.text+'</button> ';
+        });
+        b += '</div>';
+    });
+    (d.meddle||[]).forEach(function(m){
+        b += '<div style="border:1px solid rgba(142,68,173,.35);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);"><b>'+(m.icon||'')+' '+m.kind+' · '+m.title+'</b><br>'+(m.desc||'')+'</div>';
+        b += '<div style="margin-top:3px;">';
+        (m.choices||[]).forEach(function(c, i){
+            b += '<button class="chonghua-btn" onclick="dowagerMeddle(\''+m.id+'\','+i+')">'+c.text+'</button> ';
+        });
+        b += '</div>';
+    });
+    if(d.can_abdicate){
+        b += '<div style="margin-top:5px;"><button class="chonghua-btn" style="border-color:var(--gold);color:var(--gold-dark);" onclick="reignAbdicate()">👑 传位（青史'+(d.legacy||0)+'·稳固'+(d.stability||0)+'）</button></div>';
+    } else {
+        b += '<div style="margin-top:5px;font-size:8px;color:var(--text-light);">改元未久，尚不宜传位</div>';
+    }
+    if((d.reign_log||[]).length){
+        b += '<div style="font-size:7px;color:var(--text-light);margin-top:3px;">'+(d.reign_log||[]).slice(0,4).map(function(l){return '· '+l;}).join('<br>')+'</div>';
+    }
+    openModal('👑 '+(d.reign_name||'')+'朝·临朝第'+(d.reign_periods||0)+'旬', b, '退朝', null, true);
+}
+
+function data_name_safe(){ return ''; }
+function dowagerSwitchTab(tab){ if(window._dowager) renderDowagerPanel(window._dowager, tab); }
+function dowagerHarem(payload){ dowagerPost('/api/dowager/harem', payload, '🏮 后宫治理'); }
 function dowagerMeddle(id, idx){ dowagerPost('/api/dowager/meddle', {meddle_id:id, choice_index:idx}, '🕸️ 内外势力'); }
 function dowagerConsort(name, action){ dowagerPost('/api/dowager/consort', {name:name, action:action}, '🌸 六宫处置'); }
 function reignAgenda(id, idx){ dowagerPost('/api/reign/action', {agenda_id:id, choice_index:idx}, '📜 国是'); }
 function reignAbdicate(){ if(!confirm('确定传位？此举将定你一生的史笔。'))return; dowagerPost('/api/reign/action', {action:'abdicate'}, '👑 传位'); }
-function renderRegnantPanel(d){
-    const bar = (label, v, color) => `<span style="display:inline-block;min-width:44px;">${label}</span><span style="display:inline-block;width:44px;height:5px;background:rgba(158,190,178,0.18);border-radius:3px;vertical-align:middle;overflow:hidden;"><span style="display:block;width:${Math.max(0,Math.min(100,v))}%;height:100%;background:${color};"></span></span> <b style="color:${color};">${v}</b>`;
-    let body = `<div style="font-size:9px;color:var(--text-mid);line-height:1.9;">
-        <div>年号 <b style="color:var(--gold-dark);">${d.reign_name}</b> · 临朝 ${d.reign_periods} 旬</div>
-        <div>${bar('朝局稳固', d.stability, d.stability<=25?'#c0392b':'#7a9ac0')}　${bar('威权', d.sovereignty, '#d4ac0d')}</div>
-        <div>${bar('青史', d.legacy, d.legacy>=70?'#4a8a5a':'#9a7ac0')}　${bar('民心', d.people, '#4a8a5a')}</div>
-        <div>🏠 外戚 ${d.clan_power} · 🏵️ 宗室 ${d.royal_power} · ⚖️ 权臣 ${d.minister_power}</div></div>`;
-    body += `<div style="font-size:9px;color:var(--text-dark);font-weight:600;margin-top:5px;">📜 待决国是（${(d.agenda||[]).length}/2）</div>`;
-    if(!(d.agenda||[]).length){ body += `<div style="font-size:8px;color:var(--text-light);">六部无事，可暂歇。</div>`; }
-    (d.agenda||[]).forEach(a=>{
-        body += `<div style="border:1px solid var(--border-light);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);background:var(--bg-card);">
-            <div style="font-weight:600;">📜 ${a.title}</div>
-            <div style="line-height:1.6;margin-top:2px;">${a.desc||''}</div>
-            <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
-            ${(a.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="reignAgenda('${a.id}',${i})">${c.text}</button>`).join('')}
-            </div></div>`;
-    });
-    (d.meddle||[]).forEach(m=>{
-        body += `<div style="border:1px solid rgba(142,68,173,.35);border-radius:6px;padding:4px;margin-top:3px;font-size:8px;color:var(--text-mid);background:rgba(142,68,173,.06);">
-            <div style="font-weight:600;">${m.icon||'🕸️'} ${m.kind} · ${m.title}</div>
-            <div style="line-height:1.6;margin-top:2px;">${m.desc||''}</div>
-            <div style="display:flex;flex-direction:column;gap:3px;margin-top:3px;">
-            ${(m.choices||[]).map((c,i)=>`<button class="chonghua-btn" style="text-align:left;" onclick="dowagerMeddle('${m.id}',${i})">${c.text}</button>`).join('')}
-            </div></div>`;
-    });
-    body += `<div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap;">
-        ${d.can_abdicate?`<button class="chonghua-btn" style="border-color:var(--gold);color:var(--gold-dark);" onclick="reignAbdicate()">👑 传位（青史${d.legacy}·稳固${d.stability}）</button>`:`<span style="font-size:8px;color:var(--text-light);">改元未久，尚不宜传位</span>`}
-    </div>`;
-    body += `<div style="font-size:7px;color:var(--text-light);margin-top:4px;">青史≥70 且稳固≥55 传位可得「女帝功成」；稳固≤25 有倾覆之危（神器倾覆）。满 ${d.legacy_gate} 旬后从容议禅。</div>`;
-    if((d.reign_log||[]).length){ body += `<div style="font-size:7px;color:var(--text-light);margin-top:4px;border-top:1px dashed var(--border-light);padding-top:3px;">${(d.reign_log||[]).slice(0,4).map(l=>'· '+l).join('<br>')}</div>`; }
-    openModal(`👑 ${d.reign_name}朝 · 临朝第${d.reign_periods}旬`, body, '退朝', null, true);
-}
-function dowagerHarem(payload){ dowagerPost('/api/dowager/harem', payload, '🏮 后宫治理'); }
-function dowagerAffair(affairId, idx){ dowagerPost('/api/dowager/affair', {affair_id: affairId, choice_index: idx}, '⚖️ 帘后裁断'); }
-function dowagerAct(action){ dowagerPost('/api/dowager/action', {action: action}, '🕯️ 太后施为'); }
+function dowagerAffair(id, idx){ dowagerPost('/api/dowager/affair', {affair_id:id, choice_index:idx}, '⚖️ 帘后裁断'); }
+function dowagerAct(action){ dowagerPost('/api/dowager/action', {action:action}, '🕯️ 太后施为'); }
 function dowagerPower(mode){
     const label={yield:'撤帘还政',refuse:'拒绝还政',regnant:'临朝称制'}[mode]||mode;
     if(!confirm(`确定「${label}」？此举关乎国本，难以挽回。`))return;
-    dowagerPost('/api/dowager/power', {mode: mode}, '👑 权柄抉择');
+    dowagerPost('/api/dowager/power', {mode:mode}, '👑 权柄抉择');
 }
-function nl2br(s){ return String(s||'').split(String.fromCharCode(10)).join('<br>'); }
 function dowagerPost(path, extra, title){
     if(!playerId)return;
     myFetch(`${API_BASE}${path}`, {method:'POST', headers:{'Content-Type':'application/json'},
         body:JSON.stringify(Object.assign({player_id:playerId}, extra))}).then(r=>r.json()).then(d=>{
         if(d.error){ showToast('❌ '+d.error, d.error.includes('行动点')?'error':undefined); return; }
         window._dowager = d.overview;
+        if(d.attributes && window._lastGameData) window._lastGameData.attributes = d.attributes;
+        if(d.silver!==undefined && window._lastGameData) window._lastGameData.silver = d.silver;
         if(d.game_over){ closeModal(); openModal('👑 终局', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${nl2br(d.narration)}</div>`, '知道了', ()=>refreshState(), true); return; }
-        closeModal();
-        openModal(title, `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${nl2br(d.narration)}</div>`, '知道了', ()=>{refreshState();openDowager();}, true);
+        showToast('✅ '+(d.narration||'完成').slice(0,50));
+        renderDowagerPanel(window._dowager, window._dowagerTab);
     }).catch(e=>showToast('❌ 操作失败'));
 }
+function nl2br(s){ return String(s||'').split(String.fromCharCode(10)).join('<br>'); }
 
 async function openAffairs(){
     if(!playerId) return;
