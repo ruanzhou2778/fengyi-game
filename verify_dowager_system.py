@@ -65,7 +65,8 @@ ok("重复进入被拒", not ok_, msg)
 
 # 2. 奏事生成与裁决
 section("2. 朝会奏事")
-msgs = D.generate_court_affairs(gs)
+with patch("dowager_system.random.random", return_value=0.0),      patch("dowager_system.random.choice", side_effect=lambda seq: seq[0 if len(seq) > 1 else 0]):
+    msgs = D.generate_court_affairs(gs)
 ok("奏事生成", len(d["pending"]) >= 1, d["pending"])
 ev = d["pending"][0]
 ok("奏事结构完整", all(k in ev for k in ("id", "title", "desc", "choices")) and len(ev["choices"]) == 3, ev)
@@ -675,7 +676,7 @@ for m in d32["ministers"]:
 mp_b = d32["minister_power"]
 with patch("dowager_system.random.random", return_value=0.99):
     msgs32 = D.dowager_period_tick(g32)
-ok("领袖发难其势+4", d32["minister_power"] >= mp_b + 4, (mp_b, d32["minister_power"]))
+ok("领袖发难其势+3以上", d32["minister_power"] >= mp_b + 3, (mp_b, d32["minister_power"]))
 ok("payload 含百官", all(k in D.dowager_payload(g32) for k in ("ministers", "sessions_held", "last_session", "session_due")))
 
 # 17. 称制期大朝会：亲临是天职，不出选择

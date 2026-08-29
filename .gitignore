@@ -26,3 +26,5 @@ config.local.json
 .DS_Store
 avatars/
 avatars/pack/
+avatars/pack/*.rar
+*.rar
