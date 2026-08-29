@@ -13397,8 +13397,9 @@ def serve_ui_asset(fname):
     return send_from_directory(UI_ASSET_DIR, fname)
 
 
-# ===== 按身份分桶的头像分配（avatars/index.json 由 tools/avatar_classifier.py 生成） =====
-AVATAR_INDEX_CACHE = {"mtime": None, "data": None}
+# ===== 按身份分桶的头像分配（avatars/pool/ 由 tools/build_avatar_pool.py 压缩生成并入库） =====
+AVATAR_POOL_DIR = os.path.join(AVATAR_DIR, "pool")
+AVATAR_POOL_CACHE = {"mtime": None, "pools": None}
 # 角色 → 桶优先级（依次回退，全空则回退旧 pack 逻辑）
 BUCKET_ALIASES = {
     "player":  ["名妃", "妃嫔", "公主"],
@@ -13416,45 +13417,45 @@ BUCKET_ALIASES = {
 }
 
 
-def _load_avatar_index():
-    """加载 avatars/index.json（带 mtime 缓存）；不存在返回 None。"""
-    path = os.path.join(AVATAR_DIR, "index.json")
-    if not os.path.isfile(path):
-        return None
+def _load_bucket_pools():
+    """扫描 avatars/pool/<桶>/ 目录（git 跟踪，clone 即用）。返回 {桶: [文件名...]}。"""
+    if not os.path.isdir(AVATAR_POOL_DIR):
+        return {}
     try:
-        mt = os.path.getmtime(path)
-        if AVATAR_INDEX_CACHE["data"] is None or mt != AVATAR_INDEX_CACHE["mtime"]:
-            with open(path, "r", encoding="utf-8") as f:
-                AVATAR_INDEX_CACHE["data"] = json.load(f)
-            AVATAR_INDEX_CACHE["mtime"] = mt
-        return AVATAR_INDEX_CACHE["data"]
+        mt = os.path.getmtime(AVATAR_POOL_DIR)
+        if AVATAR_POOL_CACHE["pools"] is None or mt != AVATAR_POOL_CACHE["mtime"]:
+            pools = {}
+            for d in os.listdir(AVATAR_POOL_DIR):
+                pdir = os.path.join(AVATAR_POOL_DIR, d)
+                if os.path.isdir(pdir):
+                    pools[d] = sorted(f for f in os.listdir(pdir) if f.endswith(".jpg"))
+            AVATAR_POOL_CACHE["pools"] = pools
+            AVATAR_POOL_CACHE["mtime"] = mt
+        return AVATAR_POOL_CACHE["pools"]
     except Exception as e:
-        print(f"[warn] avatar index load: {e}")
-        return None
+        print(f"[warn] avatar pool load: {e}")
+        return {}
 
 
-def _bucket_pick(idx_data, buckets, seed_key):
+def _bucket_pick(pools, buckets, seed_key):
     """按桶优先级取一张确定性头像 URL；所有桶为空返回 None。"""
     import hashlib, urllib.parse
     for b in buckets:
-        entries = idx_data.get(b) or []
-        if not entries:
+        files = pools.get(b) or []
+        if not files:
             continue
-        idx = int(hashlib.md5(seed_key.encode()).hexdigest(), 16) % len(entries)
-        fname = entries[idx].get("file", "")
-        if not fname:
-            continue
-        return "/avatars/inbox/" + urllib.parse.quote(fname)
+        idx = int(hashlib.md5(seed_key.encode()).hexdigest(), 16) % len(files)
+        return f"/avatars/pool/{urllib.parse.quote(b)}/{files[idx]}"
     return None
 
 
 def _pack_assign_all(game_state):
-    """给所有无头像的角色批量分配头像：优先按身份桶取 _inbox 大图库，回退旧 pack。"""
+    """给所有无头像的角色批量分配头像：优先按身份桶取 pool 图库，回退旧 pack。"""
     import hashlib
     pack_dir = os.path.join(AVATAR_DIR, "pack")
     pack_files = sorted([f for f in os.listdir(pack_dir)
                          if f.endswith((".jpg", ".png"))]) if os.path.isdir(pack_dir) else []
-    idx_data = _load_avatar_index()
+    pools = _load_bucket_pools()
 
     def _assign(key, url):
         if url:
@@ -13463,18 +13464,14 @@ def _pack_assign_all(game_state):
             idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
             _set_avatar_field(game_state.player_id, key, f"/avatars/pack/{pack_files[idx]}")
 
-    def _buckets_for(key, fallback):
-        return BUCKET_ALIASES.get(key, fallback)
-
     # 主控
     if not getattr(game_state, "avatar", None):
-        _assign("player", _bucket_pick(idx_data, _buckets_for("player", ["名妃", "妃嫔"]), "player") if idx_data else None)
+        _assign("player", _bucket_pick(pools, BUCKET_ALIASES["player"], "player"))
     # NPC
     for name, npc in (game_state.npcs or {}).items():
         if isinstance(npc, dict) and not npc.get("avatar"):
             alias = f"npc_{name}" if name in ("太后", "皇后") else "npc"
-            buckets = _buckets_for(alias, ["妃嫔", "名妃"])
-            _assign(f"npc:{name}", _bucket_pick(idx_data, buckets, f"npc:{name}") if idx_data else None)
+            _assign(f"npc:{name}", _bucket_pick(pools, BUCKET_ALIASES.get(alias, BUCKET_ALIASES["npc"]), f"npc:{name}"))
     # 子嗣（按性别分桶）
     for c in (game_state.children or []):
         if isinstance(c, dict) and not c.get("avatar"):
@@ -13482,14 +13479,14 @@ def _pack_assign_all(game_state):
             if not uid:
                 continue
             key = f"child:{uid}"
-            buckets = "child_m" if c.get("gender") == "皇子" else "child_f"
-            _assign(key, _bucket_pick(idx_data, _buckets_for(buckets, ["皇子", "公主"]), key) if idx_data else None)
+            alias = "child_m" if c.get("gender") == "皇子" else "child_f"
+            _assign(key, _bucket_pick(pools, BUCKET_ALIASES[alias], key))
     # 宫人
     for s in (game_state.servants or []):
         if getattr(s, "avatar", None) is None:
             key = f"servant:{s.name}"
             alias = "servant_宫女" if s.type == "宫女" else "servant_太监"
-            _assign(key, _bucket_pick(idx_data, _buckets_for(alias, ["宫女", "侍卫"]), key) if idx_data else None)
+            _assign(key, _bucket_pick(pools, BUCKET_ALIASES[alias], key))
     # 宗室
     rc = getattr(game_state, "royal_clan", None)
     if isinstance(rc, dict):
@@ -13497,19 +13494,19 @@ def _pack_assign_all(game_state):
             for name, m in (rc.get(pool) or {}).items():
                 if isinstance(m, dict) and not m.get("avatar"):
                     key = f"royal:{name}"
-                    _assign(key, _bucket_pick(idx_data, _buckets_for(alias, ["皇子", "公主"]), key) if idx_data else None)
+                    _assign(key, _bucket_pick(pools, BUCKET_ALIASES[alias], key))
     # 太后线妃嫔
     ds = getattr(game_state, "dowager_state", None)
     if isinstance(ds, dict):
         for c in (ds.get("consorts") or []):
             if isinstance(c, dict) and not c.get("avatar"):
                 key = f"consort:{c['name']}"
-                _assign(key, _bucket_pick(idx_data, _buckets_for("consort", ["妃嫔", "名妃"]), key) if idx_data else None)
+                _assign(key, _bucket_pick(pools, BUCKET_ALIASES["consort"], key))
         # 冷宫
         for name, inm in (ds.get("inmates") or {}).items():
             if isinstance(inm, dict) and not inm.get("avatar"):
                 key = f"cold:{name}"
-                _assign(key, _bucket_pick(idx_data, _buckets_for("cold", ["妃嫔", "名妃"]), key) if idx_data else None)
+                _assign(key, _bucket_pick(pools, BUCKET_ALIASES["cold"], key))
 
 
 def _set_avatar_field(player_id, key, url):

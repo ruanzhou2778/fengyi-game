@@ -4,29 +4,27 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-
 # 运行时数据（存档为本地游玩数据，不入库）
 saves/
 *.log
-
 # 备份文件
 *.bak*
 *.bak_*
 _*.py
 _*.js
 _*.txt
-
 # 本地配置
 .env
 config.local.json
-
 # 编辑器
 .vscode/
 .idea/
 .DS_Store
-avatars/
-avatars/pack/
-avatars/pack/*.rar
 *.rar
-avatars/
 _loading_overlay_shot.png
+
+# 头像图库：inbox 原图/废弃图/索引不入库；pool 压缩池与 ui 场景图入库
+avatars/_inbox/
+avatars/_review/
+avatars/pack/
+avatars/index.json

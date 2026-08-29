@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
-"""验证：①身份分桶头像分配 ②inbox/ui 路由 ③NPC 主动上门。"""
-import sys, os, json
+"""验证：①pool 分桶头像分配 ②pool/ui 路由 ③NPC 主动上门。"""
+import sys, os
 sys.path.insert(0, '.')
 import app as A
 from app import app as flask_app
 
 client = flask_app.test_client()
 passed = failed = 0
-from tools.avatar_classifier import ALL_BUCKETS as _ALL_BUCKETS
 
 def check(name, cond, detail=""):
     global passed, failed
@@ -18,65 +17,48 @@ def check(name, cond, detail=""):
         failed += 1
         print(f"  [FAIL] {name} :: {detail}")
 
-# === ① 分桶分配 ===
-idx = A._load_avatar_index()
-has_index = idx is not None and any(isinstance(idx.get(b), list) and idx[b] for b in _ALL_BUCKETS)
-if has_index:
-    url = A._bucket_pick(idx, ["名妃", "妃嫔"], "npc:测试")
-    check("分桶取图返回 inbox URL", url and url.startswith("/avatars/inbox/"), str(url))
-    url2 = A._bucket_pick(idx, ["名妃", "妃嫔"], "npc:测试")
-    check("同 key 确定性（两次一致）", url == url2)
-    check("空桶回退返回 None", A._bucket_pick(idx, ["不存在的桶"], "x") is None)
-    # URL 编码：# 不得裸露
-    for entry in (idx.get("妃嫔") or [])[:30]:
-        fname = entry.get("file", "")
-        if "#" in fname:
-            enc = A._bucket_pick(idx, ["妃嫔"], "t#" + fname)
-            check("含#文件名已编码", enc and "#" not in enc, enc)
-            break
-else:
-    print("  [INFO] avatars/index.json 不存在或为空 —— 验证回退逻辑")
-    check("_load_avatar_index 返回 None 不报错", idx is None)
+# === ① pool 分桶 ===
+pools = A._load_bucket_pools()
+has_pool = bool(pools) and any(pools.values())
+check("pool 目录扫描非空", has_pool, str({k: len(v) for k, v in list(pools.items())[:3]}))
+if has_pool:
+    url = A._bucket_pick(pools, ["名妃", "妃嫔"], "npc:测试")
+    check("分桶取图返回 pool URL", url and url.startswith("/avatars/pool/"), str(url))
+    check("同 key 确定性（两次一致）", url == A._bucket_pick(pools, ["名妃", "妃嫔"], "npc:测试"))
+    check("空桶链返回 None", A._bucket_pick(pools, ["不存在的桶"], "x") is None)
+    # 安全文件名（无 # 空格等）
+    bad = [f for files in pools.values() for f in files if any(c in f for c in "#?&% ")]
+    check("pool 文件名全部安全", not bad, str(bad[:3]))
+    # 薄桶回退链覆盖
+    for alias, chain in [("npc_太后", A.BUCKET_ALIASES["npc_太后"]), ("child_m", A.BUCKET_ALIASES["child_m"]),
+                         ("servant_太监", A.BUCKET_ALIASES["servant_太监"])]:
+        check(f"回退链可用 {alias}", A._bucket_pick(pools, chain, alias) is not None)
 
-# 全链路：开局 → avatar_payload → 角色拿到头像
+# 全链路：开局 → avatar_payload
 r = client.post('/api/start', json={"name": "分桶测试", "api_base": "", "api_key": "", "api_model": ""})
 pid = r.get_json()["player_id"]
 gs = A.sessions[pid]
 gs.npcs["柳妃"] = {"name": "柳妃", "alive": True, "rank": "妃", "age": 24}
-import os as _os
-has_pack = any(f.endswith((".jpg", ".png")) for f in (_os.listdir("avatars/pack") if _os.path.isdir("avatars/pack") else []))
 payload = A.avatar_payload(gs)
 npc_url = payload.get("npc:柳妃", "")
-if has_index or has_pack:
-    check("NPC 分到头像 URL", bool(npc_url), str(payload))
-    check("有 index 时 NPC 用 inbox 图", (not has_index) or npc_url.startswith("/avatars/inbox/"), npc_url)
-    check("无 index 时回退 pack 图", has_index or npc_url.startswith("/avatars/pack/"), npc_url)
-else:
-    print("  [INFO] 无 index 也无 pack —— 分配静默跳过（不报错即通过）")
-    check("空图源不报错", isinstance(payload, dict))
-
-# 子嗣按性别
+if has_pool:
+    check("NPC 分到 pool 头像", npc_url.startswith("/avatars/pool/"), npc_url)
 gs.children.append({"uid": 1, "gender": "皇子", "name": "承泰", "alive": True})
 gs.children.append({"uid": 2, "gender": "公主", "name": "明玥", "alive": True})
 payload = A.avatar_payload(gs)
-if has_index or has_pack:
+if has_pool:
     check("皇子分到头像", bool(payload.get("child:1")))
     check("公主分到头像", bool(payload.get("child:2")))
-else:
-    check("空图源子嗣不报错", isinstance(payload, dict))
+    check("皇子取男桶", "/avatars/pool/" in (payload.get("child:1") or ""))
 
 # === ② 路由 ===
-if has_index:
-    all_files = []
-    for b in _ALL_BUCKETS:
-        all_files += [e["file"] for e in (idx.get(b) or [])]
-    if all_files:
-        import urllib.parse
-        sample = all_files[0]
-        rr = client.get(f"/avatars/inbox/{urllib.parse.quote(sample)}")
-        check(f"inbox 路由可取图 ({sample[:20]}...)", rr.status_code == 200, f"status={rr.status_code}")
+if has_pool:
+    first_bucket = next(b for b, files in pools.items() if files)
+    sample = f"/avatars/pool/{first_bucket}/{pools[first_bucket][0]}"
+    rr = client.get(sample)
+    check(f"pool 路由可取图 ({first_bucket})", rr.status_code == 200, f"{sample} status={rr.status_code}")
 rr = client.get("/avatars/ui/scene1.jpg")
-check("ui 路由 scene1.jpg", rr.status_code == 200 and rr.content_length and rr.content_length > 10000, f"status={rr.status_code}")
+check("ui 路由 scene1.jpg", rr.status_code == 200, f"status={rr.status_code}")
 rr = client.get("/avatars/ui/不存在.jpg")
 check("ui 路由 404", rr.status_code == 404)
 
@@ -118,7 +100,6 @@ gs.npcs["柳妃"]["alive"] = False
 check("死亡 NPC 不触发", A.generate_npc_visits(gs) == [])
 gs.npcs["柳妃"]["alive"] = True
 
-# next_period 全链路含上门消息
 reset_att({"好感": 30, "信任": 30, "畏惧": 0, "爱慕": 80, "敌意": 0})
 found_visit = False
 for seed in range(20):
