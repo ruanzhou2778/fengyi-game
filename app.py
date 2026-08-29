@@ -6117,6 +6117,61 @@ def _guard_inner_palace_routes():
 
 
 
+def enforce_six_palace_assistant(game_state):
+    """皇后去世/病重/怀孕时必须设一位协理六宫（嫔位及以上、非皇后；NPC 或主控均可）。
+
+    转旬检查：现任协理失效（薨逝/离宫）或皇后失能且无协理时，自动择优任命
+    （位份最高者优先，次看威望）。中宫虚悬时不强制。返回情报消息列表。
+    """
+    queen_name = get_queen_name(game_state, include_player=True)
+    if not queen_name:
+        return []
+    reason = ""
+    if queen_name == game_state.name:
+        if getattr(game_state, "is_pregnant", False):
+            reason = "身怀六甲"
+        elif int(game_state.attributes.get("健康", 100) or 0) < 30:
+            reason = "凤体违和"
+    else:
+        qnpc = (game_state.npcs or {}).get(queen_name) or {}
+        if not qnpc.get("alive", True):
+            reason = "薨逝"
+        elif qnpc.get("is_pregnant"):
+            reason = "身怀六甲"
+        elif int((qnpc.get("attributes") or {}).get("健康", 100) or 0) < 30:
+            reason = "凤体违和"
+    if not reason:
+        return []
+    if _get_six_palace_assistant(game_state):
+        return []  # 已有协理襄助
+
+    my_idx = RANK_LEVELS.get(game_state.rank.name, 0)
+    candidates = []
+    if queen_name != game_state.name and my_idx >= RANK_LEVELS.get("嫔", 0):
+        candidates.append((game_state.name, my_idx, int(game_state.attributes.get("威望", 0) or 0), True))
+    for name, npc in (game_state.npcs or {}).items():
+        if not isinstance(npc, dict) or not npc.get("alive", True):
+            continue
+        if name in ("太后", queen_name, game_state.name):
+            continue
+        idx = RANK_LEVELS.get(normalize_rank_name(npc.get("rank", "答应")), 0)
+        if idx < RANK_LEVELS.get("嫔", 0):
+            continue
+        if npc.get("is_pregnant") or int((npc.get("attributes") or {}).get("健康", 100) or 0) < 30:
+            continue
+        candidates.append((name, idx, int((npc.get("attributes") or {}).get("威望", 0) or 0), False))
+    if not candidates:
+        return []
+    candidates.sort(key=lambda c: (-c[1], -c[2]))
+    chosen, _idx, _pw, is_player = candidates[0]
+    game_state.six_palace_assistant = chosen
+    if not is_player:
+        npc = game_state.npcs[chosen]
+        npc["assists_six_palaces"] = True
+    msg = f"🏛️ 皇后{reason}，宫务不可一日无人主持——着{chosen}协理六宫"
+    game_state.add_memory(msg)
+    return [msg]
+
 def npc_manage_inner_palace(game_state):
     """玩家非内务府掌管者时，由现任皇后/协理六宫者自动经营：
     每旬自动向皇帝请拨内帑（约五成准奏），并用库银自动升级产业（每旬至多一项）。
@@ -8330,6 +8385,9 @@ def next_period():
             intelligence.append(msg)
         # 非主控掌管内务府时，现任皇后/协理者自动请帑与经营产业
         for msg in npc_manage_inner_palace(game_state):
+            intelligence.append(msg)
+        # 皇后去世/病重/怀孕时，必须设一位协理六宫
+        for msg in enforce_six_palace_assistant(game_state):
             intelligence.append(msg)
             game_state.add_memory(msg)
     except Exception as e:

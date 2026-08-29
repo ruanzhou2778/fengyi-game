@@ -4675,7 +4675,7 @@ async function openAffairs(){
                 <div style="display:flex;justify-content:space-between;"><span><b>${rel.对象}</b>（${rel.对象身份}）</span><span style="color:${riskColor};">风险${rel.风险值}${rel.风险值>=70?' ☠️':rel.风险值>=50?'⚠️':''}</span></div>
                 <div>关系：${rel.关系阶段} · 情感${rel.情感值} · 忠诚${rel.忠诚度} · 可${rel.特殊能力}</div>
                 <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:2px;">
-                    <button class="chonghua-btn" onclick="affairAct('develop','${rel.对象_type||''}','gift','${rel.对象}')">🌗 再见一面</button>
+                    <button class="chonghua-btn" onclick="affairAct('develop','${rel.对象类型||''}','gift','${rel.对象}')">🌗 再见一面</button>
                     <button class="chonghua-btn" onclick="affairAct('use',null,'','${rel.对象}')">💠 用其所长</button>
                     <button class="chonghua-btn" onclick="affairAct('mitigate',null,'cut','${rel.对象}')">✂️ 断绝</button>
                     <button class="chonghua-btn" onclick="affairAct('mitigate',null,'bribe_knower','${rel.对象}')">🪙 收买知情者</button>
