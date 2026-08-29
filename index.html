@@ -3042,7 +3042,30 @@ const ov=document.getElementById('modalOverlay');
 ov.classList.add('active');
 ov.style.display='flex'; // compat_prep.js 设置了 inline display:none，必须同步覆盖
 }
-function closeModal(){const ov=document.getElementById('modalOverlay');ov.classList.remove('active');ov.style.display='none';modalCallback=null;}
+function closeModal(){const ov=document.getElementById('modalOverlay');ov.classList.remove('active');ov.style.display='none';modalCallback=null;
+if(_modalQueue.length){setTimeout(_pumpModal,140);}else{_modalActive=false;}}
+
+// ===== 重要事件串行弹窗队列：一次只显示一层，玩家点击后才推进下一层 =====
+let _modalQueue=[];let _modalActive=false;
+function enqueueModal(opt){if(!opt)return;_modalQueue.push(opt);if(!_modalActive)_pumpModal();}
+function _pumpModal(){
+    if(!_modalQueue.length){_modalActive=false;return;}
+    const it=_modalQueue.shift();_modalActive=true;
+    const badge=_modalQueue.length?`<div style="text-align:right;font-size:7px;color:var(--text-light);margin-top:4px;">还有 ${_modalQueue.length} 条待阅</div>`:'';
+    openModal(it.title||'📌 宫中事',(it.body||'')+badge,it.confirmText||'知道了',it.callback||null,true);
+}
+function enqueueKeyEvents(list){
+    (list||[]).forEach(ev=>{
+        if(!ev)return;
+        const txt=typeof ev==='string'?ev:(ev.text||'');
+        if(!txt.trim())return;
+        const icon=(typeof ev==='object'&&ev.icon)?ev.icon:'📌';
+        const title=(typeof ev==='object'&&ev.title)?`${icon} ${ev.title}`:'📌 宫中事';
+        enqueueModal({title:title,
+            body:`<div style="font-size:11px;color:var(--text-mid);line-height:1.9;">${txt}</div>`,
+            confirmText:'知道了'});
+    });
+}
 function modalConfirm(){if(modalCallback)modalCallback();closeModal();}
 document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal();});
 document.getElementById('saveListModal').addEventListener('click',function(e){if(e.target===this)closeSaveListModal();});
@@ -4369,7 +4392,7 @@ if(data.other_birth_msgs && data.other_birth_msgs.length>0){data.other_birth_msg
 if(data.prince_events && data.prince_events.length>0){data.prince_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'👑'),'prince');showToast(formatEventMsg(msg,'👑'));});}
 if(data.growth_events && data.growth_events.length>0){data.growth_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'🌱'),'prince');showToast(formatEventMsg(msg,'🌱'));});}
 if(data.chonghua_events && data.chonghua_events.length>0){data.chonghua_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'🏛️'),'prince');showToast(formatEventMsg(msg,'🏛️'));});}
-if(data.draft_events && data.draft_events.length>0){data.draft_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'📜'),'new-concubine');showToast(formatEventMsg(msg,'📜'));});}
+if(data.draft_events && data.draft_events.length>0){const _dm=[];data.draft_events.forEach(msg=>{addLogEntry(formatEventMsg(msg,'📜'),'new-concubine');_dm.push({icon:'📜',title:'选秀',text:formatEventMsg(msg,'📜')});});enqueueKeyEvents(_dm);}
 if(data.death_events && data.death_events.length>0){data.death_events.forEach(msg=>{addLogEntry(`🕯️ ${msg}`,'demotion');showToast('🕯️ 宫闱噩耗','error');});}
 if(data.intrigue_events && data.intrigue_events.length>0){data.intrigue_events.forEach(msg=>addLogEntry(msg,'intel'));}
 }
@@ -6204,6 +6227,10 @@ async function nextPeriod() {
         }
         
         updateUI(d);
+        // 重要事件逐条弹窗，须玩家点击后才显示下一层
+        if (d.key_events && d.key_events.length) {
+            enqueueKeyEvents(d.key_events);
+        }
         if (d.ai_events_used && !d.ai_events_fallback) {
             showToast('🌙 转旬完成（AI 情报已更新）');
         } else if (d.ai_events_fallback) {

@@ -8272,6 +8272,41 @@ def emperor_flip():
         "reward": reward_info
     })
 
+
+# ============================================================
+#  重要事件分级（供前端串行弹窗）
+# ============================================================
+# 每条 (关键词元组, 级别, 图标, 标题)；级别越小越先弹
+KEY_EVENT_RULES = (
+    (("终局", "赐死", "白绫", "薨逝", "驾崩", "伏诛", "病殁", "幽居", "倾覆", "废为庶人"), 1, "🕯️", "大事不谐"),
+    (("案发", "谋逆", "复辟", "举兵", "事败", "败露", "抄没", "除爵", "除宗籍"), 1, "⚖️", "祸起萧墙"),
+    (("登基", "继位", "称制", "改元", "还政", "撤帘", "临朝"), 1, "👑", "天命更移"),
+    (("晋封", "册立", "晋为", "晋位", "受封", "加封", "凤印"), 2, "📜", "恩旨下达"),
+    (("诞下", "喜得", "皇孙", "生下", "临盆", "有孕", "怀胎"), 2, "👶", "宗庙添丁"),
+    (("放榜", "选秀", "留用", "册封为", "奉旨入册"), 2, "🌸", "新人入宫"),
+    (("冷宫", "打入", "贬入", "出冷宫", "特赦"), 2, "🏚️", "宫门开合"),
+    (("危", "警", "⚠️", "弹劾", "察觉", "记恨", "背叛", "收买", "叛"), 3, "⚠️", "暗流涌动"),
+    (("宗室", "亲王", "郡王", "长公主", "大宗正"), 3, "🏵️", "宗室动静"),
+    (("家族", "母家", "外戚", "权臣", "朝堂", "国是", "内帑"), 3, "🏛️", "前朝消息"),
+)
+KEY_EVENT_MAX = 6          # 单次转旬最多弹窗数（其余仍入日志）
+
+
+def classify_key_events(lines):
+    """从转旬情报中挑出需要弹窗确认的重要事件，按级别排序。"""
+    out = []
+    for raw in (lines or []):
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        for keys, level, icon, title in KEY_EVENT_RULES:
+            if any(k in text for k in keys):
+                out.append({"level": level, "icon": icon, "title": title, "text": text})
+                break
+    out.sort(key=lambda e: e["level"])
+    return out[:KEY_EVENT_MAX]
+
+
 @app.route('/api/next_period', methods=['POST'])
 def next_period():
     data = request.get_json()
@@ -8882,6 +8917,7 @@ def next_period():
         "narration": f"📅 {game_state.get_calendar_str()}，转旬完成。",
         "intelligence": "\n".join(intelligence),
         "intelligence_list": intelligence,
+        "key_events": classify_key_events(intelligence),
         "attributes": game_state.attributes,
         "attr_max": game_state.ATTR_MAX,
         "silver": game_state.silver,
