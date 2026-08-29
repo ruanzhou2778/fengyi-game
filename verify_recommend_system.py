@@ -88,7 +88,10 @@ section("2. 成功率公式")
 gs2 = fresh_state()
 start_draft_ok(gs2)
 c0 = gs2.draft["candidates"][0]
-rates = {k: R.compute_rate(gs2, c0, k) for k in R.METHODS}
+from unittest.mock import patch as _p
+# compute_rate 内有 ±10 随机抖动，固定后才能稳定比较方式间加成
+with _p('recommend_system.random.randint', return_value=0):
+    rates = {k: R.compute_rate(gs2, c0, k) for k in R.METHODS}
 ok("rates within [5,95]", all(5 <= v <= 95 for v in rates.values()), rates)
 ok("phoenix bonus > public", rates["phoenix"] >= rates["public"], rates)
 ok("private bonus > public", rates["private"] >= rates["public"], rates)
