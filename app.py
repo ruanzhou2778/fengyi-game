@@ -7986,7 +7986,7 @@ def draft_recommend_action():
         narration += f"✅ {result['candidate']}已蒙圣意属意，放榜时自会留用册封。"
     game_state.add_memory(f"举荐结果：{tier}")
     return jsonify({"success": True, **result, "narration": narration,
-                    "draft_panel": draft_panel_payload(game_state),
+                    "draft_panel": draft_panel_payload(game_state), "avatars": avatar_payload(game_state),
                     "silver": game_state.silver,
                     "attributes": game_state.attributes,
                     "remaining_actions": game_state.remaining_actions,
@@ -13233,6 +13233,133 @@ def serve_static(filename):
     if filename.startswith('api/'):
         return jsonify({"error": "接口不存在，请确认游戏后端已启动"}), 404
     return send_from_directory('.', filename)
+
+# ============================================================
+#  自定义头像系统
+# ============================================================
+AVATAR_DIR = "avatars"
+os.makedirs(AVATAR_DIR, exist_ok=True)
+
+
+@app.route('/api/avatar/upload', methods=['POST'])
+def avatar_upload():
+    """上传自定义头像（前端已缩至 128×128 的 base64 JPEG）。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    b64 = data.get('avatar') or ''
+    key = (data.get('key') or '').strip()
+    if not key or not b64:
+        return jsonify({"error": "缺少 avatar 或 key"}), 400
+    if not b64.startswith("data:image/"):
+        return jsonify({"error": "仅支持图片格式"}), 400
+    import base64 as _b64
+    try:
+        raw = _b64.b64decode(b64.split(",", 1)[-1])
+    except Exception:
+        return jsonify({"error": "图片解码失败"}), 400
+    if len(raw) > 200 * 1024:
+        return jsonify({"error": "图片过大（上限200KB），请换小图"}), 400
+    import hashlib
+    fname = hashlib.md5(key.encode()).hexdigest() + ".jpg"
+    path = os.path.join(AVATAR_DIR, fname)
+    with open(path, "wb") as f:
+        f.write(raw)
+    _set_avatar_field(player_id, key, f"/avatars/{fname}")
+    return jsonify({"success": True, "url": f"/avatars/{fname}", "key": key})
+
+
+@app.route('/api/avatar/remove', methods=['POST'])
+def avatar_remove():
+    data = request.get_json(silent=True) or {}
+    key = (data.get('key') or '').strip()
+    if not key:
+        return jsonify({"error": "缺少 key"}), 400
+    import hashlib
+    fname = hashlib.md5(key.encode()).hexdigest() + ".jpg"
+    path = os.path.join(AVATAR_DIR, fname)
+    if os.path.exists(path):
+        os.remove(path)
+    _set_avatar_field(data.get('player_id'), key, "")
+    return jsonify({"success": True})
+
+
+@app.route('/avatars/<path:fname>')
+def serve_avatar(fname):
+    return send_from_directory(AVATAR_DIR, fname)
+
+
+def _set_avatar_field(player_id, key, url):
+    """根据 key 把头像 URL 写入对应角色的 avatar 字段。"""
+    try:
+        game_state = sessions.get(player_id)
+        if not game_state:
+            return
+        if key == "player":
+            game_state.avatar = url
+        elif key.startswith("npc:"):
+            npc = (game_state.npcs or {}).get(key[4:])
+            if isinstance(npc, dict):
+                npc["avatar"] = url
+        elif key.startswith("child:"):
+            uid = key[6:]
+            for c in (game_state.children or []):
+                if str(c.get("uid")) == uid:
+                    c["avatar"] = url
+                    break
+        elif key.startswith("servant:"):
+            sn = key[8:]
+            for s in (game_state.servants or []):
+                if s.name == sn:
+                    s.avatar = url
+                    break
+        elif key.startswith("royal:"):
+            rc = getattr(game_state, "royal_clan", None)
+            if isinstance(rc, dict):
+                for pool in ("males", "females"):
+                    if key[6:] in (rc.get(pool) or {}):
+                        rc[pool][key[6:]]["avatar"] = url
+                        break
+        elif key.startswith("consort:"):
+            ds = getattr(game_state, "dowager_state", None)
+            if isinstance(ds, dict):
+                for c in (ds.get("consorts") or []):
+                    if c.get("name") == key[8:]:
+                        c["avatar"] = url
+                        break
+        elif key.startswith("cold:"):
+            ds = getattr(game_state, "cold_palace", None)
+            if isinstance(ds, dict) and key[5:] in (ds.get("inmates") or {}):
+                ds["inmates"][key[5:]]["avatar"] = url
+    except Exception as e:
+        print(f"[warn] avatar set {key}: {e}")
+
+
+def avatar_payload(game_state):
+    """收集所有已设置头像的 key→URL 映射，供前端批量挂载。"""
+    out = {}
+    if getattr(game_state, "avatar", None):
+        out["player"] = game_state.avatar
+    for name, npc in (game_state.npcs or {}).items():
+        if isinstance(npc, dict) and npc.get("avatar"):
+            out[f"npc:{name}"] = npc["avatar"]
+    for c in (game_state.children or []):
+        if isinstance(c, dict) and c.get("avatar"):
+            out[f"child:{c.get('uid', '')}"] = c["avatar"]
+    for s in (game_state.servants or []):
+        if getattr(s, "avatar", None):
+            out[f"servant:{s.name}"] = s.avatar
+    rc = getattr(game_state, "royal_clan", None)
+    if isinstance(rc, dict):
+        for pool in ("males", "females"):
+            for name, m in (rc.get(pool) or {}).items():
+                if isinstance(m, dict) and m.get("avatar"):
+                    out[f"royal:{name}"] = m["avatar"]
+    ds = getattr(game_state, "dowager_state", None)
+    if isinstance(ds, dict):
+        for c in (ds.get("consorts") or []):
+            if isinstance(c, dict) and c.get("avatar"):
+                out[f"consort:{c['name']}"] = c["avatar"]
+    return out
 
 restore_sessions_on_startup()
 

@@ -664,6 +664,9 @@ class GameState:
         self.dowager_ending_triggered = False
         # 太后垂帘听政（见 dowager_system.py / DOWAGER_SYSTEM.md）
         self.dowager_state = {"active": False}
+        self.avatar = ""                  # 主控自定义头像 URL
+        self.avatar = ""
+        self.avatar = ""                  # 主控自定义头像 URL
 
     def get_attr_max(self, attr_name):
         return self.ATTR_MAX.get(attr_name, 100)
@@ -870,6 +873,9 @@ class GameState:
             "last_court_event": getattr(self, "last_court_event", ""),
             "dowager_ending_triggered": getattr(self, "dowager_ending_triggered", False),
             "dowager_state": getattr(self, "dowager_state", {"active": False}),
+            "avatar": getattr(self, "avatar", ""),
+            "avatar": getattr(self, "avatar", ""),
+            "avatar": getattr(self, "avatar", ""),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -1051,6 +1057,9 @@ class GameState:
             game_state.dowager_ending_triggered = bool(data.get("dowager_ending_triggered", False))
             ds = data.get("dowager_state")
             game_state.dowager_state = ds if isinstance(ds, dict) else {"active": False}
+            game_state.avatar = data.get("avatar", "")
+            game_state.avatar = data.get("avatar", "")
+            game_state.avatar = data.get("avatar", "")
             ending = data.get("ending")
             game_state.ending = ending if isinstance(ending, dict) else None
             game_state.ending_unlocked = data.get("ending_unlocked")

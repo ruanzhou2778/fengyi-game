@@ -2997,6 +2997,57 @@ if(pageId==='pageChonghua') { renderChonghuaInline(); renderPrincessInline(); }
 });
 });
 
+// ===== 自定义头像 =====
+window._avatars = window._avatars || {};
+function charIcon(key, emoji, sz){
+    sz = sz || 28;
+    const url = (window._avatars||{})[key];
+    if(url) return `<img src="${url}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;border:1px solid var(--gold);vertical-align:middle;" onerror="this.outerHTML='${emoji}'">`;
+    return `<span style="font-size:${Math.round(sz*0.8)}px;display:inline-block;width:${sz}px;text-align:center;vertical-align:middle;">${emoji}</span>`;
+}
+function avatarUploadBtn(key){
+    return `<button class="chonghua-mini-btn" style="font-size:7px;" onclick="pickAvatar('${key}')" title="上传头像">📷</button>`;
+}
+function pickAvatar(key){
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = function(){
+        const file = inp.files[0]; if(!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e){
+            const img = new Image();
+            img.onload = function(){
+                const cv = document.createElement('canvas');
+                cv.width = 128; cv.height = 128;
+                const ctx = cv.getContext('2d');
+                const ratio = Math.max(128/img.width, 128/img.height);
+                ctx.drawImage(img, (128-img.width*ratio)/2, (128-img.height*ratio)/2, img.width*ratio, img.height*ratio);
+                const b64 = cv.toDataURL('image/jpeg', 0.82);
+                myFetch(`${API_BASE}/api/avatar/upload`, {method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({player_id: playerId, avatar: b64, key: key})})
+                    .then(r=>r.json()).then(d=>{
+                        if(d.error){ showToast('❌ '+d.error,'error'); return; }
+                        window._avatars[key] = d.url;
+                        showToast('✅ 头像已更新');
+                        refreshState();
+                    }).catch(e=>showToast('❌ 上传失败'));
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    };
+    inp.click();
+}
+function removeAvatar(key){
+    if(!confirm('确定移除此头像？'))return;
+    myFetch(`${API_BASE}/api/avatar/remove`, {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({player_id: playerId, key: key})})
+        .then(r=>r.json()).then(d=>{
+            delete (window._avatars||{})[key];
+            showToast('✅ 头像已移除');
+            refreshState();
+        }).catch(e=>showToast('❌ 操作失败'));
+}
 function showToast(msg, type){const e=document.querySelector('.toast-notification');if(e)e.remove();const t=document.createElement('div');t.className='toast-notification'+(type==='error'?' toast-error':'');t.textContent=msg;document.body.appendChild(t);const duration=type==='error'?3500:2000;setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity 0.5s ease';setTimeout(()=>t.remove(),500);},duration);}
 function showChildInteractError(msg){showToast('❌ '+msg,'error');const warnEl=document.getElementById('childModalWarn');if(warnEl){warnEl.textContent='⚡ '+msg;warnEl.style.display='block';}}
 function childMoodEmoji(mood){const m={'开心':'😊','平静':'😌','思念':'🥺','兴奋':'🤩','闷闷不乐':'😔','生病':'🤒'};return m[mood]||'😌';}
@@ -3601,7 +3652,7 @@ const servants=data.servants||[];const container=document.getElementById('servan
 if(typeof updateInnerPalacePanel==='function') updateInnerPalacePanel();
 
 if(servants.length===0){container.innerHTML='<span style="color:var(--text-light);font-size:8px;">暂无宫女太监</span>';countEl.textContent='0人';return;}
-container.innerHTML='';servants.forEach(s=>{const isConf=s.name===((window._lastGameData&&window._lastGameData.confidant)||'');const card=document.createElement('span');card.className='servant-card';if(isConf)card.style.borderColor='var(--gold)';card.innerHTML=`${isConf?'🔒 ':''}${s.type==='宫女'?'👩':'🧑'} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">${s.age||'-'}岁</span><span class="s-skill">技${s.skill}</span>${isConf?'<span style="color:var(--gold);font-size:7px;">心腹</span>':''}`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});const _cn=(window._lastGameData&&window._lastGameData.confidant)||'';countEl.textContent=`${servants.length}人${_cn?` · 🔒心腹:${_cn}`:''}`;
+container.innerHTML='';servants.forEach(s=>{const isConf=s.name===((window._lastGameData&&window._lastGameData.confidant)||'');const card=document.createElement('span');card.className='servant-card';if(isConf)card.style.borderColor='var(--gold)';card.innerHTML=`${isConf?'🔒 ':''}${charIcon('servant:'+s.name, s.type==='宫女'?'👩':'🧑', 20)} ${s.name}<span class="s-type">${s.type}</span><span class="s-loyalty">${s.age||'-'}岁</span><span class="s-skill">技${s.skill}</span>${isConf?'<span style="color:var(--gold);font-size:7px;">心腹</span>':''}`;card.addEventListener('click',()=>openServantDetail(s));container.appendChild(card);});const _cn=(window._lastGameData&&window._lastGameData.confidant)||'';countEl.textContent=`${servants.length}人${_cn?` · 🔒心腹:${_cn}`:''}`;
 renderConflictAssist(servants);
 }
 
@@ -4301,6 +4352,8 @@ function newbornTrait(gender) {
 }
 
 function updateUI(data){
+if(data.avatars)window._avatars=Object.assign(window._avatars||{},data.avatars);
+if(data.avatars)window._avatars=Object.assign(window._avatars||{},data.avatars);
 const displayRank=data.display_rank||data.rank||'-';const silver=data.silver||0;const calendarStr=data.calendar_str||data.calendar||'建元元年一月上旬';const rem=data.remaining_actions!==undefined?data.remaining_actions:7;const max=data.max_actions||7;const attrMax=data.attr_max||{宠爱:999,威望:3000};const playerAge=Math.max(12, Math.floor(Number(data.age||16) || 16));
 miniRank.textContent=displayRank;miniSilver.textContent=`🪙 ${silver}`;miniCalendar.textContent=calendarStr;miniActions.textContent=`⚡${rem}/${max}`;
 renderIntriguePanel(data.intrigue||window._lastGameData?.intrigue, data.intrigue_events||[]);
@@ -5029,7 +5082,7 @@ async function openInteract(type, name) {
                 const title = c.title || (c.gender === '皇子' ? '皇子' : '公主');
                 const trait = c.trait || (age > 5 ? '聪慧' : (age > 3 ? '伶俐' : '襁褓'));
                 return `<span onclick="openChildDetail('${d.name}', ${idx})" style="display:inline-block;background:${c.gender === '皇子' ? '#e8eaf6' : '#fce4ec'};padding:2px 8px;border-radius:12px;font-size:8px;margin:1px;border:1px solid ${c.gender === '皇子' ? '#c5cae9' : '#f8bbd0'};cursor:pointer;transition:all 0.2s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'">
-                    ${c.gender === '皇子' ? '👑' : '🌸'} ${c.name || '未命名'}（${title}）${age}岁 ${trait}
+                    ${charIcon('child:'+(c.uid||''), c.gender === '皇子' ? '👑' : '🌸', 22)} ${c.name || '未命名'}（${title}）${age}岁 ${trait}
                 </span>`;
             }).join('');
         }
@@ -5109,7 +5162,7 @@ async function openChildTransferMenu(npcName) {
         herChildren.forEach((c, idx) => {
             const age = Math.floor(c.age || 0);
             html += `<div style="display:flex;align-items:center;gap:4px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;padding:4px 6px;">
-                <span>${c.gender === '皇子' ? '👑' : '🌸'} ${c.name || '未命名'}</span>
+                <span>${charIcon('child:'+(c.uid||''), c.gender === '皇子' ? '👑' : '🌸', 22)} ${c.name || '未命名'}</span>
                 <span style="font-size:7px;color:var(--text-light);">${age}岁</span>
                 <button onclick="confirmAdoptIn('${npcName.replace(/'/g, "\\'")}', ${idx})" style="margin-left:auto;padding:2px 8px;border:1px solid var(--gold);border-radius:6px;background:var(--gold-light);font-size:8px;cursor:pointer;font-family:inherit;color:var(--text-mid);">📥 收养</button>
             </div>`;
@@ -5122,7 +5175,7 @@ async function openChildTransferMenu(npcName) {
         myChildren.forEach((c, idx) => {
             const age = Math.floor(c.age || 0);
             html += `<div style="display:flex;align-items:center;gap:4px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;padding:4px 6px;">
-                <span>${c.gender === '皇子' ? '👑' : '🌸'} ${c.name || '未命名'}</span>
+                <span>${charIcon('child:'+(c.uid||''), c.gender === '皇子' ? '👑' : '🌸', 22)} ${c.name || '未命名'}</span>
                 <span style="font-size:7px;color:var(--text-light);">${age}岁</span>
                 <button onclick="confirmAdoptOut('${npcName.replace(/'/g, "\\'")}', ${idx})" style="margin-left:auto;padding:2px 8px;border:1px solid rgba(90,130,70,0.5);border-radius:6px;background:rgba(90,130,70,0.15);font-size:8px;cursor:pointer;font-family:inherit;color:#ffffff;">📤 托付</button>
             </div>`;
@@ -5137,7 +5190,7 @@ async function openChildTransferMenu(npcName) {
             const idx = herChildren.indexOf(c);
             const age = Math.floor(c.age || 0);
             html += `<div style="display:flex;align-items:center;gap:4px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;padding:4px 6px;">
-                <span>${c.gender === '皇子' ? '👑' : '🌸'} ${c.name || '未命名'}</span>
+                <span>${charIcon('child:'+(c.uid||''), c.gender === '皇子' ? '👑' : '🌸', 22)} ${c.name || '未命名'}</span>
                 <span style="font-size:7px;color:var(--text-light);">${age}岁</span>
                 <button onclick="confirmAdoptRecall('${npcName.replace(/'/g, "\\'")}', ${idx})" style="margin-left:auto;padding:2px 8px;border:1px solid var(--gold);border-radius:6px;background:var(--gold-light);font-size:8px;cursor:pointer;font-family:inherit;color:var(--text-mid);">🏠 接回</button>
             </div>`;
@@ -5823,7 +5876,7 @@ function openDraftPanel() {
         }
         return `<div style="border:1px solid var(--border-light);border-radius:8px;padding:5px;margin-bottom:4px;${c.npc_rec?'border-color:rgba(142,68,173,0.5);':''}background:var(--bg-card);">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span style="font-weight:600;">${c.icon} ${c.name} <span style="color:var(--text-light);">(${c.rank})</span></span>
+                <span style="font-weight:600;">${charIcon('npc:'+c.name, c.icon, 22)} ${c.name} <span style="color:var(--text-light);">(${c.rank})</span></span>
                 <span>${tags}</span>
             </div>
             <div style="font-size:8px;color:var(--text-mid);margin-top:2px;">🏠 ${c.family_background}　容貌${c.attributes['容貌']}·才情${c.attributes['才情']}·心计${c.attributes['心计']}·健康${c.attributes['健康']}</div>
