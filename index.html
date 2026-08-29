@@ -3520,6 +3520,10 @@ async function sellItem(itemName, maxCount) {
 //  核心 UI 更新
 // ============================================================
 function updateHaremPage(data){
+    // 太后垂帘期：切换为新帝后宫视图
+    if(data.dowager_mode && window._dowager && window._dowager.active){
+        return renderDowagerHaremPage(data);
+    }
     const npcs = { ...(data.npcs || {}) };
     const playerName = data.player_name || data.name || '';
     const playerAge = Math.max(12, Math.floor(Number(data.age||16) || 16));
@@ -3640,10 +3644,50 @@ function updateHaremPage(data){
     }
 }
 
+function renderDowagerHaremPage(data){
+    const d = window._dowager || {};
+    const grid = document.getElementById('npcGrid');
+    const consorts = (d.consorts || []).filter(c => c.alive !== false);
+    const emp = d.emperor || {};
+    const mode = d.harem_mode || '共治';
+    const modeName = {'亲掌':'太后亲掌','共治':'与后共治','放权':'全付新后'}[mode] || mode;
+    let html = `<div style="grid-column:1/3;margin-bottom:4px;">
+        <div style="font-size:10px;color:var(--gold-dark);font-weight:600;">👑 ${emp.name||'新帝'} 的后宫（${modeName}）</div>
+        <div style="font-size:8px;color:var(--text-light);">新后：${d.new_queen||'未立'}　敬顺 ${d.queen_favor}　皇孙可期 ${d.grandchild_chance||0}%</div>
+    </div>`;
+    // 新后卡
+    if(d.new_queen){
+        html += `<div class="npc-card-queen" style="cursor:pointer;" onclick="openDowager()">
+            <div style="display:flex;align-items:center;gap:2px;font-size:10px;">
+                <span>${charIcon('npc:'+d.new_queen, '👑', 32)}</span>
+                <span style="font-weight:600;color:var(--text-dark);font-size:12px;">${d.new_queen}</span>
+                <span class="queen-badge" style="margin-left:auto;">👑中宫皇后</span>
+            </div>
+            <div style="font-size:7px;color:var(--text-light);">对太后敬顺 ${d.queen_favor}</div>
+        </div>`;
+    }
+    // 妃嫔卡
+    consorts.forEach(c => {
+        html += `<div class="npc-card" style="cursor:pointer;" onclick="openDowager()">
+            <div style="display:flex;align-items:center;gap:2px;font-size:10px;">
+                <span>${charIcon('consort:'+c.name, '🌸', 26)}</span>
+                <span style="font-weight:600;color:var(--text-dark);">${c.name}</span>
+                <span style="font-size:6px;color:var(--gold);background:var(--gold-light);padding:1px 4px;border-radius:6px;margin-left:auto;">${c.rank}</span>
+            </div>
+            <div style="font-size:7px;color:var(--text-light);">帝宠 ${c.favor} · 敬顺 ${c.respect}${c.children?` · 👶${c.children}`:''}</div>
+        </div>`;
+    });
+    if(!consorts.length && !d.new_queen){
+        html += '<div style="color:var(--text-light);text-align:center;padding:8px;font-size:9px;grid-column:1/3;">新帝后宫尚未充盈</div>';
+    }
+    grid.innerHTML = html;
+}
+
+
 function updateStatusPage(data){
 const attrs=data.attributes||{};const attrMax=data.attr_max||{宠爱:999,威望:3000};const playerAge=Math.max(12, Math.floor(Number(data.age||16) || 16));
 sName.textContent=`${data.player_name||data.name||'未命名'} · ${playerAge}岁`;sFamily.textContent=data.family_background||'未知';
-let rankText=data.display_rank||data.rank||'-';
+let rankText=data.dowager_mode?'太后（垂帘听政）':(data.display_rank||data.rank||'-');
 if(data.rank_tenure_required>0)rankText+=` · 资历${data.rank_periods||0}/${data.rank_tenure_required}旬`;
 if(data.special_favor)rankText+=' · 专宠';
 const empress=data.empress_status||null;
@@ -4375,6 +4419,7 @@ function newbornTrait(gender) {
 
 function updateUI(data){
 if(data.avatars)window._avatars=Object.assign(window._avatars||{},data.avatars);
+if(data.dowager_mode!==undefined)window._dowagerMode=data.dowager_mode;
 if(data.avatars)window._avatars=Object.assign(window._avatars||{},data.avatars);
 const displayRank=data.display_rank||data.rank||'-';const silver=data.silver||0;const calendarStr=data.calendar_str||data.calendar||'建元元年一月上旬';const rem=data.remaining_actions!==undefined?data.remaining_actions:7;const max=data.max_actions||7;const attrMax=data.attr_max||{宠爱:999,威望:3000};const playerAge=Math.max(12, Math.floor(Number(data.age||16) || 16));
 miniRank.textContent=displayRank;miniSilver.textContent=`🪙 ${silver}`;miniCalendar.textContent=calendarStr;miniActions.textContent=`⚡${rem}/${max}`;
@@ -5057,12 +5102,13 @@ async function openRelationNet(){
         const r = await myFetch(`${API_BASE}/api/relationships?player_id=${playerId}`);
         const d = await r.json();
         const net = d.net || {};
-        let rows = Object.keys(net).map(a => {
+        let rows = [];
+        try{rows = Object.keys(net).map(a => {
             const rels = Object.entries(net[a] || {})
                 .sort((x, y) => y[1].score - x[1].score)
                 .map(([b, e]) => `<span style="display:inline-block;background:var(--bg-card);border:1px solid ${e.color};border-radius:10px;padding:1px 7px;font-size:9px;color:#e8e2d6;margin:1px 2px;cursor:pointer;" title="${(e.events||[]).map(v=>v.事件).join(' / ')}" onclick="closeModal();openInteract('npc','${b}')">${e.icon} ${b} · ${e.tier} ${e.score>0?'+':''}${e.score}</span>`).join('');
             return `<div style="padding:3px 0;border-bottom:1px dashed var(--border-light);"><span style="font-size:9px;color:var(--text-dark);font-weight:600;">${a}</span><div style="margin-top:2px;">${rels || '<span style="font-size:8px;color:var(--text-light);">（尚无往来）</span>'}</div></div>`;
-        }).join('');
+        }).join('');}catch(e){console.warn('relation net parse error',e);}
         const logHtml = (d.log || []).slice(0, 8).map(m => `<div style="font-size:8px;color:var(--text-light);padding:1px 0;">· ${m}</div>`).join('');
         const html = `<div style="max-height:55vh;overflow-y:auto;">${rows}</div>${logHtml ? `<div style="margin-top:6px;font-size:8px;color:var(--text-mid);font-weight:600;">📜 近日人情变动</div>${logHtml}` : ''}`;
         openModal('🕸️ 后宫关系网', html, '关闭', null, true);
