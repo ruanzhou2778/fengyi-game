@@ -13345,21 +13345,16 @@ def avatar_reroll():
         return jsonify({"error": "缺少 key"}), 400
     if key == "player" and getattr(game_state, "avatar", None):
         game_state.avatar = ""  # 想换掉上传的头像时允许直接掷
-    if key.startswith("emperor"):
-        emp = getattr(game_state, "emperor", None) or {}
-        key = f"emperor:{emp.get('name', '')}"
     rerolls = getattr(game_state, "avatar_rerolls", None)
     if not isinstance(rerolls, dict):
         rerolls = {}
         game_state.avatar_rerolls = rerolls
     rerolls[key] = int(rerolls.get(key, 0)) + 1
-    _set_avatar_field(player_id, key.replace("emperor:", "emperor") if key.startswith("emperor") else key, "")
-    # 兼容 emperor 虚拟键：_set_avatar_field 不认识 emperor，跳过即可（URL 每次现算）
+    _set_avatar_field(player_id, key, "")
     _pack_assign_all(game_state)
     autosave_session(player_id)
     payload = avatar_payload(game_state)
-    out_key = "emperor" if key.startswith("emperor") else key
-    return jsonify({"success": True, "key": out_key, "url": payload.get(out_key, ""),
+    return jsonify({"success": True, "key": key, "url": payload.get(key, ""),
                     "avatars": payload})
 
 
@@ -13443,7 +13438,6 @@ BUCKET_ALIASES = {
     "royal_f": ["公主", "妃嫔"],
     "consort": ["妃嫔", "公主"],
     "cold":    ["妃嫔"],
-    "emperor": ["皇帝", "名臣", "驸马", "皇子"],
 }
 
 
@@ -13800,13 +13794,6 @@ def avatar_payload(game_state):
     out = {}
     if getattr(game_state, "avatar", None):
         out["player"] = game_state.avatar
-    # 皇帝（无自定义头像时从 皇帝 桶确定性取一张，支持 🎲 换血）
-    emp = getattr(game_state, "emperor", None)
-    if isinstance(emp, dict):
-        emp_key = f"emperor:{emp.get('name', '')}"
-        out["emperor"] = _bucket_pick(_load_bucket_pools(), BUCKET_ALIASES["emperor"],
-                                      emp_key,
-                                      (getattr(game_state, "avatar_rerolls", {}) or {}).get(emp_key, 0)) or ""
     for name, npc in (game_state.npcs or {}).items():
         if isinstance(npc, dict) and npc.get("avatar"):
             out[f"npc:{name}"] = npc["avatar"]
