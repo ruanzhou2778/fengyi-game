@@ -22,9 +22,9 @@ pools = A._load_bucket_pools()
 has_pool = bool(pools) and any(pools.values())
 check("pool 目录扫描非空", has_pool, str({k: len(v) for k, v in list(pools.items())[:3]}))
 if has_pool:
-    url = A._bucket_pick(pools, ["名妃", "妃嫔"], "npc:测试")
+    url = A._bucket_pick(pools, ["妃嫔", "公主"], "npc:测试")
     check("分桶取图返回 pool URL", url and url.startswith("/avatars/pool/"), str(url))
-    check("同 key 确定性（两次一致）", url == A._bucket_pick(pools, ["名妃", "妃嫔"], "npc:测试"))
+    check("同 key 确定性（两次一致）", url == A._bucket_pick(pools, ["妃嫔", "公主"], "npc:测试"))
     check("空桶链返回 None", A._bucket_pick(pools, ["不存在的桶"], "x") is None)
     # 安全文件名（无 # 空格等）
     bad = [f for files in pools.values() for f in files if any(c in f for c in "#?&% ")]

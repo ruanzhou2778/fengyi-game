@@ -28,7 +28,7 @@ TAGS_CACHE = os.path.join("avatars", "_wd14_tags.json")
 MODEL_DIR = os.path.join(os.environ.get("TEMP", "/tmp"), "wd14_vit_v3")
 SIZE = 448
 
-FEMALE_BUCKETS = ["妃嫔", "名妃", "太后", "公主", "宫女", "女官"]
+FEMALE_BUCKETS = ["妃嫔", "太后", "公主", "宫女", "女官"]
 MALE_BUCKETS = ["皇帝", "皇子", "名臣", "驸马", "侍卫", "男仆"]
 ALL_BUCKETS = FEMALE_BUCKETS + MALE_BUCKETS
 
@@ -198,8 +198,6 @@ def main():
         else:
             if "黄/金" in palette and cloth_c >= 2:
                 bucket = "太后"
-            elif cloth_c == 3:
-                bucket = "名妃"
             elif cloth_c >= 2 and any(c in palette for c in ("白", "红")) and "黄/金" not in palette:
                 bucket = "公主"
             elif cloth_c == 1:

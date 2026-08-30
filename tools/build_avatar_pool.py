@@ -14,7 +14,7 @@ from PIL import Image
 INBOX = os.path.join("avatars", "_inbox")
 POOL = os.path.join("avatars", "pool")
 INDEX = os.path.join("avatars", "index.json")
-BUCKETS = ["妃嫔", "名妃", "太后", "公主", "宫女", "女官", "皇帝", "皇子", "名臣", "驸马", "侍卫", "男仆"]
+BUCKETS = ["妃嫔", "太后", "公主", "宫女", "女官", "皇帝", "皇子", "名臣", "驸马", "侍卫", "男仆"]
 MAX_SIDE = 320
 QUALITY = 82
 

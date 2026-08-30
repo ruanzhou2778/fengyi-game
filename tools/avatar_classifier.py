@@ -13,7 +13,7 @@ import numpy as np
 INBOX  = os.path.join("avatars", "_inbox")
 OUT    = os.path.join("avatars", "index.json")
 
-FEMALE_BUCKETS = ["妃嫔", "名妃", "太后", "公主", "宫女", "女官"]
+FEMALE_BUCKETS = ["妃嫔", "太后", "公主", "宫女", "女官"]
 MALE_BUCKETS   = ["皇子", "名臣", "驸马", "侍卫", "男仆"]
 ALL_BUCKETS    = FEMALE_BUCKETS + MALE_BUCKETS
 
@@ -267,8 +267,6 @@ def classify_one(path):
     if gender == "f":
         if bg_c >= 2 and "黄/金" in palette_names and cloth_c >= 2:
             bucket = "太后"
-        elif cloth_c == 3 and bg_c >= 1:
-            bucket = "名妃"
         elif cloth_c >= 2 and any(c in palette_names for c in ("白", "红")) and "黄/金" not in palette_names and bg_c <= 1:
             bucket = "公主"
         elif bg_c == 0 and cloth_c == 1:
