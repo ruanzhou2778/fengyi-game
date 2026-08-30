@@ -13414,6 +13414,7 @@ BUCKET_ALIASES = {
     "royal_f": ["公主", "名妃", "妃嫔"],
     "consort": ["妃嫔", "名妃", "公主"],
     "cold":    ["妃嫔", "名妃"],
+    "emperor": ["皇帝", "名臣", "驸马", "皇子"],
 }
 
 
@@ -13765,6 +13766,11 @@ def avatar_payload(game_state):
     out = {}
     if getattr(game_state, "avatar", None):
         out["player"] = game_state.avatar
+    # 皇帝（无自定义头像时从 皇帝 桶确定性取一张）
+    emp = getattr(game_state, "emperor", None)
+    if isinstance(emp, dict):
+        out["emperor"] = _bucket_pick(_load_bucket_pools(), BUCKET_ALIASES["emperor"],
+                                      f"emperor:{emp.get('name', '')}") or ""
     for name, npc in (game_state.npcs or {}).items():
         if isinstance(npc, dict) and npc.get("avatar"):
             out[f"npc:{name}"] = npc["avatar"]
