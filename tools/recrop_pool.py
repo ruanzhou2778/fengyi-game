@@ -90,8 +90,14 @@ def main():
     only = set(sys.argv[1:])
     with open(os.path.join("avatars", "index.json"), encoding="utf-8") as f:
         idx = json.load(f)
+    # 已人工/检测确认无头的输出路径永久跳过，避免重建图池时再次生成无头头像
+    faceless_path = os.path.join("avatars", "_faceless_pool.txt")
+    faceless = set()
+    if os.path.isfile(faceless_path):
+        with open(faceless_path, encoding="utf-8") as f:
+            faceless = {line.strip().replace("\\", "/") for line in f if line.strip()}
 
-    n_ok = n_face = n_fallback = n_miss = 0
+    n_ok = n_face = n_nohead = n_miss = 0
     total_bytes = 0
     for bucket in [b for b in idx.keys() if not b.startswith("_") and (not only or b in only)]:
         entries = idx.get(bucket) or []
@@ -104,27 +110,28 @@ def main():
             if old.endswith(".jpg"):
                 os.remove(os.path.join(out_dir, old))
         for i, e in enumerate(entries, 1):
+            out_name = f"b{i:04d}.jpg"
+            if f"{bucket}/{out_name}" in faceless:
+                n_nohead += 1
+                continue
             src = find_source(e["file"])
             if not src:
                 n_miss += 1
                 continue
             try:
                 im = Image.open(src).convert("RGB")
-                arr = np.array(im)
-                had_face = head_center(arr) is not None
                 sq = crop_square(im)
-                dst = os.path.join(out_dir, f"b{i:04d}.jpg")
+                dst = os.path.join(out_dir, out_name)
                 sq.save(dst, "JPEG", quality=QUALITY, optimize=True)
                 total_bytes += os.path.getsize(dst)
                 n_ok += 1
-                n_face += 1 if had_face else 0
-                n_fallback += 0 if had_face else 1
-            except Exception as ex:
+                n_face += 1
+            except Exception:
                 n_miss += 1
         print(f"  {bucket}: {len(entries)} 张", flush=True)
 
     print(f"\n完成：输出 {n_ok} 张（{OUT_SIZE}×{OUT_SIZE} 正方形）")
-    print(f"  按脸定位 {n_face} / 兜底居中 {n_fallback} / 源缺失 {n_miss}")
+    print(f"  按脸定位 {n_face} / 无头跳过 {n_nohead} / 源缺失 {n_miss}")
     print(f"  体积 {total_bytes/1024/1024:.0f}MB")
 
 

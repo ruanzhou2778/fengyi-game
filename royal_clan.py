@@ -414,8 +414,18 @@ def _royal_random_event(game_state, rc):
 
 
 # ===== 玩法接口（§2.3 / §3.3） =====
+def _rel_key(member):
+    """男性成员用「关系」，女性成员用「与玩家关系」（前端/概览沿用此键）。"""
+    return "与玩家关系" if "与玩家关系" in member else "关系"
+
+
+def _rel_get(member):
+    return int(member.get(_rel_key(member), 0) or 0)
+
+
 def _rel_change(member, delta):
-    member["关系"] = max(-100, min(100, int(member.get("关系", 0) or 0) + delta))
+    k = _rel_key(member)
+    member[k] = max(-100, min(100, int(member.get(k, 0) or 0) + delta))
 
 
 def royal_male_action(game_state, rc, member, action):
@@ -424,8 +434,8 @@ def royal_male_action(game_state, rc, member, action):
     spec = ACTIONS_MALE.get(action)
     if not spec:
         return False, "无效的宗室动作"
-    if member["关系"] < spec["min_rel"]:
-        return False, f"{spec['name']}需关系≥{spec['min_rel']}（当前{member['关系']}）"
+    if _rel_get(member) < spec["min_rel"]:
+        return False, f"{spec['name']}需关系≥{spec['min_rel']}（当前{_rel_get(member)}）"
     if action == "ally":
         if member["name"] in rc["allies"]:
             return False, "你与她家已有盟约"
@@ -439,8 +449,8 @@ def royal_male_action(game_state, rc, member, action):
         if not ok:
             return False, err
         gain = 2 if member["帝眷"] > 50 else (1 if random.random() < 0.5 else -1)
-        game_state.relationships.setdefault("皇帝", {"好感": 10})["好感"] = \
-            max(0, min(100, game_state.relationships["皇帝"].get("好感", 10) + gain))
+        emp_rel = game_state.relationships.setdefault("皇帝", {"好感": 10})
+        emp_rel["好感"] = max(0, min(100, emp_rel.get("好感", 10) + gain))
         _rel_change(member, 2)
         return True, f"📜 你托{member['name']}向圣上转陈一言，{'圣意颇纳' if gain > 0 else '圣意未察'}（皇帝好感{'+' if gain > 0 else ''}{gain}）"
     if action == "aid":
@@ -494,8 +504,8 @@ def royal_female_action(game_state, rc, member, action):
     spec = ACTIONS_FEMALE.get(action)
     if not spec:
         return False, "无效的宗室女动作"
-    if member["关系"] < spec["min_rel"]:
-        return False, f"{spec['name']}需关系≥{spec['min_rel']}（当前{member['关系']}）"
+    if _rel_get(member) < spec["min_rel"]:
+        return False, f"{spec['name']}需关系≥{spec['min_rel']}（当前{_rel_get(member)}）"
     if action == "befriend":
         if game_state.silver < 20:
             return False, "银两不足，结交需20两"
@@ -563,8 +573,8 @@ def royal_female_action(game_state, rc, member, action):
             return False, "你们已是手帕交"
         rc["handkerchief"].append(member["name"])
         _rel_change(member, 15)
-        game_state.relationships.setdefault("皇帝", {"好感": 10})["好感"] = \
-            min(100, game_state.relationships["皇帝"].get("好感", 10) + 3)
+        emp_rel = game_state.relationships.setdefault("皇帝", {"好感": 10})
+        emp_rel["好感"] = min(100, emp_rel.get("好感", 10) + 3)
         return True, f"🌸 你与{member['name']}互换信物，义结金兰（关系+15，皇帝好感+3）"
     return False, "无效的宗室女动作"
 

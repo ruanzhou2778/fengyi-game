@@ -57,6 +57,11 @@ if has_pool:
     sample = f"/avatars/pool/{first_bucket}/{pools[first_bucket][0]}"
     rr = client.get(sample)
     check(f"pool 路由可取图 ({first_bucket})", rr.status_code == 200, f"{sample} status={rr.status_code}")
+# 皇帝头像（皇帝桶或回退链）
+emp_url = payload.get("emperor", "")
+check("皇帝头像存在", bool(emp_url) and emp_url.startswith("/avatars/pool/"), str(emp_url))
+if "皇帝" in pools and pools["皇帝"]:
+    check("皇帝优先取 皇帝 桶", "/%E7%9A%87%E5%B8%9D/" in emp_url or "/皇帝/" in emp_url, emp_url)
 rr = client.get("/avatars/ui/scene1.jpg")
 check("ui 路由 scene1.jpg", rr.status_code == 200, f"status={rr.status_code}")
 rr = client.get("/avatars/ui/不存在.jpg")

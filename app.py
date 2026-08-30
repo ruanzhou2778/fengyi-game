@@ -13345,16 +13345,20 @@ def avatar_reroll():
         return jsonify({"error": "缺少 key"}), 400
     if key == "player" and getattr(game_state, "avatar", None):
         game_state.avatar = ""  # 想换掉上传的头像时允许直接掷
+    if key.startswith("emperor"):
+        emp = getattr(game_state, "emperor", None) or {}
+        key = f"emperor:{emp.get('name', '')}"
     rerolls = getattr(game_state, "avatar_rerolls", None)
     if not isinstance(rerolls, dict):
         rerolls = {}
         game_state.avatar_rerolls = rerolls
     rerolls[key] = int(rerolls.get(key, 0)) + 1
-    _set_avatar_field(player_id, key, "")
+    _set_avatar_field(player_id, key, "")  # emperor 虚拟键在此为 no-op，URL 每次现算
     _pack_assign_all(game_state)
     autosave_session(player_id)
     payload = avatar_payload(game_state)
-    return jsonify({"success": True, "key": key, "url": payload.get(key, ""),
+    out_key = "emperor" if key.startswith("emperor") else key
+    return jsonify({"success": True, "key": out_key, "url": payload.get(out_key, ""),
                     "avatars": payload})
 
 
@@ -13438,6 +13442,7 @@ BUCKET_ALIASES = {
     "royal_f": ["公主", "妃嫔"],
     "consort": ["妃嫔", "公主"],
     "cold":    ["妃嫔"],
+    "emperor": ["皇帝", "名臣", "驸马", "皇子"],
 }
 
 
@@ -13465,13 +13470,38 @@ def _bucket_pick(pools, buckets, seed_key, salt=0):
     """按桶优先级取一张确定性头像 URL；salt 非零时换血（🎲 随机按钮）。"""
     import hashlib, urllib.parse
     seed = f"{seed_key}#{salt}" if salt else seed_key
+    blocked = set()
+    blocked_path = os.path.join(AVATAR_DIR, "_faceless_pool.txt")
+    if os.path.isfile(blocked_path):
+        try:
+            with open(blocked_path, encoding="utf-8") as f:
+                blocked = {line.strip().replace("\\", "/") for line in f if line.strip()}
+        except OSError:
+            pass
     for b in buckets:
-        files = pools.get(b) or []
+        files = [f for f in (pools.get(b) or []) if f"{b}/{f}" not in blocked]
         if not files:
             continue
         idx = int(hashlib.md5(seed.encode()).hexdigest(), 16) % len(files)
         return f"/avatars/pool/{urllib.parse.quote(b)}/{files[idx]}"
     return None
+
+
+def _pool_file_exists(url):
+    """池头像 URL 指向的文件是否仍可用（被隔离/列入黑名单也视为不可用）。"""
+    import urllib.parse
+    if not url.startswith("/avatars/pool/"):
+        return True
+    rel = urllib.parse.unquote(url[len("/avatars/pool/"):]).replace("\\", "/")
+    blocked_path = os.path.join(AVATAR_DIR, "_faceless_pool.txt")
+    if os.path.isfile(blocked_path):
+        try:
+            with open(blocked_path, encoding="utf-8") as f:
+                if rel in {line.strip() for line in f if line.strip()}:
+                    return False
+        except OSError:
+            pass
+    return os.path.isfile(os.path.join(AVATAR_POOL_DIR, rel))
 
 
 def _pack_assign_all(game_state):
@@ -13482,6 +13512,35 @@ def _pack_assign_all(game_state):
                          if f.endswith((".jpg", ".png"))]) if os.path.isdir(pack_dir) else []
     pools = _load_bucket_pools()
     rerolls = getattr(game_state, "avatar_rerolls", {}) or {}
+
+    # 自愈：池图被隔离/删除后清掉死链头像，让下面的分配按"无头像"重新取图
+    def _heal(url):
+        return "" if url and url.startswith("/avatars/pool/") and not _pool_file_exists(url) else url
+    if getattr(game_state, "avatar", None):
+        game_state.avatar = _heal(game_state.avatar)
+    for npc in (game_state.npcs or {}).values():
+        if isinstance(npc, dict) and npc.get("avatar"):
+            npc["avatar"] = _heal(npc["avatar"])
+    for c in (game_state.children or []):
+        if isinstance(c, dict) and c.get("avatar"):
+            c["avatar"] = _heal(c["avatar"])
+    for s in (game_state.servants or []):
+        if getattr(s, "avatar", None):
+            s.avatar = _heal(s.avatar)
+    rc = getattr(game_state, "royal_clan", None)
+    if isinstance(rc, dict):
+        for pool in ("males", "females"):
+            for m in (rc.get(pool) or {}).values():
+                if isinstance(m, dict) and m.get("avatar"):
+                    m["avatar"] = _heal(m["avatar"])
+    ds = getattr(game_state, "dowager_state", None)
+    if isinstance(ds, dict):
+        for c in (ds.get("consorts") or []):
+            if isinstance(c, dict) and c.get("avatar"):
+                c["avatar"] = _heal(c["avatar"])
+        for inm in (ds.get("inmates") or {}).values():
+            if isinstance(inm, dict) and inm.get("avatar"):
+                inm["avatar"] = _heal(inm["avatar"])
 
     def _assign(key, url):
         if url:
@@ -13794,6 +13853,13 @@ def avatar_payload(game_state):
     out = {}
     if getattr(game_state, "avatar", None):
         out["player"] = game_state.avatar
+    # 皇帝（无自定义头像时从 皇帝 桶确定性取一张，支持 🎲 换血）
+    emp = getattr(game_state, "emperor", None)
+    if isinstance(emp, dict):
+        emp_key = f"emperor:{emp.get('name', '')}"
+        out["emperor"] = _bucket_pick(_load_bucket_pools(), BUCKET_ALIASES["emperor"],
+                                      emp_key,
+                                      (getattr(game_state, "avatar_rerolls", {}) or {}).get(emp_key, 0)) or ""
     for name, npc in (game_state.npcs or {}).items():
         if isinstance(npc, dict) and npc.get("avatar"):
             out[f"npc:{name}"] = npc["avatar"]

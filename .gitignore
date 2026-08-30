@@ -28,3 +28,5 @@ avatars/_inbox/
 avatars/_review/
 avatars/pack/
 avatars/index.json
+# 坏头像黑名单必须入库（服务器重建图池/分配时要用）
+!avatars/_faceless_pool.txt

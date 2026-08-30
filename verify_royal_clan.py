@@ -116,7 +116,7 @@ else:
 section("3. 宗室女动作")
 fs = R.alive_females(rc)
 f_candidate = next(f for f in fs if f["称号"] == "宗室女")
-f_candidate["关系"] = 40
+f_candidate["与玩家关系"] = 40
 silver0 = gs.silver
 ok_, msg = R.royal_female_action(gs, rc, f_candidate, "befriend")
 ok("结交成功", ok_ and gs.silver == silver0 - 20, msg)
@@ -124,7 +124,7 @@ ok_, msg = R.royal_female_action(gs, rc, f_candidate, "recommend")
 ok("推荐入宫", ok_ and f_candidate["name"] in rc.get("draft_inject", []), msg)
 f_jz = next((f for f in fs if f["称号"] in ("郡主", "县主")), None)
 if f_jz:
-    f_jz["关系"] = 40
+    f_jz["与玩家关系"] = 40
     f_jz["父系"] = next((m["name"] for m in males if m["爵位"] in ("亲王", "郡王")), "")
     rc["males"].setdefault(f_jz["父系"], {"name": f_jz["父系"], "爵位": "亲王", "帝眷": 50, "立场": "中立", "实力": 40, "alive": True, "generation": "同辈", "关系": 0, "标记": [], "妻妾": [], "子女": 0, "年龄": 40, "野心": 30, "封地": ""})
     dj0 = rc["males"][f_jz["父系"]]["帝眷"]
@@ -134,7 +134,7 @@ gs.remaining_actions = 10
 ok_, msg = R.royal_female_action(gs, rc, f_candidate, "intel")
 ok("情报入流言", ok_ and any(r.get("source") == "royal_clan" for r in gs.intrigue.get("rumors", [])), msg)
 f_bond = next(f for f in fs if f["称号"] == "长公主")
-f_bond["关系"] = 40
+f_bond["与玩家关系"] = 40
 ok_, msg = R.royal_female_action(gs, rc, f_bond, "bond")
 ok("手帕交", ok_ and f_bond["name"] in rc["handkerchief"], msg)
 
@@ -189,7 +189,7 @@ sgs.silver = 3000
 sgs.remaining_actions = 20
 rc3 = R.seed_royal_clan(sgs)
 f3 = next(f for f in R.alive_females(rc3) if f["称号"] == "宗室女")
-f3["关系"] = 50
+f3["与玩家关系"] = 50
 R.royal_female_action(sgs, rc3, f3, "recommend")
 A.start_draft(sgs, "大选")
 names = [c["name"] for c in sgs.draft["candidates"]]
