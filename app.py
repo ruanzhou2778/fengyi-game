@@ -13793,7 +13793,11 @@ def avatar_payload(game_state):
                 out[f"consort:{c['name']}"] = c["avatar"]
     return out
 
-restore_sessions_on_startup()
+# 存档预热放后台线程：817+ 存档同步加载会阻塞 gunicorn worker 启动，
+# 导致容器健康检查超时；未预热到的会话由 get_or_restore_session 按需恢复。
+import threading
+threading.Thread(target=restore_sessions_on_startup, daemon=True,
+                 name="session-restore").start()
 
 if __name__ == '__main__':
     load_events()
