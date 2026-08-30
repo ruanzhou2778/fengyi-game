@@ -13332,6 +13332,37 @@ AVATAR_DIR = "avatars"
 os.makedirs(AVATAR_DIR, exist_ok=True)
 
 
+@app.route('/api/avatar/reroll', methods=['POST'])
+def avatar_reroll():
+    """🎲 随机换一张：对指定角色递换取图 salt，重新分配（保留上传的自定义头像则先清除）。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    key = (data.get('key') or '').strip()
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if not key:
+        return jsonify({"error": "缺少 key"}), 400
+    if key == "player" and getattr(game_state, "avatar", None):
+        game_state.avatar = ""  # 想换掉上传的头像时允许直接掷
+    if key.startswith("emperor"):
+        emp = getattr(game_state, "emperor", None) or {}
+        key = f"emperor:{emp.get('name', '')}"
+    rerolls = getattr(game_state, "avatar_rerolls", None)
+    if not isinstance(rerolls, dict):
+        rerolls = {}
+        game_state.avatar_rerolls = rerolls
+    rerolls[key] = int(rerolls.get(key, 0)) + 1
+    _set_avatar_field(player_id, key.replace("emperor:", "emperor") if key.startswith("emperor") else key, "")
+    # 兼容 emperor 虚拟键：_set_avatar_field 不认识 emperor，跳过即可（URL 每次现算）
+    _pack_assign_all(game_state)
+    autosave_session(player_id)
+    payload = avatar_payload(game_state)
+    out_key = "emperor" if key.startswith("emperor") else key
+    return jsonify({"success": True, "key": out_key, "url": payload.get(out_key, ""),
+                    "avatars": payload})
+
+
 @app.route('/api/avatar/upload', methods=['POST'])
 def avatar_upload():
     """上传自定义头像（前端已缩至 128×128 的 base64 JPEG）。"""
@@ -13436,14 +13467,15 @@ def _load_bucket_pools():
         return {}
 
 
-def _bucket_pick(pools, buckets, seed_key):
-    """按桶优先级取一张确定性头像 URL；所有桶为空返回 None。"""
+def _bucket_pick(pools, buckets, seed_key, salt=0):
+    """按桶优先级取一张确定性头像 URL；salt 非零时换血（🎲 随机按钮）。"""
     import hashlib, urllib.parse
+    seed = f"{seed_key}#{salt}" if salt else seed_key
     for b in buckets:
         files = pools.get(b) or []
         if not files:
             continue
-        idx = int(hashlib.md5(seed_key.encode()).hexdigest(), 16) % len(files)
+        idx = int(hashlib.md5(seed.encode()).hexdigest(), 16) % len(files)
         return f"/avatars/pool/{urllib.parse.quote(b)}/{files[idx]}"
     return None
 
@@ -13455,22 +13487,26 @@ def _pack_assign_all(game_state):
     pack_files = sorted([f for f in os.listdir(pack_dir)
                          if f.endswith((".jpg", ".png"))]) if os.path.isdir(pack_dir) else []
     pools = _load_bucket_pools()
+    rerolls = getattr(game_state, "avatar_rerolls", {}) or {}
 
     def _assign(key, url):
         if url:
             _set_avatar_field(game_state.player_id, key, url)
         elif pack_files:
-            idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % len(pack_files)
+            idx = int(hashlib.md5(f"{key}#{rerolls.get(key, 0)}".encode()).hexdigest(), 16) % len(pack_files)
             _set_avatar_field(game_state.player_id, key, f"/avatars/pack/{pack_files[idx]}")
+
+    def _pick(key, alias):
+        return _bucket_pick(pools, BUCKET_ALIASES[alias], key, rerolls.get(key, 0))
 
     # 主控
     if not getattr(game_state, "avatar", None):
-        _assign("player", _bucket_pick(pools, BUCKET_ALIASES["player"], "player"))
+        _assign("player", _pick("player", "player"))
     # NPC
     for name, npc in (game_state.npcs or {}).items():
         if isinstance(npc, dict) and not npc.get("avatar"):
             alias = f"npc_{name}" if name in ("太后", "皇后") else "npc"
-            _assign(f"npc:{name}", _bucket_pick(pools, BUCKET_ALIASES.get(alias, BUCKET_ALIASES["npc"]), f"npc:{name}"))
+            _assign(f"npc:{name}", _pick(f"npc:{name}", alias))
     # 子嗣（按性别分桶）
     for c in (game_state.children or []):
         if isinstance(c, dict) and not c.get("avatar"):
@@ -13479,13 +13515,13 @@ def _pack_assign_all(game_state):
                 continue
             key = f"child:{uid}"
             alias = "child_m" if c.get("gender") == "皇子" else "child_f"
-            _assign(key, _bucket_pick(pools, BUCKET_ALIASES[alias], key))
+            _assign(key, _pick(key, alias))
     # 宫人
     for s in (game_state.servants or []):
         if getattr(s, "avatar", None) is None:
             key = f"servant:{s.name}"
             alias = "servant_宫女" if s.type == "宫女" else "servant_太监"
-            _assign(key, _bucket_pick(pools, BUCKET_ALIASES[alias], key))
+            _assign(key, _pick(key, alias))
     # 宗室
     rc = getattr(game_state, "royal_clan", None)
     if isinstance(rc, dict):
@@ -13493,19 +13529,19 @@ def _pack_assign_all(game_state):
             for name, m in (rc.get(pool) or {}).items():
                 if isinstance(m, dict) and not m.get("avatar"):
                     key = f"royal:{name}"
-                    _assign(key, _bucket_pick(pools, BUCKET_ALIASES[alias], key))
+                    _assign(key, _pick(key, alias))
     # 太后线妃嫔
     ds = getattr(game_state, "dowager_state", None)
     if isinstance(ds, dict):
         for c in (ds.get("consorts") or []):
             if isinstance(c, dict) and not c.get("avatar"):
                 key = f"consort:{c['name']}"
-                _assign(key, _bucket_pick(pools, BUCKET_ALIASES["consort"], key))
+                _assign(key, _pick(key, "consort"))
         # 冷宫
         for name, inm in (ds.get("inmates") or {}).items():
             if isinstance(inm, dict) and not inm.get("avatar"):
                 key = f"cold:{name}"
-                _assign(key, _bucket_pick(pools, BUCKET_ALIASES["cold"], key))
+                _assign(key, _pick(key, "cold"))
 
 
 def _set_avatar_field(player_id, key, url):
@@ -13764,11 +13800,13 @@ def avatar_payload(game_state):
     out = {}
     if getattr(game_state, "avatar", None):
         out["player"] = game_state.avatar
-    # 皇帝（无自定义头像时从 皇帝 桶确定性取一张）
+    # 皇帝（无自定义头像时从 皇帝 桶确定性取一张，支持 🎲 换血）
     emp = getattr(game_state, "emperor", None)
     if isinstance(emp, dict):
+        emp_key = f"emperor:{emp.get('name', '')}"
         out["emperor"] = _bucket_pick(_load_bucket_pools(), BUCKET_ALIASES["emperor"],
-                                      f"emperor:{emp.get('name', '')}") or ""
+                                      emp_key,
+                                      (getattr(game_state, "avatar_rerolls", {}) or {}).get(emp_key, 0)) or ""
     for name, npc in (game_state.npcs or {}).items():
         if isinstance(npc, dict) and npc.get("avatar"):
             out[f"npc:{name}"] = npc["avatar"]

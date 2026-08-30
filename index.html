@@ -489,7 +489,7 @@
             margin-bottom: 3px;
         }
 
-        .emperor-strip {
+        .emperor-strip { position: relative;
             display: flex;
             align-items: center;
             gap: 10px;
@@ -1789,7 +1789,7 @@
             <div class="page" id="pageHarem">
                 <div class="section-label">👑 皇 帝</div>
                 <div class="emperor-strip" onclick="openEmperorInteract()">
-                    <span class="avatar" id="empAvatar">👑</span>
+                    <span class="avatar" id="empAvatar">👑</span><button class="chonghua-mini-btn" style="position:absolute;top:2px;right:4px;font-size:8px;z-index:2;" onclick="event.stopPropagation();rerollAvatar('emperor')" title="随机换皇帝头像">🎲</button>
                     <div class="info">
                         <div class="name" id="empName">-</div>
                         <div class="mood" id="empPersonality">-</div>
@@ -3058,12 +3058,23 @@ window._avatars = window._avatars || {};
 function charIcon(key, emoji, sz){
     sz = sz || 28;
     const url = (window._avatars||{})[key];
-    if(url) return `<img src="${url}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;border:1px solid var(--gold);vertical-align:middle;" onerror="this.outerHTML='${emoji}'">`;
+    if(url) return `<img src="${url}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;object-position:center top;border:1px solid var(--gold);vertical-align:middle;" onerror="this.outerHTML='${emoji}'">`;
     return `<span style="font-size:${Math.round(sz*0.8)}px;display:inline-block;width:${sz}px;text-align:center;vertical-align:middle;">${emoji}</span>`;
 }
 function avatarUploadBtn(key){
-    return `<button class="chonghua-mini-btn" style="font-size:7px;" onclick="pickAvatar('${key}')" title="上传头像">📷</button>`;
+    return `<button class="chonghua-mini-btn" style="font-size:7px;" onclick="pickAvatar('${key}')" title="上传头像">📷</button><button class="chonghua-mini-btn" style="font-size:7px;" onclick="rerollAvatar('${key}')" title="随机换一张">🎲</button>`;
 }
+async function rerollAvatar(key){
+    if(!playerId){ showToast('❌ 请先开始游戏'); return; }
+    try{
+        const r=await myFetch(`${API_BASE}/api/avatar/reroll`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,key:key})});
+        const d=await r.json();
+        if(d.error){ showToast('❌ '+d.error,'error'); return; }
+        showToast('🎲 已随机换新');
+        refreshState();
+    }catch(e){ showToast('❌ 换血失败','error'); }
+}
+window.rerollAvatar = rerollAvatar;
 function pickAvatar(key){
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'image/*';
@@ -3760,7 +3771,7 @@ const apDesc = document.getElementById('playerAppearanceDesc');
 const tbEl = document.getElementById('playerTalentBonus');
 if (avBox) {
     const avUrl = pr.avatar || (window._avatars && (window._avatars['player'] || window._avatars['player:'+(data.player_name||'')]));
-    if (avUrl) avBox.innerHTML = `<img src="${avUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+    if (avUrl) avBox.innerHTML = `<img src="${avUrl}" style="width:100%;height:100%;object-fit:cover;object-position:center top;">`;
     else avBox.innerHTML = data.dowager_mode ? '👑' : '🌸';
 }
 if (nameLine) nameLine.textContent = `${data.player_name||data.name||'未命名'} · ${playerAge}岁`;
@@ -3798,7 +3809,7 @@ if(typeof chonghuaVisible!=='undefined'&&chonghuaVisible&&typeof renderChonghuaI
 }
 }
 
-function updateEmperorDisplay(data){if(data.emperor){const e=data.emperor;document.getElementById('empName').textContent=e.name||'萧景琰';document.getElementById('empPersonality').textContent=`${e.personality||'明君'}${e.age?` · ${e.age}岁`:''}`;const s=e.stats||{};document.getElementById('empStats').innerHTML=`<span>威严 ${s.威严||'-'}</span><span>仁德 ${s.仁德||'-'}</span><span>勤政 ${s.勤政||'-'}</span><span>好色 ${s.好色||'-'}</span>`;const avEl=document.getElementById('empAvatar');if(avEl){const url=(window._avatars||{})['emperor'];avEl.innerHTML=url?`<img src="${url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`:'👑';}}}
+function updateEmperorDisplay(data){if(data.emperor){const e=data.emperor;document.getElementById('empName').textContent=e.name||'萧景琰';document.getElementById('empPersonality').textContent=`${e.personality||'明君'}${e.age?` · ${e.age}岁`:''}`;const s=e.stats||{};document.getElementById('empStats').innerHTML=`<span>威严 ${s.威严||'-'}</span><span>仁德 ${s.仁德||'-'}</span><span>勤政 ${s.勤政||'-'}</span><span>好色 ${s.好色||'-'}</span>`;const avEl=document.getElementById('empAvatar');if(avEl){const url=(window._avatars||{})['emperor'];avEl.innerHTML=url?`<img src="${url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:center top;">`:'👑';}}}
 function updateDowagerDisplay(data){const rel=data.relationships?data.relationships['太后']:null;const dowager=(data.dowager)||((window._lastGameData||{}).dowager)||{};document.getElementById('dowagerFavor').textContent=rel?rel.好感:'-';const personalityEl=document.getElementById('dowagerPersonality');if(personalityEl)personalityEl.textContent=`${dowager.personality||'威严慈祥'}${dowager.age?` · ${dowager.age}岁`:''}`;}
 function updateServantList(data){
 const servants=data.servants||[];const container=document.getElementById('servantList');const countEl=document.getElementById('servantCount');

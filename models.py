@@ -665,8 +665,7 @@ class GameState:
         # 太后垂帘听政（见 dowager_system.py / DOWAGER_SYSTEM.md）
         self.dowager_state = {"active": False}
         self.avatar = ""                  # 主控自定义头像 URL
-        self.avatar = ""
-        self.avatar = ""                  # 主控自定义头像 URL
+        self.avatar_rerolls = {}          # 各角色随机头像换血计数 {avatar_key: 次数}
 
     def get_attr_max(self, attr_name):
         return self.ATTR_MAX.get(attr_name, 100)
@@ -874,8 +873,7 @@ class GameState:
             "dowager_ending_triggered": getattr(self, "dowager_ending_triggered", False),
             "dowager_state": getattr(self, "dowager_state", {"active": False}),
             "avatar": getattr(self, "avatar", ""),
-            "avatar": getattr(self, "avatar", ""),
-            "avatar": getattr(self, "avatar", ""),
+            "avatar_rerolls": getattr(self, "avatar_rerolls", {}),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -1058,8 +1056,8 @@ class GameState:
             ds = data.get("dowager_state")
             game_state.dowager_state = ds if isinstance(ds, dict) else {"active": False}
             game_state.avatar = data.get("avatar", "")
-            game_state.avatar = data.get("avatar", "")
-            game_state.avatar = data.get("avatar", "")
+            rr = data.get("avatar_rerolls")
+            game_state.avatar_rerolls = rr if isinstance(rr, dict) else {}
             ending = data.get("ending")
             game_state.ending = ending if isinstance(ending, dict) else None
             game_state.ending_unlocked = data.get("ending_unlocked")
