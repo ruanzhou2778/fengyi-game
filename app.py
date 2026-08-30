@@ -13330,8 +13330,6 @@ def serve_static(filename):
 # ============================================================
 AVATAR_DIR = "avatars"
 os.makedirs(AVATAR_DIR, exist_ok=True)
-import rarfile as _rf
-_rf.UNRAR_TOOL = r"E:\WinRAR\UnRAR.exe"
 
 
 @app.route('/api/avatar/upload', methods=['POST'])
