@@ -8400,17 +8400,16 @@ def classify_key_events(lines):
     return out[:KEY_EVENT_MAX]
 
 
-@app.route('/api/next_period', methods=['POST'])
-def next_period():
-    data = request.get_json()
-    player_id = data.get('player_id')
+def _advance_one_period(player_id, api_config=None):
+    """推进一旬的完整结算主体（转旬/转月/转年共用，保证所有时间相关钩子一致）。"""
     game_state, err = session_or_404(player_id)
     if err:
         return err
     ensure_ending_fields(game_state)
     if is_game_over(game_state):
         return game_over_response(game_state)
-    api_config = get_user_api_config(request, player_id)
+    if api_config is None:
+        api_config = {"api_key": "", "api_base": "", "api_model": ""}
 
     # ---- 时间推进 ----
     old_month, old_year = game_state.month, game_state.year
@@ -9013,7 +9012,7 @@ def next_period():
     dowager_data = game_state.npcs.get("太后")
 
     autosave_session(player_id)
-    return jsonify({
+    return {
         "success": True,
         "day": game_state.day,
         "month": game_state.month,
@@ -9085,7 +9084,81 @@ def next_period():
         "banquet": banquet_payload(game_state),
         "medical": medical_payload(game_state),
         "market": market_payload(game_state),
-    })
+    }
+
+@app.route('/api/next_period', methods=['POST'])
+def next_period():
+    """转旬：推进一旬（10 天），触发全部旬度结算。"""
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    api_config = get_user_api_config(request, player_id)
+    result = _advance_one_period(player_id, api_config)
+    if isinstance(result, tuple):
+        return result
+    return jsonify(result)
+
+
+@app.route('/api/skip_time', methods=['POST'])
+def skip_time():
+    """转月/转年：连跑 3/36 旬，复用 _advance_one_period 全部结算钩子。
+
+    连跳期间：强制本地叙事（避免 36 次 AI 调用）、错过节令宴饮、
+    修剪交互弹窗队列（家族/子嗣/协理），终局立即停止。
+    """
+    data = request.get_json(silent=True) or {}
+    player_id = data.get('player_id')
+    unit = data.get('unit', 'month')
+    n = 3 if unit == 'month' else (36 if unit == 'year' else 0)
+    if not n:
+        return jsonify({"error": "unit 须为 month 或 year"}), 400
+    game_state, err = session_or_404(player_id)
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    skip_api = {"api_key": "", "api_base": "", "api_model": ""}
+    key_msgs = []
+    seen = set()
+    last = None
+    ran = 0
+    for i in range(n):
+        last = _advance_one_period(player_id, skip_api)
+        if isinstance(last, tuple):
+            return last
+        ran += 1
+        for k in (last.get("key_events") or []):
+            text = (k.get("text") if isinstance(k, dict) else str(k) or "").strip()
+            if text and text not in seen and len(key_msgs) < 60:
+                seen.add(text)
+                key_msgs.append(k)
+        if last.get("game_over"):
+            break
+        # 中段旬：错过节令宴 + 修剪待裁决队列，防止连跳堆积弹窗
+        if i < n - 1:
+            bq = getattr(game_state, "banquet", None)
+            if isinstance(bq, dict) and bq.get("pending"):
+                p = bq["pending"]
+                bq.setdefault("attended", {})[p.get("key")] = game_state.year
+                bq["pending"] = None
+                miss = f"🏮 事务缠身，错过了{p.get('name', '节令宴饮')}。"
+                key_msgs.append(miss)
+                game_state.add_memory(miss)
+            feq = getattr(game_state, "family_event_queue", None)
+            if isinstance(feq, list) and len(feq) > 3:
+                game_state.family_event_queue = feq[-3:]
+            ceq = getattr(game_state, "child_event_queue", None)
+            if isinstance(ceq, list) and len(ceq) > 3:
+                game_state.child_event_queue = ceq[-3:]
+            geq = getattr(game_state, "governance_events", None)
+            if isinstance(geq, list) and len(geq) > 2:
+                game_state.governance_events = geq[-2:]
+    autosave_session(player_id)
+    last = dict(last)
+    last["skip"] = {"unit": unit, "periods_ran": ran}
+    last["key_events"] = key_msgs
+    last["narration"] = f"⏩ 快进完成：共推进 {ran} 旬（{'一月' if unit == 'month' else '一年'}），当前 {game_state.get_calendar_str()}。"
+    return jsonify(last)
+
 
 @app.route('/api/intrigue/targets', methods=['GET'])
 def intrigue_targets_api():

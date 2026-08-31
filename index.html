@@ -1727,6 +1727,8 @@
                     <button class="qa-btn primary" onclick="doFlip()">🌙 翻牌</button>
                     <button class="qa-btn" onclick="doRandomEvent()">🎲 随机事件</button>
                     <button class="qa-btn" id="nextPeriodBtn">📅 转旬</button>
+                    <button class="qa-btn" id="skipMonthBtn" title="连推 3 旬到下月">⏩ 转月</button>
+                    <button class="qa-btn" id="skipYearBtn" title="连推 36 旬到明年（孩子快快长大）">⏭ 转年</button>
                 </div>
 
                 <!-- ⭐ 每日行动网格（加回来了） -->
@@ -7781,6 +7783,31 @@ document.getElementById('romanceToggle')?.addEventListener('change',updateRomanc
 sendBtn.addEventListener('click',function(){const t=userInput.value.trim();if(t)sendFreeInput(t);});
 userInput.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();const t=this.value.trim();if(t)sendFreeInput(t);}});
 nextPeriodBtn.addEventListener('click',nextPeriod);
+
+// ===== 转月/转年：连跳多旬，孩子快快长大 =====
+async function skipTime(unit){
+    if(!playerId||isProcessing) return;
+    const label = unit==='month' ? '转月（连推 3 旬到下月）' : '转年（连推 36 旬到明年）';
+    if(!confirm(`确定要${label}吗？\n\n期间会自动结算俸禄、年龄、子嗣成长、选秀、宴饮等全部旬度变化；\n节令宴饮将错过，待裁事务仅保留最近几件；\n若触发结局会立即停下。`)) return;
+    isProcessing = true;
+    showLoading(true, {title: unit==='month'?'⏩ 转月推进中...':'⏭ 转年推进中...', sub: unit==='year'?'岁月如梭，红颜弹指老':'光阴似箭'});
+    try{
+        const r = await myFetch(`${API_BASE}/api/skip_time`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({player_id:playerId, unit:unit}), skipLoading:true
+        });
+        const d = await parseApiResponse(r);
+        addLogEntry(`⏩ ${d.calendar_str} 快进完成（${d.skip?.periods_ran??0} 旬）`, 'system');
+        (d.intelligence_list||[]).forEach(item=>{ if(item&&item.trim()) addLogEntry(`📌 ${item.trim()}`,'intel'); });
+        updateUI(d);
+        if(d.key_events&&d.key_events.length) enqueueKeyEvents(d.key_events);
+        showToast(unit==='month'?'⏩ 已到下月':'⏭ 已到明年');
+    }catch(e){ showToast('❌ 快进失败：'+e.message); }
+    showLoading(false);
+    isProcessing = false;
+}
+document.getElementById('skipMonthBtn')?.addEventListener('click',()=>skipTime('month'));
+document.getElementById('skipYearBtn')?.addEventListener('click',()=>skipTime('year'));
 
 createScenarioOverlay();
 initMapCanvas();
