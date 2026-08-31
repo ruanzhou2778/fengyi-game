@@ -1824,6 +1824,11 @@
 
                 <div id="statusTags"></div>
 
+                <div class="stat-block" id="banquetBlock" style="display:none;">
+                    <div class="block-title">🏮 节 令 宴 饮</div>
+                    <div id="banquetPanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;"></div>
+                </div>
+
                 <div class="section-label" style="margin-top:4px;">👥 妃 嫔</div>
                 <div class="npc-grid" id="npcGrid"><div style="color:var(--text-light);text-align:center;padding:8px;font-size:9px;grid-column:1/3;">请先开始游戏</div></div>
             </div>
@@ -1874,6 +1879,16 @@
                 <div class="stat-block">
                     <div class="block-title">🤝 阵 营 关 系</div>
                     <div id="factionContent"><span style="color:var(--text-light);font-size:8px;">加载中...</span></div>
+                </div>
+
+                <div class="stat-block">
+                    <div class="block-title">🌿 太 医 署</div>
+                    <div id="medicalPanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;"></div>
+                </div>
+
+                <div class="stat-block">
+                    <div class="block-title">🏪 宫 廷 市 集</div>
+                    <div id="marketPanel" style="font-size:8px;color:var(--text-mid);line-height:1.5;"></div>
                 </div>
 
                 <div class="stat-block">
@@ -4593,7 +4608,7 @@ if(data.death_message){
 }
 
 if(data.promotion){const lines=data.promotion.split('\n');const eff=data.effects?Object.entries(data.effects).filter(([k,v])=>v!==0).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join('、'):'';const body=`${lines[0]||'圣旨到！'}<span class="sub">${lines.slice(1).join('<br>')||'皇恩浩荡，特此嘉奖。'}</span>${eff?`<div class="edict-effect">📊 ${eff}</div>`:''}`;showEdictModal('📜 圣 旨',body);addLogEntry(`🎉 ${data.promotion}`,'promotion');}
-updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);renderHeirRaceUI(data);renderRegencyPanel(data);renderConsortPanel(data);renderGovernancePanel(data);renderFamilyPanel(data);loadQueenAuthority();
+updateHaremPage(data);updateStatusPage(data);updateEmperorDisplay(data);updateDowagerDisplay(data);updateServantList(data);updateChildrenUI(data);renderHeirPalaceUI(data);renderHeirRaceUI(data);renderRegencyPanel(data);renderConsortPanel(data);renderGovernancePanel(data);renderFamilyPanel(data);renderBanquetPanel(data);renderMedicalPanel(data);renderMarketPanel(data);loadQueenAuthority();
 checkChildEventQueue(data);
 if((data.relationship_log||[]).length>0){addLogEntry(data.relationship_log[0],'intel');}
 const disabled=rem<=0;
@@ -4672,6 +4687,106 @@ async function childEventRespond(evId, idx){
         refreshState();
     } catch(e){ showToast('❌ ' + e.message, 'error'); }
 }
+// ===== 节令宴饮 / 太医署 / 宫廷市集 =====
+function renderBanquetPanel(data){
+    const block = document.getElementById('banquetBlock');
+    const panel = document.getElementById('banquetPanel');
+    if(!block || !panel) return;
+    const b = data.banquet || {};
+    const p = b.pending;
+    if(!p){ block.style.display='none'; return; }
+    block.style.display='block';
+    panel.innerHTML = `<div style="font-size:9px;color:var(--text-dark);font-weight:600;">${p.icon||'🏮'} ${p.name||''}</div>
+        <div style="margin:2px 0 4px;">${p.desc||''}</div>
+        <button class="interact-btn" onclick="openBanquetModal()">赴宴择对 ▸</button>`;
+}
+function openBanquetModal(){
+    const data = window._lastGameData || {};
+    const p = ((data.banquet)||{}).pending;
+    if(!p) return;
+    let body = `<div style="font-size:10px;color:var(--text-mid);line-height:1.7;">${p.desc||''}</div>`;
+    body += `<div style="display:flex;flex-direction:column;gap:5px;margin-top:8px;">`;
+    (p.choices||[]).forEach((c,i)=>{
+        body += `<button onclick="banquetRespond(${i})" style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border-light);border-radius:6px;color:var(--text-mid);font-size:9px;cursor:pointer;font-family:inherit;text-align:left;">${c.text}</button>`;
+    });
+    body += `</div>`;
+    openModal(`🏮 ${p.name||'节令宴饮'}`, body, '暂不应宴', null, true);
+}
+async function banquetRespond(idx){
+    if(!playerId) return;
+    try{
+        const r = await myFetch(`${API_BASE}/api/banquet/respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,choice_index:idx})});
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error||'应对失败');
+        closeModal();
+        openModal('🏮 宴饮归闻', `<div style="font-size:10px;color:var(--text-mid);line-height:1.8;">${d.narration||''}</div>`, '知道了', ()=>refreshState(), true);
+    }catch(e){ showToast('❌ '+e.message,'error'); }
+}
+function renderMedicalPanel(data){
+    const panel = document.getElementById('medicalPanel');
+    if(!panel) return;
+    const m = data.medical || {};
+    const ph = m.physician || {};
+    const conds = m.conditions || [];
+    const herbs = m.herbs || {};
+    let html = `<div>太医 <b style="color:var(--gold);">${ph.name||'—'}</b> · 好感 ${ph.favor||0}/100 · 医术 ${ph.skill||0}</div>`;
+    if(conds.length){
+        html += `<div style="margin-top:2px;color:#c0392b;">病症：${conds.map(c=>`${c.name}（${c.desc||''}·已缠${(c.months||0)+1}旬）`).join('；')}</div>`;
+    } else {
+        html += `<div style="margin-top:2px;color:var(--text-light);">脉案平安，并无病症</div>`;
+    }
+    const herbTxt = Object.entries(herbs).filter(([k,v])=>v>0).map(([k,v])=>`${k}×${v}`).join('、');
+    html += `<div style="margin-top:2px;">药匣：${herbTxt||'<span style="color:var(--text-light);">空</span>'}</div>`;
+    html += `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">
+        <button class="interact-btn" onclick="medicalAction('consult')">🩺 请脉(10两)</button>
+        <button class="interact-btn" onclick="medicalAction('gift')">🎁 打点(20两)</button>`;
+    if(conds.length){
+        html += `<button class="interact-btn" onclick="medicalAction('treat','${conds[0].name}')">💊 医「${conds[0].name}」</button>`;
+    }
+    html += `</div>`;
+    panel.innerHTML = html;
+}
+async function medicalAction(action, target){
+    if(!playerId) return;
+    try{
+        const r = await myFetch(`${API_BASE}/api/medical/action`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,action:action,target:target||''})});
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error||'太医事未成');
+        showToast('✅ '+(d.narration||'').slice(0,40));
+        refreshState();
+    }catch(e){ showToast('❌ '+e.message,'error'); }
+}
+function renderMarketPanel(data){
+    const panel = document.getElementById('marketPanel');
+    if(!panel) return;
+    const mk = data.market || {};
+    const stock = (mk.stock||[]).filter(s=>s.stock>0);
+    if(!stock.length){ panel.innerHTML = '<span style="color:var(--text-light);">本月市集未开，待下月上新</span>'; return; }
+    const npcNames = Object.keys((data.npcs)||{}).filter(n=>n!=='太后');
+    let html = `<div style="color:var(--text-light);margin-bottom:3px;">尚功局本月货架（每月初轮换）</div>`;
+    html += stock.map(s=>{
+        const giftPicker = s.kind==='gift' ? `<select id="mkTgt_${s.id}" style="font-size:7px;background:var(--bg-card);color:var(--text-mid);border:1px solid var(--border-light);border-radius:4px;">${npcNames.slice(0,12).map(n=>`<option>${n}</option>`).join('')}</select>` : '';
+        return `<div style="display:flex;align-items:center;gap:4px;padding:2px 0;border-bottom:1px dashed var(--border-light);">
+            <span>${s.icon} <b>${s.name}</b><span style="color:var(--text-light);"> · ${s.desc}</span></span>
+            <span style="margin-left:auto;white-space:nowrap;">${giftPicker}<button class="interact-btn" onclick="marketBuy('${s.id}')">🪙${s.price}</button></span>
+        </div>`;
+    }).join('');
+    panel.innerHTML = html;
+}
+async function marketBuy(itemId){
+    if(!playerId) return;
+    let target = '';
+    const sel = document.getElementById('mkTgt_'+itemId);
+    if(sel) target = sel.value;
+    try{
+        const r = await myFetch(`${API_BASE}/api/market/buy`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,item_id:itemId,target:target})});
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.error||'购买失败');
+        showToast('✅ '+(d.narration||'').slice(0,42));
+        refreshState();
+    }catch(e){ showToast('❌ '+e.message,'error'); }
+}
+
 function renderGovernancePanel(data){
     const panel = document.getElementById('governancePanel');
     if(!panel) return;

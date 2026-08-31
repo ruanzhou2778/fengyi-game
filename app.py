@@ -105,6 +105,9 @@ from endings import (
 import httpx
 from urllib.parse import urlparse
 from ai_service import generate_period_events, _strip_reasoning, get_openai_client
+from new_features import (generate_banquet, resolve_banquet, banquet_payload,
+                          medical_period_tick, medical_action, poison_screen, medical_payload,
+                          market_refresh, market_buy, market_payload)
 
 app = Flask(__name__)
 
@@ -1949,6 +1952,11 @@ def generate_palace_conflict(game_state, initiator=None, target=None, api_key=No
     player_poisoned_by = None
     if conflict_type == "下毒" and initiator_win and target == game_state.name:
         poison_damage = random.randint(25, 40)
+        # 太医网络拦截：备解毒散或太医眼线到位，毒性减半
+        mitigated, _herb, screen_msg = poison_screen(game_state)
+        if mitigated:
+            poison_damage = poison_damage // 2
+            game_state.add_memory(f"🩺 {screen_msg}（健康-{poison_damage}）")
         game_state.attributes["健康"] = max(0, game_state.attributes.get("健康", 60) - poison_damage)
         player_poisoned_by = initiator
         game_state.add_memory(f"{initiator}对你下毒，健康-{poison_damage}")
@@ -8646,6 +8654,16 @@ def next_period():
     for evt in process_clan_period(game_state):
         intelligence.append(evt)
     generate_family_events(game_state)
+    # ---- 太医网络：病症衰减/新发/孕期胎象 ----
+    for msg in medical_period_tick(game_state):
+        intelligence.append(msg)
+    # ---- 宫廷市集：每月轮换货架 ----
+    if market_refresh(game_state):
+        intelligence.append("🏪 尚功局市集上新，诸妃可往一观。")
+    # ---- 节令宴饮：月初发请柬 ----
+    banquet_msg = generate_banquet(game_state)
+    if banquet_msg:
+        intelligence.append(banquet_msg)
     # ---- 宗室系统：立场演化/世系繁衍/谋逆链/宗室事件 ----
     for evt in process_royal_clan_period(game_state):
         intelligence.append(evt)
@@ -9064,6 +9082,9 @@ def next_period():
         "governance_events": getattr(game_state, "governance_events", []),
         "governance_history": getattr(game_state, "governance_history", [])[-10:],
         "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5],
+        "banquet": banquet_payload(game_state),
+        "medical": medical_payload(game_state),
+        "market": market_payload(game_state),
     })
 
 @app.route('/api/intrigue/targets', methods=['GET'])
@@ -9525,7 +9546,7 @@ def get_state(player_id):
         npcs_with_children = serialize_npcs_for_client(game_state)
         dowager_data = game_state.npcs.get("太后")
         ensure_ending_fields(game_state)
-        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "player_render": build_player_render(game_state), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "dowager_mode": is_dowager_active(game_state), "avatars": avatar_payload(game_state), "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state), "child_event_queue": getattr(game_state, "child_event_queue", []), "governance_events": getattr(game_state, "governance_events", []), "governance_history": getattr(game_state, "governance_history", [])[-10:], "family_event_queue": getattr(game_state, "family_event_queue", []), "family_event_history": (getattr(game_state, "family_event_history", []) or [])[-10:], "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5], **confidant_payload(game_state)})
+        return jsonify({"rank": game_state.rank.name, "nobletitle": game_state.nobletitle, "display_rank": game_state.get_display_rank(), "rank_periods": get_rank_periods(game_state), "rank_tenure_required": get_min_tenure(game_state.rank.name), "special_favor": is_special_favor(game_state), "empress_status": get_empress_requirement_status(game_state), "name": game_state.name, "age": game_state.age, "family_background": game_state.family_background, "attributes": game_state.attributes, "attr_max": game_state.ATTR_MAX, "relationships": game_state.relationships, "current_time": game_state.current_time, "day": game_state.day, "month": game_state.month, "year": game_state.year, "calendar_str": game_state.get_calendar_str(), "silver": game_state.silver, "story_flags": game_state.story_flags, "storyline": game_state.storyline.value, "emperor": game_state.emperor, "dowager": dowager_data, "memories": game_state.get_recent_memories(5), "inventory": game_state.inventory, "npcs": npcs_with_children, "is_pregnant": game_state.is_pregnant, "pregnancy_month": game_state.pregnancy_month, "children": game_state.children, "has_children": game_state.has_children, "rivalries": game_state.rivalries, "alliances": game_state.alliances, "intrigue": summarize_intrigue(game_state), "intrigue_events": [], "attr_change_log": game_state.attr_change_log[-10:], "servants": [s.to_dict() for s in game_state.get_active_servants()], "romance_mode": game_state.romance_mode, "player_name": game_state.name, "remaining_actions": game_state.remaining_actions, "max_actions": game_state.max_actions, "appearance": getattr(game_state,'appearance',''), "talent": getattr(game_state,'talent',''), "personality": getattr(game_state,'personality',''), "traits": getattr(game_state,'traits',[]), "custom_story": getattr(game_state,'custom_story',''), "player_render": build_player_render(game_state), "ending": ending_payload(game_state), "game_over": is_game_over(game_state), "neglect_periods": getattr(game_state, "neglect_periods", 0), "restored_from_save": need_restore, "dowager_mode": is_dowager_active(game_state), "avatars": avatar_payload(game_state), "heir_status": game_state.heir_status, "palaces": PALACE_LIST, "chonghua": chonghua_state(game_state), "chonghua_capacity": chonghua_capacity(chonghua_state(game_state)), "chonghua_permission": chonghua_permission(game_state), "court_faction_favor": normalize_court_faction_favor(getattr(game_state, "court_faction_favor", None)), "heir_race": normalize_heir_race(getattr(game_state, "heir_race", None)), "heir_panel": heir_panel_payload(game_state), "draft_panel": draft_panel_payload(game_state), "child_event_queue": getattr(game_state, "child_event_queue", []), "governance_events": getattr(game_state, "governance_events", []), "governance_history": getattr(game_state, "governance_history", [])[-10:], "family_event_queue": getattr(game_state, "family_event_queue", []), "family_event_history": (getattr(game_state, "family_event_history", []) or [])[-10:], "relationship_log": (getattr(game_state, "relationship_log", []) or [])[:5], "banquet": banquet_payload(game_state), "medical": medical_payload(game_state), "market": market_payload(game_state), **confidant_payload(game_state)})
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -13324,6 +13345,84 @@ def serve_static(filename):
     if filename.startswith('api/'):
         return jsonify({"error": "接口不存在，请确认游戏后端已启动"}), 404
     return send_from_directory('.', filename)
+
+# ============================================================
+#  节令宴饮 / 太医网络 / 宫廷市集（见 new_features.py）
+# ============================================================
+@app.route('/api/banquet/overview', methods=['GET'])
+def banquet_overview_api():
+    game_state, err = session_or_404(request.args.get('player_id'))
+    if err:
+        return err
+    return jsonify({"banquet": banquet_payload(game_state)})
+
+
+@app.route('/api/banquet/respond', methods=['POST'])
+def banquet_respond_api():
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    ok, msg, effects = resolve_banquet(game_state, data.get('choice_index', 0))
+    if not ok:
+        return jsonify({"error": msg}), 400
+    autosave_session(data.get('player_id'))
+    return jsonify({"success": True, "narration": msg, "effects": effects or {},
+                    "banquet": banquet_payload(game_state), "silver": game_state.silver,
+                    "attributes": game_state.attributes})
+
+
+@app.route('/api/medical/overview', methods=['GET'])
+def medical_overview_api():
+    game_state, err = session_or_404(request.args.get('player_id'))
+    if err:
+        return err
+    return jsonify({"medical": medical_payload(game_state)})
+
+
+@app.route('/api/medical/action', methods=['POST'])
+def medical_action_api():
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    ok, msg = medical_action(game_state, data.get('action'), data.get('target', ''))
+    if not ok:
+        return jsonify({"error": msg}), 400
+    autosave_session(data.get('player_id'))
+    return jsonify({"success": True, "narration": msg, "medical": medical_payload(game_state),
+                    "silver": game_state.silver, "attributes": game_state.attributes})
+
+
+@app.route('/api/market/overview', methods=['GET'])
+def market_overview_api():
+    game_state, err = session_or_404(request.args.get('player_id'))
+    if err:
+        return err
+    market_refresh(game_state)
+    return jsonify({"market": market_payload(game_state)})
+
+
+@app.route('/api/market/buy', methods=['POST'])
+def market_buy_api():
+    data = request.get_json(silent=True) or {}
+    game_state, err = session_or_404(data.get('player_id'))
+    if err:
+        return err
+    if is_game_over(game_state):
+        return game_over_response(game_state)
+    ok, msg = market_buy(game_state, data.get('item_id', ''), data.get('target', ''))
+    if not ok:
+        return jsonify({"error": msg}), 400
+    autosave_session(data.get('player_id'))
+    return jsonify({"success": True, "narration": msg, "market": market_payload(game_state),
+                    "medical": medical_payload(game_state), "silver": game_state.silver,
+                    "attributes": game_state.attributes})
+
 
 # ============================================================
 #  自定义头像系统

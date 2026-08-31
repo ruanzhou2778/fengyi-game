@@ -666,6 +666,12 @@ class GameState:
         self.dowager_state = {"active": False}
         self.avatar = ""                  # 主控自定义头像 URL
         self.avatar_rerolls = {}          # 各角色随机头像换血计数 {avatar_key: 次数}
+        # 节令宴饮（见 new_features.py）：pending 待赴宴 + attended 已办年份 + log
+        self.banquet = {"pending": None, "attended": {}, "log": []}
+        # 太医网络：physician 好感 + conditions 病症 + herbs 药匣
+        self.medical = {"physician": {"name": "沈修", "favor": 20, "skill": 55}, "conditions": [], "herbs": {}, "log": []}
+        # 宫廷市集：stock 货架 + refreshed 刷新月份
+        self.market = {"stock": [], "refreshed": ""}
 
     def get_attr_max(self, attr_name):
         return self.ATTR_MAX.get(attr_name, 100)
@@ -874,6 +880,9 @@ class GameState:
             "dowager_state": getattr(self, "dowager_state", {"active": False}),
             "avatar": getattr(self, "avatar", ""),
             "avatar_rerolls": getattr(self, "avatar_rerolls", {}),
+            "banquet": getattr(self, "banquet", {"pending": None, "attended": {}, "log": []}),
+            "medical": getattr(self, "medical", {"physician": {"name": "沈修", "favor": 20, "skill": 55}, "conditions": [], "herbs": {}, "log": []}),
+            "market": getattr(self, "market", {"stock": [], "refreshed": ""}),
             "created_at": self.created_at,
             "updated_at": datetime.now().isoformat()
         }
@@ -1058,6 +1067,13 @@ class GameState:
             game_state.avatar = data.get("avatar", "")
             rr = data.get("avatar_rerolls")
             game_state.avatar_rerolls = rr if isinstance(rr, dict) else {}
+            bq = data.get("banquet")
+            game_state.banquet = bq if isinstance(bq, dict) else {"pending": None, "attended": {}, "log": []}
+            md = data.get("medical")
+            game_state.medical = md if isinstance(md, dict) else {
+                "physician": {"name": "沈修", "favor": 20, "skill": 55}, "conditions": [], "herbs": {}, "log": []}
+            mk = data.get("market")
+            game_state.market = mk if isinstance(mk, dict) else {"stock": [], "refreshed": ""}
             ending = data.get("ending")
             game_state.ending = ending if isinstance(ending, dict) else None
             game_state.ending_unlocked = data.get("ending_unlocked")
