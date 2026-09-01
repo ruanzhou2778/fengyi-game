@@ -270,8 +270,11 @@ def ensure_medical_state(game_state):
     return m
 
 
-def medical_period_tick(game_state):
-    """转旬结算：病症衰减/新发、孕期胎象。返回消息列表。"""
+def medical_period_tick(game_state, skip_mode=False):
+    """转旬结算：病症衰减/新发、孕期胎象。返回消息列表。
+
+    skip_mode：连跳时病症损耗减半（快进健康保护的一部分）。
+    """
     msgs = []
     m = ensure_medical_state(game_state)
     phys = m["physician"]
@@ -285,6 +288,8 @@ def medical_period_tick(game_state):
             continue
         decay = int(spec["decay"])
         if favor >= 60:
+            decay = max(1, decay // 2)
+        if skip_mode:
             decay = max(1, decay // 2)
         game_state.attributes["健康"] = max(0, game_state.attributes.get("健康", 60) - decay)
         cond["months"] = int(cond.get("months", 0)) + 1

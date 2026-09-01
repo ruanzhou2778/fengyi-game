@@ -7788,7 +7788,9 @@ nextPeriodBtn.addEventListener('click',nextPeriod);
 async function skipTime(unit){
     if(!playerId||isProcessing) return;
     const label = unit==='month' ? '转月（连推 3 旬到下月）' : '转年（连推 36 旬到明年）';
-    if(!confirm(`确定要${label}吗？\n\n期间会自动结算俸禄、年龄、子嗣成长、选秀、宴饮等全部旬度变化；\n节令宴饮将错过，待裁事务仅保留最近几件；\n若触发结局会立即停下。`)) return;
+    const hp = ((window._lastGameData||{}).attributes||{})['健康'] ?? 100;
+    const hpWarn = hp < 50 ? `\n\n⚠️ 你当前健康只有 ${hp}，身子已亏空——快进虽不会油尽灯枯，但转完后请务必休养调理！` : '';
+    if(!confirm(`确定要${label}吗？\n\n期间会自动结算俸禄、年龄、子嗣成长、选秀、宴饮等全部旬度变化；\n节令宴饮将错过，待裁事务仅保留最近几件；\n快进期间健康损耗减半且不会病逝，若触发其他结局会立即停下。${hpWarn}`)) return;
     isProcessing = true;
     showLoading(true, {title: unit==='month'?'⏩ 转月推进中...':'⏭ 转年推进中...', sub: unit==='year'?'岁月如梭，红颜弹指老':'光阴似箭'});
     try{

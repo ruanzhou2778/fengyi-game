@@ -70,6 +70,17 @@ ok("错过宴饮有记录", any("错过" in m for m in d.get("key_events", [])),
 ok("当年宴已标记 attended", gs.banquet["attended"].get("shangyuan") == 3 or True)
 ok("年龄+1", gs.age >= 17, str(gs.age))
 ok(f"转年耗时 {time.time()-t0:.1f}s < 20s", time.time() - t0 < 20)
+ok("转年后健康≥保底12（快进不病逝）", gs.attributes["健康"] >= 12, str(gs.attributes["健康"]))
+ok("转年未触发死亡结局", not gs.ending)
+
+# ===== 3.5 濒危健康转月保底 =====
+gs.ending = None
+gs.attributes["健康"] = 3  # 濒危：正常玩法下 30%/旬 病逝
+gs.month, gs.day = 4, 1
+rr = client.post('/api/skip_time', json={"player_id": pid, "unit": "month"})
+ok("濒危(健康3)转月不死", rr.status_code == 200 and gs.attributes["健康"] >= 12,
+   f"http={rr.status_code} hp={gs.attributes['健康']}")
+ok("保底提示已入关键事件", any("照料" in str(k) for k in rr.get_json().get("key_events", [])))
 
 # ===== 4. 队列修剪（中段） =====
 gs.month, gs.day, gs.year = 4, 11, 3

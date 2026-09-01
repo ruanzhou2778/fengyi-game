@@ -8400,8 +8400,12 @@ def classify_key_events(lines):
     return out[:KEY_EVENT_MAX]
 
 
-def _advance_one_period(player_id, api_config=None):
-    """推进一旬的完整结算主体（转旬/转月/转年共用，保证所有时间相关钩子一致）。"""
+def _advance_one_period(player_id, api_config=None, skip_mode=False):
+    """推进一旬的完整结算主体（转旬/转月/转年共用，保证所有时间相关钩子一致）。
+
+    skip_mode：连跳（转月/转年）保护——健康损耗减半，且结局判定前保底健康，
+    避免"一键转年直接油尽灯枯"；正常游玩不受影响。
+    """
     game_state, err = session_or_404(player_id)
     if err:
         return err
@@ -8479,7 +8483,10 @@ def _advance_one_period(player_id, api_config=None):
         intelligence.append(f"📜 {evt}")
 
     # ---- 俸禄 ----
-    game_state.attributes["健康"] = max(0, game_state.attributes["健康"] - random.randint(0, 2))
+    health_loss = random.randint(0, 2)
+    if skip_mode:
+        health_loss = health_loss // 2  # 连跳岁月：日常操劳减半
+    game_state.attributes["健康"] = max(0, game_state.attributes["健康"] - health_loss)
     salary = max(1, (20 + game_state.rank.value * 5) // 3)
     game_state.silver += salary
     game_state.add_memory(f"领取俸禄{salary}银两")
@@ -8654,7 +8661,7 @@ def _advance_one_period(player_id, api_config=None):
         intelligence.append(evt)
     generate_family_events(game_state)
     # ---- 太医网络：病症衰减/新发/孕期胎象 ----
-    for msg in medical_period_tick(game_state):
+    for msg in medical_period_tick(game_state, skip_mode=skip_mode):
         intelligence.append(msg)
     # ---- 宫廷市集：每月轮换货架 ----
     if market_refresh(game_state):
@@ -8993,6 +9000,13 @@ def _advance_one_period(player_id, api_config=None):
                 if not game_state.children:
                     game_state.attributes["威望"] = max(0, game_state.attributes.get("威望", 0) - 20)
 
+    # ===== 快进保命线：健康不至油尽灯枯（正常游玩不受影响） =====
+    if skip_mode and not game_state.ending:
+        hp = game_state.attributes.get("健康", 60)
+        if hp < 12:
+            game_state.attributes["健康"] = 12
+            intelligence.append("⚠️ 你健康濒危，宫人日夜悉心照料，将养回一丝元气（快进期间不至病逝）——转旬后宜休养或请太医。")
+
     # ===== 终局判定（放在本旬所有结算之后，保证依据的是最终状态） =====
     ending = player_death_ending
     ending_warnings = []
@@ -9122,7 +9136,7 @@ def skip_time():
     last = None
     ran = 0
     for i in range(n):
-        last = _advance_one_period(player_id, skip_api)
+        last = _advance_one_period(player_id, skip_api, skip_mode=True)
         if isinstance(last, tuple):
             return last
         ran += 1
@@ -9157,6 +9171,12 @@ def skip_time():
     last["skip"] = {"unit": unit, "periods_ran": ran}
     last["key_events"] = key_msgs
     last["narration"] = f"⏩ 快进完成：共推进 {ran} 旬（{'一月' if unit == 'month' else '一年'}），当前 {game_state.get_calendar_str()}。"
+    hp = game_state.attributes.get("健康", 60)
+    if hp < 40:
+        warn = f"⚠️ 连月操劳，你已身子亏空（健康{hp}），宜休养、请太医或买养身丸调理。"
+        last["narration"] += " " + warn
+        if isinstance(last.get("key_events"), list):
+            last["key_events"].append({"level": 1, "icon": "⚠️", "title": "健康预警", "text": warn})
     return jsonify(last)
 
 
