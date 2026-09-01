@@ -3051,6 +3051,21 @@ const TOTAL_POINTS=100;
 const RANK_ORDER=['宫女','更衣','官女子','秀女','答应','常在','贵人','才人','美人','婕妤','嫔','妃','贵妃','皇贵妃','皇后'];
 
 var playerId=null, isProcessing=false, selectedBackground=null, eventLogs=[], flipTriggeredThisRound=false;
+// ===== 看门狗：任何操作 45 秒未结束则自动解锁界面，防止漏网路径卡死整屏 =====
+var _procSince = 0;
+setInterval(function(){
+    if (isProcessing) {
+        if (!_procSince) { _procSince = Date.now(); }
+        else if (Date.now() - _procSince > 45000) {
+            isProcessing = false; _procSince = 0;
+            var l = document.getElementById('loading'); if (l) l.style.display = 'none';
+            try { showLoading(false); } catch(e) {}
+            var sb = document.getElementById('sendBtn'); if (sb) sb.disabled = false;
+            var ui = document.getElementById('userInput'); if (ui) { ui.disabled = false; }
+            showToast('⌛ 操作长时间无响应，界面已自动解锁，请重试', 'error');
+        }
+    } else { _procSince = 0; }
+}, 2000);
 let currentCharData={
     name:'', background:null, backgroundDesc:'', appearance:'', talent:'琴艺',
     personality:'温婉贤淑', traits:[], customStory:'', attrs:{}, attrRange:{min:0,max:20}
@@ -6925,7 +6940,7 @@ async function performAction(action){
     try{
         const r=await myFetch(`${API_BASE}/api/act`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player_id:playerId,choice:`我要${actionText}`,current_time:'辰时'})});
         const d=await r.json();
-        if(d.error){showToast('❌ '+d.error,d.error.includes('行动点')?'error':undefined);return;}
+        if(d.error){showToast('❌ '+d.error,d.error.includes('行动点')?'error':undefined);loading.style.display='none';isProcessing=false;return;}
         updateUI(d);
         if(d.narration){addLogEntry(d.narration);const csd=document.getElementById('currentStoryDisplay');if(csd)csd.innerHTML=d.narration;}
         if(d.effects&&Object.keys(d.effects).length){addLogEntry(`📊 属性变化：${Object.entries(d.effects).map(([k,v])=>`${k}${v>0?'+':''}${v}`).join(' ')}`);}
