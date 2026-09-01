@@ -1674,6 +1674,21 @@
         body.scene-ok .scenario-overlay { background-image: linear-gradient(rgba(245,237,229,0.86), rgba(245,237,229,0.96)), var(--scene1, none); background-size: cover; background-position: center; }
         body.scene-ok .map-body { background-image: linear-gradient(rgba(13,20,18,0.90), rgba(13,20,18,0.96)), var(--scene2, none); background-size: cover; background-position: center; border-radius: 8px; }
         body.scene-ok .ending-overlay { background-image: linear-gradient(rgba(8,12,11,0.87), rgba(8,12,11,0.96)), var(--scene3, none); background-size: cover; background-position: center; }
+
+        /* ===== 设备自适应：手机维持原样，平板/PC 自动放大界面（zoom 等比放大小字与弹窗） ===== */
+        html { zoom: 1; }
+        @media (min-width: 700px) and (max-width: 1099px) {
+            html { zoom: 1.25; }
+            .phone { max-width: 480px; height: 840px; }
+        }
+        @media (min-width: 1100px) and (max-width: 1599px) {
+            html { zoom: 1.5; }
+            .phone { max-width: 520px; height: 900px; }
+        }
+        @media (min-width: 1600px) {
+            html { zoom: 1.7; }
+            .phone { max-width: 560px; height: 940px; }
+        }
     </style>
 </head>
 <body>
@@ -1706,6 +1721,11 @@
                         <button onclick="openDowager();closeMoreMenu()">🕯️ 垂帘听政</button>
                         <button onclick="openLedger();closeMoreMenu()">📒 内务府账册</button>
                         <button onclick="openLifeReview();closeMoreMenu()">📖 一生回顾</button>
+                        <div style="display:flex;gap:3px;margin-top:3px;padding-top:4px;border-top:1px dashed var(--border-light);">
+                            <button style="flex:1;" onclick="uiZoomStep(0.1)" title="放大界面">🔍＋</button>
+                            <button style="flex:1;" onclick="uiZoomStep(-0.1)" title="缩小界面">🔍－</button>
+                            <button style="flex:1;" onclick="uiZoomReset()" title="恢复自动识别">↺ 自动</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3145,6 +3165,38 @@ function removeAvatar(key){
 function toggleMoreMenu(){const d=document.getElementById('moreMenu');d.classList.toggle('open');}
 function closeMoreMenu(){const d=document.getElementById('moreMenu');d.classList.remove('open');}
 document.addEventListener('click',function(e){const d=document.getElementById('moreMenu');if(d&&!d.contains(e.target))d.classList.remove('open');});
+
+// ===== 界面缩放：按屏幕宽度自动分档 + 手动微调（localStorage 持久化） =====
+function getAutoZoom(){
+    const w = window.innerWidth;
+    if (w >= 1600) return 1.7;
+    if (w >= 1100) return 1.5;
+    if (w >= 700) return 1.25;
+    return 1;
+}
+function applyUiZoom(){
+    let off = parseFloat(localStorage.getItem('gongdou_ui_zoom') || '0');
+    if (isNaN(off)) off = 0;
+    const z = getAutoZoom() * (1 + off);
+    document.documentElement.style.zoom = (Math.abs(z - 1) > 0.01) ? z.toFixed(3) : '';
+}
+function uiZoomStep(delta){
+    let off = parseFloat(localStorage.getItem('gongdou_ui_zoom') || '0');
+    if (isNaN(off)) off = 0;
+    off = Math.max(-0.4, Math.min(0.8, +(off + delta).toFixed(2)));
+    localStorage.setItem('gongdou_ui_zoom', String(off));
+    applyUiZoom();
+    closeMoreMenu();
+    showToast('🔍 界面缩放 ' + Math.round(getAutoZoom() * (1 + off) * 100) + '%');
+}
+function uiZoomReset(){
+    localStorage.removeItem('gongdou_ui_zoom');
+    applyUiZoom();
+    closeMoreMenu();
+    showToast('↺ 已恢复自动缩放 ' + Math.round(getAutoZoom() * 100) + '%');
+}
+window.addEventListener('resize', applyUiZoom);
+applyUiZoom();
 function showToast(msg, type){const e=document.querySelector('.toast-notification');if(e)e.remove();const t=document.createElement('div');t.className='toast-notification'+(type==='error'?' toast-error':'');t.textContent=msg;document.body.appendChild(t);const duration=type==='error'?3500:2000;setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity 0.5s ease';setTimeout(()=>t.remove(),500);},duration);}
 function showChildInteractError(msg){showToast('❌ '+msg,'error');const warnEl=document.getElementById('childModalWarn');if(warnEl){warnEl.textContent='⚡ '+msg;warnEl.style.display='block';}}
 function childMoodEmoji(mood){const m={'开心':'😊','平静':'😌','思念':'🥺','兴奋':'🤩','闷闷不乐':'😔','生病':'🤒'};return m[mood]||'😌';}
