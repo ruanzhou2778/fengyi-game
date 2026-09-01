@@ -1675,19 +1675,16 @@
         body.scene-ok .map-body { background-image: linear-gradient(rgba(13,20,18,0.90), rgba(13,20,18,0.96)), var(--scene2, none); background-size: cover; background-position: center; border-radius: 8px; }
         body.scene-ok .ending-overlay { background-image: linear-gradient(rgba(8,12,11,0.87), rgba(8,12,11,0.96)), var(--scene3, none); background-size: cover; background-position: center; }
 
-        /* ===== 设备自适应：手机维持原样，平板/PC 自动放大界面（zoom 等比放大小字与弹窗） ===== */
-        html { zoom: 1; }
-        @media (min-width: 700px) and (max-width: 1099px) {
-            html { zoom: 1.25; }
-            .phone { max-width: 480px; height: 840px; }
-        }
-        @media (min-width: 1100px) and (max-width: 1599px) {
-            html { zoom: 1.5; }
-            .phone { max-width: 520px; height: 900px; }
-        }
-        @media (min-width: 1600px) {
-            html { zoom: 1.7; }
-            .phone { max-width: 560px; height: 940px; }
+        /* ===== 设备自适应：手机维持原样，平板/PC 自动放大界面（由 JS 计算 zoom，避免媒体查询被 zoom 反向影响） ===== */
+        html { zoom: 1; --ui-zoom: 1; }
+        @media (min-width: 700px) {
+            html, body { height: 100%; overflow: hidden; }
+            body { min-height: 0; }
+            .phone {
+                height: calc((100dvh - 24px) / var(--ui-zoom, 1));
+                max-height: none;
+            }
+            .page-container, .page { min-height: 0; }
         }
     </style>
 </head>
@@ -3166,19 +3163,26 @@ function toggleMoreMenu(){const d=document.getElementById('moreMenu');d.classLis
 function closeMoreMenu(){const d=document.getElementById('moreMenu');d.classList.remove('open');}
 document.addEventListener('click',function(e){const d=document.getElementById('moreMenu');if(d&&!d.contains(e.target))d.classList.remove('open');});
 
-// ===== 界面缩放：按屏幕宽度自动分档 + 手动微调（localStorage 持久化） =====
-function getAutoZoom(){
-    const w = window.innerWidth;
-    if (w >= 1600) return 1.7;
-    if (w >= 1100) return 1.5;
-    if (w >= 700) return 1.25;
-    return 1;
+// ===== 界面缩放：按物理视口分档（PC/平板/手机），JS 一次性计算避免媒体查询被 zoom 反向干扰 =====
+const UI_ZOOM_TIERS = [
+    { minW: 1100, zoom: 1.5, phoneW: 520 },  // PC
+    { minW: 700,  zoom: 1.25, phoneW: 480 }, // 平板
+    { minW: 0,    zoom: 1,    phoneW: 420 }, // 手机（原样）
+];
+function getAutoTier(){
+    // screen.width 是物理屏幕宽，不受 CSS zoom 和窗口大小影响：平板 700~1279 / PC ≥1280 / 手机更小
+    const w = (window.screen && window.screen.width) || window.innerWidth;
+    return UI_ZOOM_TIERS.find(t => w >= t.minW) || UI_ZOOM_TIERS[2];
 }
 function applyUiZoom(){
     let off = parseFloat(localStorage.getItem('gongdou_ui_zoom') || '0');
     if (isNaN(off)) off = 0;
-    const z = getAutoZoom() * (1 + off);
-    document.documentElement.style.zoom = (Math.abs(z - 1) > 0.01) ? z.toFixed(3) : '';
+    const tier = getAutoTier();
+    const z = tier.zoom * (1 + off);
+    const root = document.documentElement;
+    root.style.setProperty('--ui-zoom', z.toFixed(3));
+    root.style.zoom = (Math.abs(z - 1) > 0.01) ? z.toFixed(3) : '';
+    document.querySelectorAll('.phone').forEach(p => p.style.maxWidth = tier.phoneW + 'px');
 }
 function uiZoomStep(delta){
     let off = parseFloat(localStorage.getItem('gongdou_ui_zoom') || '0');
@@ -3187,15 +3191,15 @@ function uiZoomStep(delta){
     localStorage.setItem('gongdou_ui_zoom', String(off));
     applyUiZoom();
     closeMoreMenu();
-    showToast('🔍 界面缩放 ' + Math.round(getAutoZoom() * (1 + off) * 100) + '%');
+    showToast('🔍 界面缩放 ' + Math.round(getAutoTier().zoom * (1 + off) * 100) + '%');
 }
 function uiZoomReset(){
     localStorage.removeItem('gongdou_ui_zoom');
     applyUiZoom();
     closeMoreMenu();
-    showToast('↺ 已恢复自动缩放 ' + Math.round(getAutoZoom() * 100) + '%');
+    showToast('↺ 已恢复自动缩放 ' + Math.round(getAutoTier().zoom * 100) + '%');
 }
-window.addEventListener('resize', applyUiZoom);
+window.addEventListener('resize', () => { applyUiZoom(); });
 applyUiZoom();
 function showToast(msg, type){const e=document.querySelector('.toast-notification');if(e)e.remove();const t=document.createElement('div');t.className='toast-notification'+(type==='error'?' toast-error':'');t.textContent=msg;document.body.appendChild(t);const duration=type==='error'?3500:2000;setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity 0.5s ease';setTimeout(()=>t.remove(),500);},duration);}
 function showChildInteractError(msg){showToast('❌ '+msg,'error');const warnEl=document.getElementById('childModalWarn');if(warnEl){warnEl.textContent='⚡ '+msg;warnEl.style.display='block';}}
