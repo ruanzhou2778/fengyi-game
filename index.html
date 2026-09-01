@@ -1677,13 +1677,15 @@
 
         /* ===== 设备自适应：手机维持原样，平板/PC 自动放大界面（由 JS 计算 zoom，避免媒体查询被 zoom 反向影响） ===== */
         html { zoom: 1; --ui-zoom: 1; }
-        @media (min-width: 700px) {
+        @media (min-width: 620px) {
             html, body { height: 100%; overflow: hidden; }
             body { min-height: 0; }
             .phone {
                 height: calc((100dvh - 24px) / var(--ui-zoom, 1));
                 max-height: none;
             }
+            /* 平板走原生 viewport 缩放：dvh 已是缩放后的布局视口，直接减 padding 即占满 */
+            html[data-vp="native"] .phone { height: calc(100dvh - 24px); }
             .page-container, .page { min-height: 0; }
         }
     </style>
@@ -3053,10 +3055,12 @@ const RANK_ORDER=['宫女','更衣','官女子','秀女','答应','常在','贵�
 var playerId=null, isProcessing=false, selectedBackground=null, eventLogs=[], flipTriggeredThisRound=false;
 // ===== 看门狗：任何操作 45 秒未结束则自动解锁界面，防止漏网路径卡死整屏 =====
 var _procSince = 0;
+window._procGraceUntil = 0;
+function procGrace(ms){ window._procGraceUntil = Math.max(window._procGraceUntil, Date.now() + (ms || 60000)); }
 setInterval(function(){
     if (isProcessing) {
         if (!_procSince) { _procSince = Date.now(); }
-        else if (Date.now() - _procSince > 45000) {
+        else if (Date.now() - _procSince > 12000 && Date.now() > (window._procGraceUntil || 0)) {
             isProcessing = false; _procSince = 0;
             var l = document.getElementById('loading'); if (l) l.style.display = 'none';
             try { showLoading(false); } catch(e) {}
@@ -3179,15 +3183,23 @@ function closeMoreMenu(){const d=document.getElementById('moreMenu');d.classList
 document.addEventListener('click',function(e){const d=document.getElementById('moreMenu');if(d&&!d.contains(e.target))d.classList.remove('open');});
 
 // ===== 界面缩放：按物理视口分档（PC/平板/手机），JS 一次性计算避免媒体查询被 zoom 反向干扰 =====
+// 触屏设备（平板）走原生 viewport 缩放——CSS zoom 在部分触屏浏览器有点击命中偏移；PC 走 CSS zoom。
 const UI_ZOOM_TIERS = [
     { minW: 1100, zoom: 1.5, phoneW: 520 },  // PC
-    { minW: 700,  zoom: 1.25, phoneW: 480 }, // 平板
+    { minW: 700,  zoom: 1.25, phoneW: 500 }, // 平板
     { minW: 0,    zoom: 1,    phoneW: 420 }, // 手机（原样）
 ];
+function isTouchDevice(){
+    return (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
+}
 function getAutoTier(){
     // screen.width 是物理屏幕宽，不受 CSS zoom 和窗口大小影响：平板 700~1279 / PC ≥1280 / 手机更小
     const w = (window.screen && window.screen.width) || window.innerWidth;
     return UI_ZOOM_TIERS.find(t => w >= t.minW) || UI_ZOOM_TIERS[2];
+}
+function setViewportMeta(content){
+    let m = document.querySelector('meta[name="viewport"]');
+    if (m) m.setAttribute('content', content);
 }
 function applyUiZoom(){
     let off = parseFloat(localStorage.getItem('gongdou_ui_zoom') || '0');
@@ -3196,7 +3208,18 @@ function applyUiZoom(){
     const z = tier.zoom * (1 + off);
     const root = document.documentElement;
     root.style.setProperty('--ui-zoom', z.toFixed(3));
-    root.style.zoom = (Math.abs(z - 1) > 0.01) ? z.toFixed(3) : '';
+    const narrowTouch = isTouchDevice() && (window.screen.width || 0) <= 1279;
+    if (narrowTouch && Math.abs(z - 1) > 0.01) {
+        // 平板：原生 viewport 缩放（浏览器自管命中，无偏移）；桌面浏览器忽略 viewport meta，故仅限窄触屏
+        root.style.zoom = '';
+        root.dataset.vp = 'native';
+        setViewportMeta(`width=device-width, initial-scale=${z.toFixed(3)}, maximum-scale=${z.toFixed(3)}, user-scalable=no`);
+    } else {
+        // PC / 手机原样：CSS zoom
+        root.dataset.vp = '';
+        setViewportMeta('width=device-width, initial-scale=1.0');
+        root.style.zoom = (Math.abs(z - 1) > 0.01) ? z.toFixed(3) : '';
+    }
     document.querySelectorAll('.phone').forEach(p => p.style.maxWidth = tier.phoneW + 'px');
 }
 function uiZoomStep(delta){
@@ -6883,6 +6906,7 @@ async function sendFreeInput(text){if(!playerId||isProcessing||!text.trim())retu
 async function nextPeriod() {
     if (!playerId || isProcessing) return;
     isProcessing = true;
+    procGrace(60000);  // 转旬可能含 AI 调用，给看门狗豁免
     showLoading(true);
     showToast('⏳ 转旬中...');
     try {
@@ -7858,6 +7882,8 @@ nextPeriodBtn.addEventListener('click',nextPeriod);
 // ===== 转月/转年：连跳多旬，孩子快快长大 =====
 async function skipTime(unit){
     if(!playerId||isProcessing) return;
+    isProcessing = true;
+    procGrace(120000);  // 转年 36 旬结算，给看门狗豁免
     const label = unit==='month' ? '转月（连推 3 旬到下月）' : '转年（连推 36 旬到明年）';
     const hp = ((window._lastGameData||{}).attributes||{})['健康'] ?? 100;
     const hpWarn = hp < 50 ? `\n\n⚠️ 你当前健康只有 ${hp}，身子已亏空——快进虽不会油尽灯枯，但转完后请务必休养调理！` : '';
