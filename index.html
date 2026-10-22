@@ -325,7 +325,7 @@
             border-radius: 30px;
             background: transparent;
             color: #7a8a86;
-            font-size: 9px;
+            font-size: 10.5px;
             letter-spacing: 1px;
             cursor: pointer;
             font-family: inherit;
@@ -358,7 +358,7 @@
             border-radius: 12px;
             background: rgba(28, 40, 38, 0.3);
             color: #b0c0ba;
-            font-size: 8px;
+            font-size: 10px;
             cursor: pointer;
             font-family: inherit;
             transition: 0.3s;
@@ -376,11 +376,11 @@
             font-size: 14px;
         }
         #pageStory .action-grid .action-btn .label {
-            font-size: 8px;
+            font-size: 11px;
             color: #d6cfc2;
         }
         #pageStory .action-grid .action-btn .sub {
-            font-size: 6px;
+            font-size: 9px;
             color: #5a6a66;
         }
         #pageStory .action-grid .action-btn:disabled {
@@ -413,7 +413,7 @@
         .log-entry {
             padding: 3px 8px;
             border-bottom: 1px solid rgba(158, 190, 178, 0.04);
-            font-size: 9px;
+            font-size: 10.5px;
             color: #b0c0ba;
             display: flex;
             gap: 6px;
@@ -1351,7 +1351,7 @@
 
         .footnote {
             text-align: center;
-            font-size: 6px;
+            font-size: 9.5px;
             color: var(--text-light);
             padding: 2px 0 0;
             letter-spacing: 2px;
@@ -1720,6 +1720,9 @@
                         <button onclick="openDowager();closeMoreMenu()">🕯️ 垂帘听政</button>
                         <button onclick="openLedger();closeMoreMenu()">📒 内务府账册</button>
                         <button onclick="openLifeReview();closeMoreMenu()">📖 一生回顾</button>
+                        <div style="height:1px;margin:3px 0;background:var(--border-light);"></div>
+                        <button onclick="closeMoreMenu();if(confirm(\'连推 3 旬到下月？\'))skipTime(\'month\')">⏩ 转月</button>
+                        <button onclick="closeMoreMenu();if(confirm(\'连推 36 旬到明年？孩子会快快长大\'))skipTime(\'year\')">⏭ 转年</button>
                         <div style="display:flex;gap:3px;margin-top:3px;padding-top:4px;border-top:1px dashed var(--border-light);">
                             <button style="flex:1;" onclick="uiZoomStep(0.1)" title="放大界面">🔍＋</button>
                             <button style="flex:1;" onclick="uiZoomStep(-0.1)" title="缩小界面">🔍－</button>
@@ -1746,8 +1749,6 @@
                     <button class="qa-btn primary" onclick="doFlip()">🌙 翻牌</button>
                     <button class="qa-btn" onclick="doRandomEvent()">🎲 随机事件</button>
                     <button class="qa-btn" id="nextPeriodBtn">📅 转旬</button>
-                    <button class="qa-btn" id="skipMonthBtn" title="连推 3 旬到下月">⏩ 转月</button>
-                    <button class="qa-btn" id="skipYearBtn" title="连推 36 旬到明年（孩子快快长大）">⏭ 转年</button>
                 </div>
 
                 <!-- ⭐ 每日行动网格（加回来了） -->
@@ -7794,6 +7795,8 @@ function clearEndingActSlots(){
 // ============================================================
 let configVisible=false;
 document.getElementById('configToggleBtn')?.addEventListener('click',function(){const p=document.getElementById('configPanel');configVisible=!configVisible;p.style.display=configVisible?'block':'none';this.textContent=configVisible?'收起':'展开';if(configVisible){loadConfigToUI();}});
+// AI 配置面板仅在 ?dev=1 时开放（避免玩家界面暴露 API Key 输入框）
+if(!/[?&]dev=1/.test(location.search)){var _cb=document.getElementById('configToggleBtn');if(_cb){var _blk=_cb.closest('.stat-block');if(_blk)_blk.style.display='none';}}
 
 function loadConfigToUI() {
     populateConfigInputs('main');
