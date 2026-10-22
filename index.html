@@ -183,10 +183,10 @@
             border: 1px solid rgba(158, 190, 178, 0.06);
             border-radius: 16px;
             padding: 12px 14px;
-            font-size: 13px;
+            font-size: 14px;
             color: #e6e0d4;
             line-height: 1.9;
-            min-height: 52px;
+            min-height: 76px;
             flex-shrink: 0;
             margin-bottom: 6px;
             transition: all 0.3s;
@@ -348,12 +348,12 @@
         #pageStory .action-grid {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
-            gap: 4px;
+            gap: 7px;
             flex-shrink: 0;
             margin-bottom: 6px;
         }
         #pageStory .action-grid .action-btn {
-            padding: 5px 2px;
+            padding: 10px 4px;
             border: 1px solid rgba(158, 190, 178, 0.06);
             border-radius: 12px;
             background: rgba(28, 40, 38, 0.3);
@@ -373,10 +373,10 @@
             background: rgba(40, 56, 50, 0.3);
         }
         #pageStory .action-grid .action-btn .icon {
-            font-size: 14px;
+            font-size: 24px;
         }
         #pageStory .action-grid .action-btn .label {
-            font-size: 11px;
+            font-size: 12px;
             color: #d6cfc2;
         }
         #pageStory .action-grid .action-btn .sub {
@@ -1032,7 +1032,7 @@
             padding: 6px 0 8px;
             cursor: pointer;
             color: #4a5a56;
-            font-size: 7px;
+            font-size: 9.5px;
             letter-spacing: 2px;
             background: transparent;
             border: none;
@@ -1785,27 +1785,7 @@
                     </button>
                 </div>
 
-                <!-- 日志流 -->
-                <div class="log-area" id="logArea">
-                <div id="logContent">
-                    <div class="log-entry">
-                        <span class="time">二月初三</span>
-                        <span class="msg">🌸 <span class="em">华妃</span> 与 <span class="em">端妃</span> 在御花园起了口角，皇后命各抄宫规十遍</span>
-                    </div>
-                    <div class="log-entry">
-                        <span class="time">二月初二</span>
-                        <span class="msg">👑 皇帝翻了 <span class="em">林嫔</span> 的牌子，赏赐玉簪一支</span>
-                    </div>
-                    <div class="log-entry">
-                        <span class="time">二月初一</span>
-                        <span class="msg">🌙 <span class="em">华妃</span> 被诊出有喜，皇帝大喜，赏赐玉如意一对</span>
-                    </div>
-                    <div class="log-entry" style="border-bottom:none;">
-                        <span class="time">正月廿九</span>
-                        <span class="msg">📜 转旬完成 · <span class="em">安贵人</span> 晋为 <span class="em">安嫔</span></span>
-                    </div>
-                </div>
-            </div>
+                <!-- 日志流已移至「纪事」页 -->
 
                 <!-- 自由输入 -->
                 <div class="input-row">
@@ -2159,6 +2139,32 @@
             </div>
         </div>
 
+
+            <!-- ===== 纪事页（日志流，自主屏拆出） ===== -->
+            <div class="page" id="pageLog">
+                <div class="section-label">📜 起 居 注 · 宫 中 事</div>
+                <div class="log-area" id="logArea">
+                <div id="logContent">
+                    <div class="log-entry">
+                        <span class="time">二月初三</span>
+                        <span class="msg">🌸 <span class="em">华妃</span> 与 <span class="em">端妃</span> 在御花园起了口角，皇后命各抄宫规十遍</span>
+                    </div>
+                    <div class="log-entry">
+                        <span class="time">二月初二</span>
+                        <span class="msg">👑 皇帝翻了 <span class="em">林嫔</span> 的牌子，赏赐玉簪一支</span>
+                    </div>
+                    <div class="log-entry">
+                        <span class="time">二月初一</span>
+                        <span class="msg">🌙 <span class="em">华妃</span> 被诊出有喜，皇帝大喜，赏赐玉如意一对</span>
+                    </div>
+                    <div class="log-entry" style="border-bottom:none;">
+                        <span class="time">正月廿九</span>
+                        <span class="msg">📜 转旬完成 · <span class="em">安贵人</span> 晋为 <span class="em">安嫔</span></span>
+                    </div>
+                </div>
+            </div>
+            </div>
+
         <!-- ========== 底部导航 ========== -->
         <div class="bottom-nav">
             <button class="nav-item active" data-page="pageStory"><span class="nav-icon">📖</span>记事</button>
@@ -2166,6 +2172,7 @@
             <button class="nav-item" data-page="pageStatus"><span class="nav-icon">📊</span>状态</button>
             <button class="nav-item" data-page="pageChonghua"><span class="nav-icon">🏛️</span>重华宫</button>
             <button class="nav-item" data-page="pageConflict"><span class="nav-icon">⚔️</span>宫斗</button>
+            <button class="nav-item" data-page="pageLog"><span class="nav-icon">📜</span>纪事</button>
         </div>
 
         <!-- ========== 账册模态框 ========== -->
