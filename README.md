@@ -108,6 +108,41 @@ python app.py
 
 ---
 
+## 线上部署
+
+生产环境跑在华为云 ECS（Ubuntu + Docker + Nginx 反代），前端与 API 同源由 Flask 提供。
+
+- **公网地址**：`http://124.71.220.138`（裸 IP，HTTP；挂域名与 HTTPS 证书待办）
+- **服务器路径**：`/root/gongdou`（git 仓库，跟踪 `main` 分支）
+- **容器**：`fengyi-game`（镜像 `gongdou-game`，端口 5000，Nginx 80 反代；`saves/` 卷挂载持久化存档）
+- **AI 凭据**：服务器 `.env` 存放 `OPENAI_API_KEY` / `OPENAI_BASE_URL`，不进入镜像与仓库
+
+### 更新流程（推送即部署）
+
+```bash
+# 本地：提交并推送
+git push origin main
+
+# 服务器：停旧容器（小内存机器先释放内存）→ 拉取 → 重建 → 启动
+ssh root@124.71.220.138
+cd /root/gongdou
+docker compose stop game && git pull origin main \
+  && docker compose build game && docker compose up -d game
+```
+
+`deploy/` 目录另有首次装机脚本（`install-huawei-ecs.sh`）、git 部署配置
+（`setup-git-deploy.sh`）、无 git 时的 scp 推送（`push-update.ps1`）与 Nginx 配置
+（`nginx-fengyi.conf`），新服务器从那里开始。
+
+### 回滚
+
+```bash
+cd /root/gongdou && git checkout 958eae9 -- index.html \
+  && docker compose up -d --build game
+```
+
+---
+
 ## 目录结构
 ```
 fengyi-game/
@@ -158,6 +193,17 @@ python -m py_compile app.py models.py
 ---
 
 ## 变更日志
+
+- **v1.7 — 主屏结构手术与线上部署**
+  - 主屏减负：日志流（宫中八卦）从「记事」页拆出，新建独立「📜 纪事」tab；主屏只保留
+    叙事区、翻牌/随机事件/转旬三个快捷钮、每日行动网格与自由输入，信息层级回归「一屏一事」。
+  - 可读性修复：行动按钮 8px→10px（标签 12px、效果说明 6px→9px），快捷钮 9px→10.5px，
+    日志 9px→10.5px，底部导航 7px→9.5px，脚注 6px→9.5px。
+  - 行动按钮放大：图标 14px→24px、网格间距 4px→7px；叙事区字号 13px→14px、最小高度 52px→76px。
+  - 防误触：转月/转年移出主屏快捷区，收入右上角 ☰ 菜单并加确认弹窗（原按钮与「转旬」并排易误滑）。
+  - AI 配置面板（API 地址 / Key 输入）门控：仅在网址带 `?dev=1` 时显示，玩家界面不再暴露凭据输入框。
+  - 部署上线：华为云 ECS + Docker + Nginx 反代，公网可访问（见「线上部署」）。
+  - 改动全部限于表现层（index.html），游戏逻辑未动；手术前基线标签 `pre-surgery-20261022`。
 
 - **v1.6 — 重华宫系统闭环**
   - 权限分级：`chonghua_permission()` 返回 `full`（皇后/协理六宫）/ `view`（贵妃及以上）/ `own`；
